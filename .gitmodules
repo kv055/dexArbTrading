@@ -4,3 +4,9 @@
 [submodule "dexMmTradingLogicHummingBot"]
 	path = dexMmTradingLogicHummingBot
 	url = https://github.com/kv055/dexMmTradingLogicHummingBot.git
+[submodule "dexMmController"]
+	path = dexMmController
+	url = https://github.com/kv055/dexMmController.git
+[submodule "dexMonitor"]
+	path = dexMonitor
+	url = https://github.com/kv055/dexMonitor.git
