@@ -88,6 +88,22 @@ services:
           cpus: '0.25'
     restart: unless-stopped
 
+  openclaw:
+    build:
+      context: ./dexMmController/openclaw
+      dockerfile: Dockerfile
+    network_mode: host
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    volumes:
+      - ./dexMmController/openclaw/openclaw.json:/config/openclaw.json:ro
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    restart: unless-stopped
+
   mm-controller:
     build:
       context: ./dexMmController
