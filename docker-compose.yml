@@ -88,6 +88,27 @@ services:
           cpus: '0.25'
     restart: unless-stopped
 
+  mm-controller:
+    build:
+      context: ./dexMmController
+      dockerfile: Dockerfile
+    network_mode: host
+    environment:
+      - DB_PATH=/app/mm-controller.db
+      - OPENCLAW_URL=http://localhost:8001
+      - HUMMINGBOT_URL=http://localhost:8000
+      - HUMMINGBOT_USERNAME=admin
+      - HUMMINGBOT_PASSWORD=password
+    volumes:
+      - mm-controller-data:/app
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+    restart: unless-stopped
+
 volumes:
   orderbook-data:
   bisq-data:
+  mm-controller-data:
