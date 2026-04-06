@@ -112,66 +112,66 @@ services:
   #         cpus: '0.5'
   #   restart: unless-stopped
 
-  mm-controller:
-    build:
-      context: ./dexMmController
-      dockerfile: Dockerfile
-    network_mode: host
-    depends_on:
-      lnd:
-        condition: service_healthy
-    environment:
-      - DB_PATH=/app/mm-controller.db
-      - API_ADDR=:5001
-      - OPENCLAW_URL=
-      - HUMMINGBOT_URL=http://localhost:8000
-      - HUMMINGBOT_USERNAME=admin
-      - HUMMINGBOT_PASSWORD=password
-      - OFFER_PREMIUM_WSS_URL=ws://localhost:5000/ws/live_offers?cex=kraken
-      - LND_HOST=https://localhost:8080
-      - LND_MACAROON_PATH=/lnd/admin.macaroon
-      - LND_TLS_CERT_PATH=/lnd/tls.cert
-      - LND_WALLET_PASSWORD=${LND_WALLET_PASSWORD}
-    volumes:
-      - mm-controller-data:/app
-      - lnd-data:/lnd:ro
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: '0.5'
-    restart: unless-stopped
+  # mm-controller:
+  #   build:
+  #     context: ./dexMmController
+  #     dockerfile: Dockerfile
+  #   network_mode: host
+  #   depends_on:
+  #     lnd:
+  #       condition: service_healthy
+  #   environment:
+  #     - DB_PATH=/app/mm-controller.db
+  #     - API_ADDR=:5001
+  #     - OPENCLAW_URL=
+  #     - HUMMINGBOT_URL=http://localhost:8000
+  #     - HUMMINGBOT_USERNAME=admin
+  #     - HUMMINGBOT_PASSWORD=password
+  #     - OFFER_PREMIUM_WSS_URL=ws://localhost:5000/ws/live_offers?cex=kraken
+  #     - LND_HOST=https://localhost:8080
+  #     - LND_MACAROON_PATH=/lnd/admin.macaroon
+  #     - LND_TLS_CERT_PATH=/lnd/tls.cert
+  #     - LND_WALLET_PASSWORD=${LND_WALLET_PASSWORD}
+  #   volumes:
+  #     - mm-controller-data:/app
+  #     - lnd-data:/lnd:ro
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 128M
+  #         cpus: '0.5'
+  #   restart: unless-stopped
 
-  lnd:
-    image: lightninglabs/lnd:v0.18.4-beta
-    network_mode: host
-    volumes:
-      - lnd-data:/root/.lnd
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "--cacert", "/root/.lnd/tls.cert",
-             "https://localhost:8080/v1/state"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 60s
-    command:
-      - --bitcoin.active
-      - --bitcoin.mainnet
-      - --bitcoin.node=neutrino
-      - --neutrino.connect=btcd-mainnet.lightning.computer
-      - --restlisten=0.0.0.0:8080
-      - --rpclisten=0.0.0.0:10009
-      - --tlsextraip=127.0.0.1
-      - --tlsextradomain=localhost
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: '0.5'
-    restart: unless-stopped
+  # lnd:
+  #   image: lightninglabs/lnd:v0.18.4-beta
+  #   network_mode: host
+  #   volumes:
+  #     - lnd-data:/root/.lnd
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-sf", "--cacert", "/root/.lnd/tls.cert",
+  #            "https://localhost:8080/v1/state"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 20
+  #     start_period: 60s
+  #   command:
+  #     - --bitcoin.active
+  #     - --bitcoin.mainnet
+  #     - --bitcoin.node=neutrino
+  #     - --neutrino.connect=btcd-mainnet.lightning.computer
+  #     - --restlisten=0.0.0.0:8080
+  #     - --rpclisten=0.0.0.0:10009
+  #     - --tlsextraip=127.0.0.1
+  #     - --tlsextradomain=localhost
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 512M
+  #         cpus: '0.5'
+  #   restart: unless-stopped
 
 volumes:
   orderbook-data:
   bisq-data:
-  mm-controller-data:
-  lnd-data:
+  # mm-controller-data:
+  # lnd-data:
