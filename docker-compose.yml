@@ -46,12 +46,20 @@ services:
     depends_on:
       tor:
         condition: service_healthy
+      lnd:
+        condition: service_healthy
     environment:
       - DB_PATH=/app/data/orderbook.db
-      - SNAPSHOT_INTERVAL_MIN=15
+      - SNAPSHOT_INTERVAL_MIN=1
       - FRONTEND_DIR=/app/react-frontend/dist
+      - MM_CONTROLLER_API_URL=http://localhost:5001
+      - LND_HOST=https://localhost:8080
+      - LND_MACAROON_PATH=/lnd/admin.macaroon
+      - LND_TLS_CERT_PATH=/lnd/tls.cert
+      - LND_WALLET_PASSWORD=${LND_WALLET_PASSWORD}
     volumes:
       - orderbook-data:/app/data
+      - lnd-data:/lnd:ro  # read-only access to macaroon + tls cert
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
@@ -77,7 +85,7 @@ services:
       - DB_PATH=/app/data/orderbook.db
       - BISQ_GRPC_HOST=localhost:9998
       - PRICE_PROVIDER=bisq_tor
-      - SNAPSHOT_INTERVAL_MIN=15
+      - SNAPSHOT_INTERVAL_MIN=1
       - SERVER_INTERNAL_URL=http://localhost:5000
     volumes:
       - orderbook-data:/app/data
@@ -88,35 +96,45 @@ services:
           cpus: '0.25'
     restart: unless-stopped
 
-  openclaw:
-    build:
-      context: ./dexMmController/openclaw
-      dockerfile: Dockerfile
-    network_mode: host
-    environment:
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-    volumes:
-      - ./dexMmController/openclaw/openclaw.json:/config/openclaw.json:ro
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-          cpus: '0.5'
-    restart: unless-stopped
+  # openclaw:
+  #   build:
+  #     context: ./dexMmController/openclaw
+  #     dockerfile: Dockerfile
+  #   network_mode: host
+  #   environment:
+  #     - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+  #   volumes:
+  #     - ./dexMmController/openclaw/openclaw.json:/config/openclaw.json:ro
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 256M
+  #         cpus: '0.5'
+  #   restart: unless-stopped
 
   mm-controller:
     build:
       context: ./dexMmController
       dockerfile: Dockerfile
     network_mode: host
+    depends_on:
+      lnd:
+        condition: service_healthy
     environment:
       - DB_PATH=/app/mm-controller.db
-      - OPENCLAW_URL=http://localhost:8001
+      - API_ADDR=:5001
+      - OPENCLAW_URL=
       - HUMMINGBOT_URL=http://localhost:8000
       - HUMMINGBOT_USERNAME=admin
       - HUMMINGBOT_PASSWORD=password
+      - OFFER_PREMIUM_WSS_URL=ws://localhost:5000/ws/live_offers?cex=kraken
+      - LND_HOST=https://localhost:8080
+      - LND_MACAROON_PATH=/lnd/admin.macaroon
+      - LND_TLS_CERT_PATH=/lnd/tls.cert
+      - LND_WALLET_PASSWORD=${LND_WALLET_PASSWORD}
     volumes:
       - mm-controller-data:/app
+      - lnd-data:/lnd:ro
     deploy:
       resources:
         limits:
@@ -124,7 +142,36 @@ services:
           cpus: '0.5'
     restart: unless-stopped
 
+  lnd:
+    image: lightninglabs/lnd:v0.18.4-beta
+    network_mode: host
+    volumes:
+      - lnd-data:/root/.lnd
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "--cacert", "/root/.lnd/tls.cert",
+             "https://localhost:8080/v1/state"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    command:
+      - --bitcoin.active
+      - --bitcoin.mainnet
+      - --bitcoin.node=neutrino
+      - --neutrino.connect=btcd-mainnet.lightning.computer
+      - --restlisten=0.0.0.0:8080
+      - --rpclisten=0.0.0.0:10009
+      - --tlsextraip=127.0.0.1
+      - --tlsextradomain=localhost
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    restart: unless-stopped
+
 volumes:
   orderbook-data:
   bisq-data:
   mm-controller-data:
+  lnd-data:
