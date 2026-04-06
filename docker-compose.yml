@@ -46,20 +46,20 @@ services:
     depends_on:
       tor:
         condition: service_healthy
-      lnd:
-        condition: service_healthy
+      # lnd:
+      #   condition: service_healthy
     environment:
       - DB_PATH=/app/data/orderbook.db
       - SNAPSHOT_INTERVAL_MIN=1
       - FRONTEND_DIR=/app/react-frontend/dist
       - MM_CONTROLLER_API_URL=http://localhost:5001
-      - LND_HOST=https://localhost:8080
-      - LND_MACAROON_PATH=/lnd/admin.macaroon
-      - LND_TLS_CERT_PATH=/lnd/tls.cert
-      - LND_WALLET_PASSWORD=${LND_WALLET_PASSWORD}
+      # - LND_HOST=https://localhost:8080
+      # - LND_MACAROON_PATH=/lnd/admin.macaroon
+      # - LND_TLS_CERT_PATH=/lnd/tls.cert
+      # - LND_WALLET_PASSWORD=${LND_WALLET_PASSWORD}
     volumes:
       - orderbook-data:/app/data
-      - lnd-data:/lnd:ro  # read-only access to macaroon + tls cert
+      # - lnd-data:/lnd:ro  # read-only access to macaroon + tls cert
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
