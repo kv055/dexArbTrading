@@ -1,5 +1,12 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   tor:
+    logging: *default-logging
     build:
       context: ./dexMonitor
       dockerfile: Dockerfile.tor
@@ -20,6 +27,7 @@ services:
     restart: unless-stopped
 
   bisq:
+    logging: *default-logging
     build:
       context: ./dexMonitor
       dockerfile: Dockerfile.bisq
@@ -39,6 +47,7 @@ services:
     restart: unless-stopped
 
   app:
+    logging: *default-logging
     build:
       context: ./dexMonitor
       dockerfile: Dockerfile
@@ -74,6 +83,7 @@ services:
     restart: unless-stopped
 
   snapshot:
+    logging: *default-logging
     build:
       context: ./dexMonitor
       dockerfile: Dockerfile.snapshot
@@ -97,6 +107,7 @@ services:
     restart: unless-stopped
 
   # openclaw:
+  #   logging: *default-logging
   #   build:
   #     context: ./dexMmController/openclaw
   #     dockerfile: Dockerfile
@@ -113,6 +124,7 @@ services:
   #   restart: unless-stopped
 
   # mm-controller:
+  #   logging: *default-logging
   #   build:
   #     context: ./dexMmController
   #     dockerfile: Dockerfile
@@ -143,6 +155,7 @@ services:
   #   restart: unless-stopped
 
   # lnd:
+  #   logging: *default-logging
   #   image: lightninglabs/lnd:v0.18.4-beta
   #   network_mode: host
   #   volumes:
