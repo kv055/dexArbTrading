@@ -1,0 +1,14 @@
+# Copy this to vps_deploy/config.yaml on your VPS and adjust as needed.
+REPO_DIR: /opt/dexArbTrading
+REPO_FULL_NAME: kv055/dexArbTrading
+BRANCH: light_setting
+REMOTE: origin
+COMPOSE_FILE: /opt/dexArbTrading/docker-compose.yml
+WEBHOOK_SECRET: replace-with-a-random-secret
+WEBHOOK_PORT: 9000
+WEBHOOK_HOST: 0.0.0.0
+WEBHOOK_BINARY: /usr/bin/webhook
+HOOK_ID: dexarb-redeploy
+SERVICE_NAME: dexarb-webhook
+SERVICE_USER: deploy
+OPEN_FIREWALL: false

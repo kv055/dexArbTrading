@@ -1,0 +1,74 @@
+[
+  {
+    "id": "dexarb-redeploy",
+    "execute-command": "/opt/dexArbTrading/vps_deploy/redeploy.sh",
+    "command-working-directory": "/opt/dexArbTrading",
+    "response-message": "deploy queued",
+    "pass-environment-to-command": [
+      {
+        "source": "string",
+        "name": "/opt/dexArbTrading",
+        "envname": "REPO_DIR"
+      },
+      {
+        "source": "string",
+        "name": "light_setting",
+        "envname": "BRANCH"
+      },
+      {
+        "source": "string",
+        "name": "origin",
+        "envname": "REMOTE"
+      },
+      {
+        "source": "string",
+        "name": "/opt/dexArbTrading/docker-compose.yml",
+        "envname": "COMPOSE_FILE"
+      }
+    ],
+    "trigger-rule": {
+      "and": [
+        {
+          "match": {
+            "type": "value",
+            "value": "push",
+            "parameter": {
+              "source": "header",
+              "name": "X-GitHub-Event"
+            }
+          }
+        },
+        {
+          "match": {
+            "type": "payload-hmac-sha256",
+            "secret": "replace-with-a-random-secret",
+            "parameter": {
+              "source": "header",
+              "name": "X-Hub-Signature-256"
+            }
+          }
+        },
+        {
+          "match": {
+            "type": "value",
+            "value": "refs/heads/light_setting",
+            "parameter": {
+              "source": "payload",
+              "name": "ref"
+            }
+          }
+        },
+        {
+          "match": {
+            "type": "value",
+            "value": "kv055/dexArbTrading",
+            "parameter": {
+              "source": "payload",
+              "name": "repository.full_name"
+            }
+          }
+        }
+      ]
+    }
+  }
+]
