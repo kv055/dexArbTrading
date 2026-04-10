@@ -7,10 +7,10 @@ x-logging: &default-logging
 services:
   tor:
     logging: *default-logging
+    image: dexarbtrading/tor
     build:
       context: ./dexMonitor
       dockerfile: Dockerfile.tor
-    network_mode: host
     cap_add:
       - NET_ADMIN
     healthcheck:
@@ -28,10 +28,10 @@ services:
 
   bisq:
     logging: *default-logging
+    image: dexarbtrading/bisq
     build:
       context: ./dexMonitor
       dockerfile: Dockerfile.bisq
-    network_mode: host
     depends_on:
       tor:
         condition: service_healthy
@@ -48,22 +48,16 @@ services:
 
   app:
     logging: *default-logging
+    image: dexarbtrading/app
     build:
       context: ./dexMonitor
       dockerfile: Dockerfile
-    network_mode: host
-    depends_on:
-      tor:
-        condition: service_healthy
-      snapshot:
-        condition: service_healthy
-      # lnd:
-      #   condition: service_healthy
     environment:
       - DB_PATH=/app/data/orderbook.db
       - SNAPSHOT_INTERVAL_MIN=1
       - FRONTEND_DIR=/app/react-frontend/dist
-      - MM_CONTROLLER_API_URL=http://localhost:5001
+      - MM_CONTROLLER_API_URL=http://mm-controller:5001
+      - TOR_PROXY_ADDR=tor:9050
       # - LND_HOST=https://localhost:8080
       # - LND_MACAROON_PATH=/lnd/admin.macaroon
       # - LND_TLS_CERT_PATH=/lnd/tls.cert
@@ -71,6 +65,8 @@ services:
     volumes:
       - orderbook-data:/app/data
       # - lnd-data:/lnd:ro  # read-only access to macaroon + tls cert
+    ports:
+      - "5000:5000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
@@ -86,19 +82,22 @@ services:
 
   snapshot:
     logging: *default-logging
+    image: dexarbtrading/snapshot
     build:
       context: ./dexMonitor
       dockerfile: Dockerfile.snapshot
-    network_mode: host
     depends_on:
+      bisq:
+        condition: service_started
       tor:
         condition: service_healthy
     environment:
       - DB_PATH=/app/data/orderbook.db
-      - BISQ_GRPC_HOST=localhost:9998
+      - BISQ_GRPC_HOST=bisq:9998
       - PRICE_PROVIDER=bisq_tor
       - SNAPSHOT_INTERVAL_MIN=1
-      - SERVER_INTERNAL_URL=http://localhost:5000
+      - SERVER_INTERNAL_URL=http://app:5000
+      - TOR_PROXY_URL=socks5h://tor:9050
     volumes:
       - orderbook-data:/app/data
     healthcheck:
@@ -116,6 +115,7 @@ services:
 
   # openclaw:
   #   logging: *default-logging
+  #   image: dexarbtrading/openclaw
   #   build:
   #     context: ./dexMmController/openclaw
   #     dockerfile: Dockerfile
@@ -133,6 +133,7 @@ services:
 
   # mm-controller:
   #   logging: *default-logging
+  #   image: dexarbtrading/mm-controller
   #   build:
   #     context: ./dexMmController
   #     dockerfile: Dockerfile
@@ -196,3 +197,7 @@ volumes:
   bisq-data:
   # mm-controller-data:
   # lnd-data:
+
+networks:
+  default:
+    name: dexarbtrading
