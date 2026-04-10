@@ -55,6 +55,8 @@ services:
     depends_on:
       tor:
         condition: service_healthy
+      snapshot:
+        condition: service_healthy
       # lnd:
       #   condition: service_healthy
     environment:
@@ -99,6 +101,12 @@ services:
       - SERVER_INTERNAL_URL=http://localhost:5000
     volumes:
       - orderbook-data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "sqlite3 /app/data/orderbook.db \"SELECT 1 FROM sqlite_master WHERE type='table' AND name='offers';\" | grep -q 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     deploy:
       resources:
         limits:
