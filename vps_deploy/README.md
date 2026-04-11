@@ -8,22 +8,22 @@ The goal is simple:
 
 1. GitHub sends a `push` webhook to your VPS.
 2. `webhook` validates the request signature and checks that the push is for the configured branch and repository.
-3. If the request matches, `webhook` runs [`redeploy.sh`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/redeploy.sh).
+3. If the request matches, `webhook` runs [`redeploy.sh`](./redeploy.sh).
 4. `redeploy.sh` pulls the latest git changes and rebuilds the Docker Compose stack.
 
 This avoids a custom deploy app and keeps the VPS logic small and easy to inspect.
 
 ## Files
 
-- [`install.sh`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/install.sh) is the main bootstrap script. It installs and configures the deploy setup on the VPS.
-- [`redeploy.sh`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/redeploy.sh) performs the actual deploy.
-- [`hooks.json.example`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/hooks.json.example) shows the generated `webhook` hook shape.
-- [`dexarb-webhook.service`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/dexarb-webhook.service) is a static example of the `systemd` service layout.
-- [`config.env.example`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/config.env.example) and [`config.yaml.example`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/config.yaml.example) show the supported config inputs for the installer.
+- [`install.sh`](./install.sh) is the main bootstrap script. It installs and configures the deploy setup on the VPS.
+- [`redeploy.sh`](./redeploy.sh) performs the actual deploy.
+- [`hooks.json.example`](./hooks.json.example) shows the generated `webhook` hook shape.
+- [`dexarb-webhook.service`](./dexarb-webhook.service) is a static example of the `systemd` service layout.
+- [`config.env.example`](./config.env.example) and [`config.yaml.example`](./config.yaml.example) show the supported config inputs for the installer.
 
 ## Install Logic
 
-[`install.sh`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/install.sh) is meant to be idempotent.
+[`install.sh`](./install.sh) is meant to be idempotent.
 
 When you run it, it does this:
 
@@ -33,7 +33,7 @@ When you run it, it does this:
 4. Validates that the repo checkout, compose file, and webhook secret exist.
 5. Checks whether the `webhook` binary is already installed.
 6. Installs `webhook` automatically if it is missing and the VPS is apt-based.
-7. Makes [`redeploy.sh`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/redeploy.sh) executable if needed.
+7. Makes [`redeploy.sh`](./redeploy.sh) executable if needed.
 8. Renders `vps_deploy/hooks.json` from your config.
 9. Renders `/etc/systemd/system/<service>.service` from your config.
 10. Runs `systemctl daemon-reload`.
@@ -83,7 +83,7 @@ If any of those checks fail, the deploy command is not run.
 
 ## Redeploy Logic
 
-[`redeploy.sh`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/redeploy.sh) is intentionally strict.
+[`redeploy.sh`](./redeploy.sh) is intentionally strict.
 
 Before rebuilding containers, it:
 
@@ -119,8 +119,7 @@ So you can safely rerun the installer after changing config, pulling repo update
 On the VPS:
 
 ```bash
-cp /opt/dexArbTrading/vps_deploy/config.env.example /opt/dexArbTrading/vps_deploy/config.env
-cd /opt/dexArbTrading
+cp vps_deploy/config.env.example vps_deploy/config.env
 ./vps_deploy/install.sh
 ```
 
