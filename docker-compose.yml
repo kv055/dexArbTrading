@@ -113,6 +113,67 @@ services:
           cpus: '0.25'
     restart: unless-stopped
 
+  unified-api:
+    logging: *default-logging
+    image: dexarbtrading/unified-api
+    build:
+      context: ./dexUnifiedApi
+      dockerfile: Dockerfile
+    depends_on:
+      tor:
+        condition: service_healthy
+    environment:
+      - DB_PATH=/app/data/unified.db
+      - LISTEN_ADDR=:5010
+      - TOR_PROXY_ADDR=tor:9050
+      - DEXMONITOR_INTERNAL_URL=http://app:5000
+    volumes:
+      - unified-api-data:/app/data
+    ports:
+      - "5010:5010"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+    restart: unless-stopped
+
+  unified-snapshot:
+    logging: *default-logging
+    image: dexarbtrading/unified-snapshot
+    build:
+      context: ./dexUnifiedApi
+      dockerfile: Dockerfile.snapshot
+    depends_on:
+      bisq:
+        condition: service_started
+      tor:
+        condition: service_healthy
+      unified-api:
+        condition: service_healthy
+    environment:
+      - DB_PATH=/app/data/unified.db
+      - BISQ_GRPC_HOST=bisq:9998
+      - PRICE_PROVIDER=bisq_tor
+      - SNAPSHOT_INTERVAL_MIN=1
+      - SERVER_INTERNAL_URL=http://unified-api:5010
+      - TOR_PROXY_URL=socks5h://tor:9050
+      - DEXMONITOR_INTERNAL_URL=http://app:5000
+    volumes:
+      - unified-api-data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+    restart: unless-stopped
+
   # openclaw:
   #   logging: *default-logging
   #   image: dexarbtrading/openclaw
@@ -195,6 +256,7 @@ services:
 volumes:
   orderbook-data:
   bisq-data:
+  unified-api-data:
   # mm-controller-data:
   # lnd-data:
 
