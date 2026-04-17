@@ -79,6 +79,8 @@ services:
         condition: service_healthy
       tor:
         condition: service_healthy
+    ports:
+      - "5010:5010"
     environment:
       - DATABASE_URL=postgres://postgres:postgres@postgres:5432/dexarb?sslmode=disable
       - LISTEN_ADDR=:5010
