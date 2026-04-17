@@ -10,6 +10,3 @@
 [submodule "dexMonitor"]
 	path = dexMonitor
 	url = https://github.com/kv055/dexMonitor.git
-[submodule "dexArbFiatController"]
-	path = dexArbFiatController
-	url = https://github.com/kv055/dexArbFiatController.git
