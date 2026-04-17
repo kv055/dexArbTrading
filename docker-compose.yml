@@ -5,6 +5,28 @@ x-logging: &default-logging
     max-file: "3"
 
 services:
+  postgres:
+    logging: *default-logging
+    image: postgres:17-alpine
+    environment:
+      - POSTGRES_DB=dexarb
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d dexarb"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    restart: unless-stopped
+
   tor:
     logging: *default-logging
     image: dexarbtrading/tor
@@ -46,71 +68,6 @@ services:
           cpus: '1.5'
     restart: unless-stopped
 
-  app:
-    logging: *default-logging
-    image: dexarbtrading/app
-    build:
-      context: ./dexMonitor
-      dockerfile: Dockerfile
-    environment:
-      - DB_PATH=/app/data/orderbook.db
-      - SNAPSHOT_INTERVAL_MIN=1
-      - FRONTEND_DIR=/app/react-frontend/dist
-      - MM_CONTROLLER_API_URL=http://mm-controller:5001
-      - TOR_PROXY_ADDR=tor:9050
-      # - LND_HOST=https://localhost:8080
-      # - LND_MACAROON_PATH=/lnd/admin.macaroon
-      # - LND_TLS_CERT_PATH=/lnd/tls.cert
-      # - LND_WALLET_PASSWORD=${LND_WALLET_PASSWORD}
-    volumes:
-      - orderbook-data:/app/data
-      # - lnd-data:/lnd:ro  # read-only access to macaroon + tls cert
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 5s
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: '0.5'
-    restart: unless-stopped
-
-  snapshot:
-    logging: *default-logging
-    image: dexarbtrading/snapshot
-    build:
-      context: ./dexMonitor
-      dockerfile: Dockerfile.snapshot
-    depends_on:
-      bisq:
-        condition: service_started
-      tor:
-        condition: service_healthy
-    environment:
-      - DB_PATH=/app/data/orderbook.db
-      - BISQ_GRPC_HOST=bisq:9998
-      - PRICE_PROVIDER=bisq_tor
-      - SNAPSHOT_INTERVAL_MIN=1
-      - SERVER_INTERNAL_URL=http://app:5000
-      - TOR_PROXY_URL=socks5h://tor:9050
-    volumes:
-      - orderbook-data:/app/data
-    healthcheck:
-      test: ["CMD-SHELL", "sqlite3 /app/data/orderbook.db \"SELECT 1 FROM sqlite_master WHERE type='table' AND name='offers';\" | grep -q 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    deploy:
-      resources:
-        limits:
-          memory: 64M
-          cpus: '0.25'
-    restart: unless-stopped
-
   unified-api:
     logging: *default-logging
     image: dexarbtrading/unified-api
@@ -118,15 +75,14 @@ services:
       context: ./dexUnifiedApi
       dockerfile: Dockerfile
     depends_on:
+      postgres:
+        condition: service_healthy
       tor:
         condition: service_healthy
     environment:
-      - DB_PATH=/app/data/unified.db
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/dexarb?sslmode=disable
       - LISTEN_ADDR=:5010
       - TOR_PROXY_ADDR=tor:9050
-      - DEXMONITOR_INTERNAL_URL=http://app:5000
-    volumes:
-      - unified-api-data:/app/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5010/health"]
       interval: 30s
@@ -149,25 +105,76 @@ services:
     depends_on:
       bisq:
         condition: service_started
+      postgres:
+        condition: service_healthy
       tor:
         condition: service_healthy
       unified-api:
         condition: service_healthy
     environment:
-      - DB_PATH=/app/data/unified.db
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/dexarb?sslmode=disable
       - BISQ_GRPC_HOST=bisq:9998
       - PRICE_PROVIDER=bisq_tor
       - SNAPSHOT_INTERVAL_MIN=1
       - SERVER_INTERNAL_URL=http://unified-api:5010
       - TOR_PROXY_URL=socks5h://tor:9050
-      - DEXMONITOR_INTERNAL_URL=http://app:5000
-    volumes:
-      - unified-api-data:/app/data
     deploy:
       resources:
         limits:
           memory: 64M
           cpus: '0.25'
+    restart: unless-stopped
+
+  app:
+    logging: *default-logging
+    image: dexarbtrading/app
+    build:
+      context: ./dexMonitor
+      dockerfile: Dockerfile
+    depends_on:
+      unified-api:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/dexarb?sslmode=disable
+      - SNAPSHOT_INTERVAL_MIN=1
+      - FRONTEND_DIR=/app/react-frontend/dist
+      - MM_CONTROLLER_API_URL=http://mm-controller:5001
+      - TOR_PROXY_ADDR=tor:9050
+      # - LND_HOST=https://localhost:8080
+      # - LND_MACAROON_PATH=/lnd/admin.macaroon
+      # - LND_TLS_CERT_PATH=/lnd/tls.cert
+      # - LND_WALLET_PASSWORD=${LND_WALLET_PASSWORD}
+    # - lnd-data:/lnd:ro  # read-only access to macaroon + tls cert
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+    restart: unless-stopped
+
+  nginx:
+    logging: *default-logging
+    image: nginx:alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "5000:80"
+    depends_on:
+      app:
+        condition: service_healthy
+      unified-api:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 32M
+          cpus: '0.1'
     restart: unless-stopped
 
   # openclaw:
@@ -211,7 +218,6 @@ services:
   #     - LND_TLS_CERT_PATH=/lnd/tls.cert
   #     - LND_WALLET_PASSWORD=${LND_WALLET_PASSWORD}
   #   volumes:
-  #     - mm-controller-data:/app
   #     - lnd-data:/lnd:ro
   #   deploy:
   #     resources:
@@ -237,7 +243,6 @@ services:
   #     - --bitcoin.active
   #     - --bitcoin.mainnet
   #     - --bitcoin.node=neutrino
-  #     - --neutrino.connect=btcd-mainnet.lightning.computer
   #     - --restlisten=0.0.0.0:8080
   #     - --rpclisten=0.0.0.0:10009
   #     - --tlsextraip=127.0.0.1
@@ -249,29 +254,9 @@ services:
   #         cpus: '0.5'
   #   restart: unless-stopped
 
-  nginx:
-    logging: *default-logging
-    image: nginx:alpine
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    ports:
-      - "5000:80"
-    depends_on:
-      app:
-        condition: service_healthy
-      unified-api:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 32M
-          cpus: '0.1'
-    restart: unless-stopped
-
 volumes:
-  orderbook-data:
+  postgres-data:
   bisq-data:
-  unified-api-data:
   # mm-controller-data:
   # lnd-data:
 
