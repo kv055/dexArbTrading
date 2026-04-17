@@ -110,7 +110,10 @@ Before rebuilding containers, it:
 Then it:
 
 - fetches from the configured remote
+- verifies the configured remote branch exists
 - fast-forward pulls the configured branch if needed
+- syncs and updates git submodules when `.gitmodules` exists
+- refuses to continue if pull or submodule update leaves the checkout dirty
 - runs `docker compose -f <compose-file> up --build -d --remove-orphans`
 
 This means it is safe to rerun, and it also helps prevent accidentally deploying from a locally modified checkout.

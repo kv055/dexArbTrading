@@ -23,6 +23,27 @@ require_cmd() {
   fi
 }
 
+die() {
+  log "$*"
+  exit 1
+}
+
+git_repo() {
+  git -C "$REPO_DIR" "$@"
+}
+
+ensure_clean_worktree() {
+  if [[ -n "$(git_repo status --porcelain --ignore-submodules=none)" ]]; then
+    die "$1"
+  fi
+}
+
+on_error() {
+  log "redeploy failed at line $1"
+}
+
+trap 'on_error $LINENO' ERR
+
 require_cmd git
 require_cmd docker
 require_cmd flock
@@ -34,40 +55,46 @@ if ! flock -n 9; then
 fi
 
 if [[ ! -d "$REPO_DIR/.git" ]]; then
-  log "repo directory is not a git repository: $REPO_DIR"
-  exit 1
+  die "repo directory is not a git repository: $REPO_DIR"
 fi
 
 if [[ ! -f "$COMPOSE_FILE" ]]; then
-  log "compose file not found: $COMPOSE_FILE"
-  exit 1
+  die "compose file not found: $COMPOSE_FILE"
 fi
 
-current_branch="$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD)"
+current_branch="$(git_repo rev-parse --abbrev-ref HEAD)"
 if [[ "$current_branch" != "$BRANCH" ]]; then
-  log "checked out branch is '$current_branch', expected '$BRANCH'"
-  exit 1
+  die "checked out branch is '$current_branch', expected '$BRANCH'"
 fi
 
-if [[ -n "$(git -C "$REPO_DIR" status --porcelain)" ]]; then
-  log "working tree is dirty, refusing to deploy"
-  exit 1
-fi
+ensure_clean_worktree "working tree is dirty, refusing to deploy"
 
 log "fetching latest changes from $REMOTE/$BRANCH"
-git -C "$REPO_DIR" fetch --prune "$REMOTE"
+git_repo fetch --prune "$REMOTE"
 
-local_sha="$(git -C "$REPO_DIR" rev-parse HEAD)"
-remote_sha="$(git -C "$REPO_DIR" rev-parse "$REMOTE/$BRANCH")"
+if ! git_repo rev-parse --verify "$REMOTE/$BRANCH" >/dev/null 2>&1; then
+  die "remote branch not found: $REMOTE/$BRANCH"
+fi
+
+local_sha="$(git_repo rev-parse HEAD)"
+remote_sha="$(git_repo rev-parse "$REMOTE/$BRANCH")"
 
 if [[ "$local_sha" == "$remote_sha" ]]; then
   log "already up to date at $local_sha"
 else
   log "pulling $REMOTE/$BRANCH"
-  git -C "$REPO_DIR" pull --ff-only "$REMOTE" "$BRANCH"
+  git_repo pull --ff-only "$REMOTE" "$BRANCH"
 fi
 
-new_sha="$(git -C "$REPO_DIR" rev-parse HEAD)"
+if [[ -f "$REPO_DIR/.gitmodules" ]]; then
+  log "syncing and updating git submodules"
+  git_repo submodule sync --recursive
+  git_repo submodule update --init --recursive
+fi
+
+ensure_clean_worktree "working tree became dirty after pull/submodule update, refusing to continue"
+
+new_sha="$(git_repo rev-parse HEAD)"
 log "rebuilding docker compose stack from commit $new_sha"
 docker compose -f "$COMPOSE_FILE" up --build -d --remove-orphans
 log "redeploy finished successfully"
