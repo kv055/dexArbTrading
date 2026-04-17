@@ -1,9 +1,9 @@
 [
   {
     "id": "dexarb-redeploy",
-    "execute-command": "/opt/dexArbTrading/vps_deploy/redeploy.sh",
+    "execute-command": "/opt/dexArbTrading/vps_deploy/webhook-handler.sh",
     "command-working-directory": "/opt/dexArbTrading",
-    "response-message": "deploy queued",
+    "response-message": "webhook received",
     "pass-environment-to-command": [
       {
         "source": "string",
@@ -24,6 +24,36 @@
         "source": "string",
         "name": "/opt/dexArbTrading/docker-compose.yml",
         "envname": "COMPOSE_FILE"
+      },
+      {
+        "source": "string",
+        "name": "kv055/dexArbTrading",
+        "envname": "EXPECTED_REPO_FULL_NAME"
+      },
+      {
+        "source": "string",
+        "name": "/tmp/dexarb-webhook-last-ping",
+        "envname": "PING_STATUS_FILE"
+      },
+      {
+        "source": "header",
+        "name": "X-GitHub-Event",
+        "envname": "HOOK_EVENT"
+      },
+      {
+        "source": "payload",
+        "name": "ref",
+        "envname": "HOOK_REF"
+      },
+      {
+        "source": "payload",
+        "name": "repository.full_name",
+        "envname": "HOOK_REPOSITORY_FULL_NAME"
+      },
+      {
+        "source": "payload",
+        "name": "zen",
+        "envname": "HOOK_ZEN"
       }
     ],
     "trigger-rule": {
@@ -31,10 +61,10 @@
         {
           "match": {
             "type": "value",
-            "value": "push",
+            "value": "kv055/dexArbTrading",
             "parameter": {
-              "source": "header",
-              "name": "X-GitHub-Event"
+              "source": "payload",
+              "name": "repository.full_name"
             }
           }
         },
@@ -49,24 +79,28 @@
           }
         },
         {
-          "match": {
-            "type": "value",
-            "value": "refs/heads/light_setting",
-            "parameter": {
-              "source": "payload",
-              "name": "ref"
+          "or": [
+            {
+              "match": {
+                "type": "value",
+                "value": "push",
+                "parameter": {
+                  "source": "header",
+                  "name": "X-GitHub-Event"
+                }
+              }
+            },
+            {
+              "match": {
+                "type": "value",
+                "value": "ping",
+                "parameter": {
+                  "source": "header",
+                  "name": "X-GitHub-Event"
+                }
+              }
             }
-          }
-        },
-        {
-          "match": {
-            "type": "value",
-            "value": "kv055/dexArbTrading",
-            "parameter": {
-              "source": "payload",
-              "name": "repository.full_name"
-            }
-          }
+          ]
         }
       ]
     }

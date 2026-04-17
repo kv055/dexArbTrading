@@ -7,15 +7,19 @@ This folder contains a lightweight VPS-side auto-deploy setup built around [`adn
 The goal is simple:
 
 1. GitHub sends a `push` webhook to your VPS.
-2. `webhook` validates the request signature and checks that the push is for the configured branch and repository.
-3. If the request matches, `webhook` runs [`redeploy.sh`](./redeploy.sh).
-4. `redeploy.sh` pulls the latest git changes and rebuilds the Docker Compose stack.
+2. `webhook` validates the request signature and checks that the event and repository match the generated hook rules.
+3. If the request matches, `webhook` runs [`webhook-handler.sh`](./webhook-handler.sh).
+4. On GitHub `ping`, the handler records a local confirmation marker for verification.
+5. On a matching `push`, the handler runs [`redeploy.sh`](./redeploy.sh).
+6. `redeploy.sh` pulls the latest git changes and rebuilds the Docker Compose stack.
 
 This avoids a custom deploy app and keeps the VPS logic small and easy to inspect.
 
 ## Files
 
 - [`install.sh`](./install.sh) is the main bootstrap script. It installs and configures the deploy setup on the VPS.
+- [`webhook-handler.sh`](./webhook-handler.sh) is the webhook entrypoint. It records GitHub `ping` deliveries and forwards matching `push` events to deploy logic.
+- [`verify-webhook.sh`](./verify-webhook.sh) waits for GitHub's setup `ping` so you can confirm the webhook path works end to end.
 - [`redeploy.sh`](./redeploy.sh) performs the actual deploy.
 - [`hooks.json.example`](./hooks.json.example) shows the generated `webhook` hook shape.
 - [`dexarb-webhook.service`](./dexarb-webhook.service) is a static example of the `systemd` service layout.
@@ -34,12 +38,15 @@ When you run it, it does this:
 5. Checks whether the `webhook` binary is already installed.
 6. Installs `webhook` automatically if it is missing and the VPS is apt-based.
 7. Makes [`redeploy.sh`](./redeploy.sh) executable if needed.
-8. Renders `vps_deploy/hooks.json` from your config.
-9. Renders `/etc/systemd/system/<service>.service` from your config.
-10. Runs `systemctl daemon-reload`.
-11. Enables the service if it is not already enabled.
-12. Starts or restarts the service so the newest config is active.
-13. Optionally opens the webhook port in `ufw` or `firewalld` if `OPEN_FIREWALL=true`.
+8. Makes [`webhook-handler.sh`](./webhook-handler.sh) and [`verify-webhook.sh`](./verify-webhook.sh) executable if needed.
+9. Renders `vps_deploy/hooks.json` from your config.
+10. Renders `/etc/systemd/system/<service>.service` from your config.
+11. Runs `systemctl daemon-reload`.
+12. Enables the service if it is not already enabled.
+13. Starts or restarts the service so the newest config is active.
+14. Optionally opens the webhook port in `ufw` or `firewalld` if `OPEN_FIREWALL=true`.
+15. Verifies that something is listening on `WEBHOOK_PORT` and that a detected firewall allows `WEBHOOK_PORT/tcp`.
+16. Launches [`verify-webhook.sh`](./verify-webhook.sh) in interactive shells so you can save the GitHub webhook and wait for the automatic `ping`.
 
 If a file already exists with the exact expected contents, the installer leaves it alone and reports that it is already up to date.
 
@@ -58,13 +65,15 @@ Supported keys:
 - `REMOTE`: git remote. Default is `origin`.
 - `COMPOSE_FILE`: absolute path to `docker-compose.yml`.
 - `WEBHOOK_SECRET`: GitHub webhook secret.
-- `WEBHOOK_PORT`: port used by `webhook`. Default is `9000`.
+- `WEBHOOK_PORT`: port used by `webhook`. Default is `9000`. This is your installer default, not a GitHub default.
 - `WEBHOOK_HOST`: listen address for `webhook`. Default is `0.0.0.0`.
 - `WEBHOOK_BINARY`: path to the `webhook` binary. Default is `/usr/bin/webhook`.
 - `HOOK_ID`: hook route id. Default is `dexarb-redeploy`.
 - `SERVICE_NAME`: systemd service name. Default is `dexarb-webhook`.
 - `SERVICE_USER`: Linux user that runs the service.
 - `OPEN_FIREWALL`: set to `true` if the installer should try to open the port.
+- `PING_STATUS_FILE`: local file used to record the most recent GitHub `ping`. Default is `/tmp/<service>-last-ping`.
+- `WEBHOOK_VERIFY_TIMEOUT`: seconds [`verify-webhook.sh`](./verify-webhook.sh) waits for the GitHub `ping`. Default is `180`.
 
 The generated webhook URL is:
 
@@ -72,12 +81,16 @@ The generated webhook URL is:
 
 ## Hook Logic
 
-The generated `hooks.json` requires all of these to match before a deploy starts:
+The generated `hooks.json` requires all of these to match before the handler script runs:
 
-- `X-GitHub-Event` must be `push`
 - `X-Hub-Signature-256` must match your `WEBHOOK_SECRET`
-- payload `ref` must equal `refs/heads/<BRANCH>`
 - payload `repository.full_name` must match `REPO_FULL_NAME`
+- `X-GitHub-Event` must be either `ping` or `push`
+
+Then [`webhook-handler.sh`](./webhook-handler.sh) applies event-specific behavior:
+
+- `ping`: records a confirmation file in `PING_STATUS_FILE`
+- `push`: only deploys when payload `ref` equals `refs/heads/<BRANCH>`
 
 If any of those checks fail, the deploy command is not run.
 
@@ -123,7 +136,9 @@ cp vps_deploy/config.env.example vps_deploy/config.env
 ./vps_deploy/install.sh
 ```
 
-Then in GitHub create a webhook with:
+In an interactive shell, the installer then launches [`verify-webhook.sh`](./verify-webhook.sh), prints the webhook details, and waits for GitHub's automatic `ping`.
+
+In GitHub create a webhook with:
 
 - Payload URL: `http://YOUR_VPS_IP:9000/hooks/dexarb-redeploy`
 - Content type: `application/json`
@@ -131,6 +146,8 @@ Then in GitHub create a webhook with:
 - Event: push only
 
 If you changed `WEBHOOK_PORT` or `HOOK_ID`, use those values instead.
+
+GitHub does not reserve or require port `9000` for webhooks. It will send the webhook to whatever full URL you configure in the repository webhook settings, so the port must match your VPS listener and firewall rules.
 
 ## Notes
 

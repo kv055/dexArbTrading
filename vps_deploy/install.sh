@@ -13,6 +13,10 @@ log() {
   printf '[%s] %s\n' "$(timestamp)" "$*"
 }
 
+warn() {
+  log "warning: $*"
+}
+
 fail() {
   log "$*"
   exit 1
@@ -118,9 +122,13 @@ apply_defaults() {
   SERVICE_NAME="${SERVICE_NAME:-dexarb-webhook}"
   SERVICE_USER="${SERVICE_USER:-${SUDO_USER:-$USER}}"
   OPEN_FIREWALL="${OPEN_FIREWALL:-false}"
+  PING_STATUS_FILE="${PING_STATUS_FILE:-/tmp/${SERVICE_NAME}-last-ping}"
+  WEBHOOK_VERIFY_TIMEOUT="${WEBHOOK_VERIFY_TIMEOUT:-180}"
 
   HOOKS_FILE="$REPO_DIR/vps_deploy/hooks.json"
   REDEPLOY_SCRIPT="$REPO_DIR/vps_deploy/redeploy.sh"
+  WEBHOOK_HANDLER_SCRIPT="$REPO_DIR/vps_deploy/webhook-handler.sh"
+  VERIFY_WEBHOOK_SCRIPT="$REPO_DIR/vps_deploy/verify-webhook.sh"
   SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 }
 
@@ -129,7 +137,12 @@ validate_config() {
   [[ -n "$WEBHOOK_SECRET" ]] || fail "WEBHOOK_SECRET is required"
   [[ -d "$REPO_DIR/.git" ]] || fail "REPO_DIR is not a git repo: $REPO_DIR"
   [[ -f "$REDEPLOY_SCRIPT" ]] || fail "redeploy script not found: $REDEPLOY_SCRIPT"
+  [[ -f "$WEBHOOK_HANDLER_SCRIPT" ]] || fail "webhook handler script not found: $WEBHOOK_HANDLER_SCRIPT"
+  [[ -f "$VERIFY_WEBHOOK_SCRIPT" ]] || fail "webhook verifier script not found: $VERIFY_WEBHOOK_SCRIPT"
   [[ -f "$COMPOSE_FILE" ]] || fail "compose file not found: $COMPOSE_FILE"
+  [[ "$WEBHOOK_PORT" =~ ^[0-9]+$ ]] || fail "WEBHOOK_PORT must be a number: $WEBHOOK_PORT"
+  (( WEBHOOK_PORT >= 1 && WEBHOOK_PORT <= 65535 )) || fail "WEBHOOK_PORT must be between 1 and 65535: $WEBHOOK_PORT"
+  [[ "$WEBHOOK_VERIFY_TIMEOUT" =~ ^[0-9]+$ ]] || fail "WEBHOOK_VERIFY_TIMEOUT must be a number of seconds: $WEBHOOK_VERIFY_TIMEOUT"
 }
 
 json_escape() {
@@ -144,6 +157,7 @@ json_escape() {
 
 render_hooks_json() {
   local repo_dir_json branch_json remote_json compose_json secret_json repo_full_json hook_id_json
+  local handler_json ping_status_json
   repo_dir_json="$(json_escape "$REPO_DIR")"
   branch_json="$(json_escape "$BRANCH")"
   remote_json="$(json_escape "$REMOTE")"
@@ -151,14 +165,16 @@ render_hooks_json() {
   secret_json="$(json_escape "$WEBHOOK_SECRET")"
   repo_full_json="$(json_escape "$REPO_FULL_NAME")"
   hook_id_json="$(json_escape "$HOOK_ID")"
+  handler_json="$(json_escape "$WEBHOOK_HANDLER_SCRIPT")"
+  ping_status_json="$(json_escape "$PING_STATUS_FILE")"
 
   cat <<EOF
 [
   {
     "id": "${hook_id_json}",
-    "execute-command": "${repo_dir_json}/vps_deploy/redeploy.sh",
+    "execute-command": "${handler_json}",
     "command-working-directory": "${repo_dir_json}",
-    "response-message": "deploy queued",
+    "response-message": "webhook received",
     "pass-environment-to-command": [
       {
         "source": "string",
@@ -179,6 +195,36 @@ render_hooks_json() {
         "source": "string",
         "name": "${compose_json}",
         "envname": "COMPOSE_FILE"
+      },
+      {
+        "source": "string",
+        "name": "${repo_full_json}",
+        "envname": "EXPECTED_REPO_FULL_NAME"
+      },
+      {
+        "source": "string",
+        "name": "${ping_status_json}",
+        "envname": "PING_STATUS_FILE"
+      },
+      {
+        "source": "header",
+        "name": "X-GitHub-Event",
+        "envname": "HOOK_EVENT"
+      },
+      {
+        "source": "payload",
+        "name": "ref",
+        "envname": "HOOK_REF"
+      },
+      {
+        "source": "payload",
+        "name": "repository.full_name",
+        "envname": "HOOK_REPOSITORY_FULL_NAME"
+      },
+      {
+        "source": "payload",
+        "name": "zen",
+        "envname": "HOOK_ZEN"
       }
     ],
     "trigger-rule": {
@@ -186,10 +232,10 @@ render_hooks_json() {
         {
           "match": {
             "type": "value",
-            "value": "push",
+            "value": "${repo_full_json}",
             "parameter": {
-              "source": "header",
-              "name": "X-GitHub-Event"
+              "source": "payload",
+              "name": "repository.full_name"
             }
           }
         },
@@ -204,24 +250,28 @@ render_hooks_json() {
           }
         },
         {
-          "match": {
-            "type": "value",
-            "value": "refs/heads/${branch_json}",
-            "parameter": {
-              "source": "payload",
-              "name": "ref"
+          "or": [
+            {
+              "match": {
+                "type": "value",
+                "value": "push",
+                "parameter": {
+                  "source": "header",
+                  "name": "X-GitHub-Event"
+                }
+              }
+            },
+            {
+              "match": {
+                "type": "value",
+                "value": "ping",
+                "parameter": {
+                  "source": "header",
+                  "name": "X-GitHub-Event"
+                }
+              }
             }
-          }
-        },
-        {
-          "match": {
-            "type": "value",
-            "value": "${repo_full_json}",
-            "parameter": {
-              "source": "payload",
-              "name": "repository.full_name"
-            }
-          }
+          ]
         }
       ]
     }
@@ -320,6 +370,24 @@ ensure_redeploy_script_executable() {
   fi
 }
 
+ensure_webhook_handler_script_executable() {
+  if [[ -x "$WEBHOOK_HANDLER_SCRIPT" ]]; then
+    log "webhook handler script already executable"
+  else
+    chmod +x "$WEBHOOK_HANDLER_SCRIPT"
+    log "made webhook handler script executable"
+  fi
+}
+
+ensure_verify_webhook_script_executable() {
+  if [[ -x "$VERIFY_WEBHOOK_SCRIPT" ]]; then
+    log "webhook verifier script already executable"
+  else
+    chmod +x "$VERIFY_WEBHOOK_SCRIPT"
+    log "made webhook verifier script executable"
+  fi
+}
+
 ensure_service_user_exists() {
   if id -u "$SERVICE_USER" >/dev/null 2>&1; then
     log "service user exists: $SERVICE_USER"
@@ -395,6 +463,54 @@ ensure_firewall() {
   log "OPEN_FIREWALL is true but no supported firewall tool was found"
 }
 
+ensure_webhook_port_reachable() {
+  local listener_found=0
+
+  if command_exists ss; then
+    if ss -ltn "sport = :${WEBHOOK_PORT}" | awk 'NR > 1 { found = 1 } END { exit(found ? 0 : 1) }'; then
+      listener_found=1
+    fi
+  elif command_exists netstat; then
+    if netstat -ltn 2>/dev/null | awk -v port=":${WEBHOOK_PORT}" '$4 ~ port"$" { found = 1 } END { exit(found ? 0 : 1) }'; then
+      listener_found=1
+    fi
+  else
+    warn "skipping local port-listener check because neither ss nor netstat is installed"
+  fi
+
+  if [[ "$listener_found" -eq 0 ]]; then
+    fail "no process is listening on TCP port ${WEBHOOK_PORT}; the webhook endpoint will not receive GitHub pushes"
+  fi
+
+  if command_exists ufw; then
+    if run_root ufw status | grep -q "Status: active"; then
+      if run_root ufw status | grep -Eq "\\b${WEBHOOK_PORT}/tcp\\b.*ALLOW"; then
+        log "verified ufw allows port ${WEBHOOK_PORT}/tcp"
+      else
+        fail "ufw is active but port ${WEBHOOK_PORT}/tcp is not allowed; GitHub will not be able to reach the webhook"
+      fi
+    else
+      log "ufw is installed but inactive"
+    fi
+    return
+  fi
+
+  if command_exists firewall-cmd; then
+    if run_root firewall-cmd --state >/dev/null 2>&1; then
+      if run_root firewall-cmd --query-port="${WEBHOOK_PORT}/tcp" >/dev/null; then
+        log "verified firewalld allows port ${WEBHOOK_PORT}/tcp"
+      else
+        fail "firewalld is active but port ${WEBHOOK_PORT}/tcp is not allowed; GitHub will not be able to reach the webhook"
+      fi
+    else
+      log "firewalld is installed but inactive"
+    fi
+    return
+  fi
+
+  warn "no supported firewall tool found for verification; if your VPS uses another firewall, allow TCP port ${WEBHOOK_PORT} manually"
+}
+
 print_summary() {
   cat <<EOF
 
@@ -407,7 +523,18 @@ Hook id: $HOOK_ID
 Webhook URL: http://YOUR_VPS_IP:${WEBHOOK_PORT}/hooks/${HOOK_ID}
 Systemd service: $SERVICE_NAME
 Hooks file: $HOOKS_FILE
+Ping status file: $PING_STATUS_FILE
 EOF
+}
+
+launch_webhook_verifier() {
+  if [[ ! -t 0 || ! -t 1 ]]; then
+    log "skipping interactive webhook verification because this shell is non-interactive"
+    log "run ${VERIFY_WEBHOOK_SCRIPT} manually on the VPS when you are ready to confirm GitHub delivery"
+    return
+  fi
+
+  "${VERIFY_WEBHOOK_SCRIPT}"
 }
 
 main() {
@@ -419,11 +546,15 @@ main() {
   ensure_webhook_installed
   ensure_service_user_exists
   ensure_redeploy_script_executable
+  ensure_webhook_handler_script_executable
+  ensure_verify_webhook_script_executable
   ensure_hooks_file
   ensure_service_file
   ensure_systemd_service
   ensure_firewall
+  ensure_webhook_port_reachable
   print_summary
+  launch_webhook_verifier
 }
 
 main "$@"
