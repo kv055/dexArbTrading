@@ -8,6 +8,8 @@ services:
   postgres:
     logging: *default-logging
     image: postgres:17-alpine
+    ports:
+      - "5432:5432"
     environment:
       - POSTGRES_DB=dexarb
       - POSTGRES_USER=postgres
@@ -255,6 +257,70 @@ services:
   #         memory: 512M
   #         cpus: '0.5'
   #   restart: unless-stopped
+
+  totp-api:
+    logging: *default-logging
+    image: dexarbtrading/totp-api
+    build:
+      context: ./dexFiatController/services/totp-api
+      dockerfile: Dockerfile
+    environment:
+      - PORT=8080
+      - API_KEY=${TOTP_API_KEY:-}
+      - TOTP_SECRETS=${TOTP_SECRETS:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+    restart: unless-stopped
+
+  fiat-controller:
+    logging: *default-logging
+    image: dexarbtrading/fiat-controller
+    build:
+      context: ./dexFiatController
+      dockerfile: Dockerfile
+    depends_on:
+      totp-api:
+        condition: service_healthy
+    environment:
+      - HEADLESS=true
+      - CHROME_PATH=/usr/bin/chromium-browser
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - TOTP_API_URL=http://totp-api:8080
+      - TOTP_API_KEY=${TOTP_API_KEY:-}
+      - PAYPAL_EMAIL=${PAYPAL_EMAIL:-}
+      - PAYPAL_PASSWORD=${PAYPAL_PASSWORD:-}
+      - PAYPAL_TOTP_SECRET=${PAYPAL_TOTP_SECRET:-}
+      - WISE_EMAIL=${WISE_EMAIL:-}
+      - WISE_PASSWORD=${WISE_PASSWORD:-}
+      - WISE_TOTP_SECRET=${WISE_TOTP_SECRET:-}
+      - WISE_PHONE=${WISE_PHONE:-}
+      - REVOLUT_EMAIL=${REVOLUT_EMAIL:-}
+      - REVOLUT_PASSWORD=${REVOLUT_PASSWORD:-}
+      - REVOLUT_PHONE=${REVOLUT_PHONE:-}
+      - SMS_PROVIDER=${SMS_PROVIDER:-}
+      - SMS_ACCOUNT_SID=${SMS_ACCOUNT_SID:-}
+      - SMS_AUTH_TOKEN=${SMS_AUTH_TOKEN:-}
+      - SMS_PHONE_NUMBER=${SMS_PHONE_NUMBER:-}
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-}
+      - EMAIL_IMAP_HOST=${EMAIL_IMAP_HOST:-}
+      - EMAIL_IMAP_USER=${EMAIL_IMAP_USER:-}
+      - EMAIL_IMAP_PASS=${EMAIL_IMAP_PASS:-}
+      - POLL_INTERVAL=${POLL_INTERVAL:-30s}
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: '1.0'
+    restart: unless-stopped
 
 volumes:
   postgres-data:
