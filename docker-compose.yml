@@ -11,13 +11,13 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_DB=dexarb
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_ADMIN_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_ADMIN_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d dexarb"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -81,12 +81,16 @@ services:
         condition: service_healthy
       tor:
         condition: service_healthy
+    env_file:
+      - ./dexUnifiedApi/.env
     ports:
       - "5010:5010"
     environment:
-      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/dexarb?sslmode=disable
+      - POSTGRES_HOST=postgres
       - LISTEN_ADDR=:5010
       - TOR_PROXY_ADDR=tor:9050
+    volumes:
+      - ./dexUnifiedApi/.env:/app/.env:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5010/health"]
       interval: 30s
@@ -115,13 +119,17 @@ services:
         condition: service_healthy
       unified-api:
         condition: service_healthy
+    env_file:
+      - ./dexUnifiedApi/.env
     environment:
-      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/dexarb?sslmode=disable
+      - POSTGRES_HOST=postgres
       - BISQ_GRPC_HOST=bisq:9998
       - PRICE_PROVIDER=bisq_tor
       - SNAPSHOT_INTERVAL_MIN=1
       - SERVER_INTERNAL_URL=http://unified-api:5010
       - TOR_PROXY_URL=socks5h://tor:9050
+    volumes:
+      - ./dexUnifiedApi/.env:/app/.env:ro
     deploy:
       resources:
         limits:
@@ -138,8 +146,10 @@ services:
     depends_on:
       unified-api:
         condition: service_healthy
+    env_file:
+      - ./dexMonitor/.env
     environment:
-      - DATABASE_URL=postgres://postgres:postgres@postgres:5432/dexarb?sslmode=disable
+      - DATABASE_URL=postgres://dex_monitor:${POSTGRES_MONITOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - SNAPSHOT_INTERVAL_MIN=1
       - FRONTEND_DIR=/app/react-frontend/dist
       - MM_CONTROLLER_API_URL=http://mm-controller:5001
@@ -287,10 +297,15 @@ services:
     build:
       context: ./dexFiatController
       dockerfile: Dockerfile
+    env_file:
+      - ./dexFiatController/.env
     depends_on:
       totp-api:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     environment:
+      - DATABASE_URL=postgres://dex_fiat_controller:${POSTGRES_FIAT_CONTROLLER_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - HEADLESS=true
       - CHROME_PATH=/usr/bin/chromium-browser
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}

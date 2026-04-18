@@ -1,5 +1,10 @@
 .codex
 .vscode
+.env
+dexUnifiedApi/.env
+dexMonitor/.env
+dexMmController/.env
+dexFiatController/.env
 vps_deploy/config.env
 vps_deploy/config.yaml
 vps_deploy/hooks.json
