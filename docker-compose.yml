@@ -128,6 +128,7 @@ services:
       - BISQ_GRPC_HOST=bisq:9998
       - PRICE_PROVIDER=bisq_tor
       - SNAPSHOT_INTERVAL_MIN=1
+      - SNAPSHOT_HEALTH_MAX_AGE_SEC=180
       - SERVER_INTERNAL_URL=http://unified-api:5010
       - TOR_PROXY_URL=socks5h://tor:9050
     volumes:
