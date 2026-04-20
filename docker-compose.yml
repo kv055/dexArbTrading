@@ -241,8 +241,18 @@ services:
   #     - LND_MACAROON_PATH=/lnd/admin.macaroon
   #     - LND_TLS_CERT_PATH=/lnd/tls.cert
   #     - LND_WALLET_PASSWORD=${LND_WALLET_PASSWORD}
+  #     - LND_SEED_MNEMONIC_FILE=/run/secrets/lnd_seed_mnemonic
+  #     - LND_AEZEED_PASSPHRASE_FILE=/run/secrets/lnd_aezeed_passphrase
+  #     - LND_RECOVERY_WINDOW=250
+  #     # Alternative to aezeed:
+  #     # - LND_EXTENDED_MASTER_KEY_FILE=/run/secrets/lnd_extended_master_key
+  #     # - LND_EXTENDED_MASTER_KEY_BIRTHDAY_TIMESTAMP=1710000000
   #   volumes:
   #     - lnd-data:/lnd:ro
+  #     - ./secrets/lnd_seed_mnemonic:/run/secrets/lnd_seed_mnemonic:ro
+  #     - ./secrets/lnd_aezeed_passphrase:/run/secrets/lnd_aezeed_passphrase:ro
+  #     # Alternative to aezeed:
+  #     # - ./secrets/lnd_extended_master_key:/run/secrets/lnd_extended_master_key:ro
   #   deploy:
   #     resources:
   #       limits:
