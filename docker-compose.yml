@@ -33,7 +33,7 @@ services:
     logging: *default-logging
     image: dexarbtrading/tor
     build:
-      context: ./dexMonitor
+      context: ./dexUnifiedApi
       dockerfile: Dockerfile.tor
     cap_add:
       - NET_ADMIN
@@ -54,13 +54,20 @@ services:
     logging: *default-logging
     image: dexarbtrading/bisq
     build:
-      context: ./dexMonitor
+      context: ./dexUnifiedApi
       dockerfile: Dockerfile.bisq
     depends_on:
       tor:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      unified-api:
+        condition: service_healthy
     environment:
       - BISQ_VERSION=1.9.22
+      - BISQ_ACCOUNT_PROVIDER=bisq
+      - BISQ_SEED_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - BISQ_WALLET_PASSWORD=${BISQ_WALLET_PASSWORD:-}
     volumes:
       - bisq-data:/home/appuser/.local/share/Bisq
     deploy:
