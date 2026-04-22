@@ -65,11 +65,16 @@ services:
         condition: service_healthy
     environment:
       - BISQ_VERSION=1.9.22
-      - BISQ_ACCOUNT_PROVIDER=bisq
+      - BISQ_ACCOUNT_PROVIDER=Bisq
+      - BISQ_ACCOUNT_FILE_PATH=${BISQ_ACCOUNT_FILE_PATH:-}
+      - BISQ_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - BISQ_SEED_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - BISQ_WALLET_PASSWORD=${BISQ_WALLET_PASSWORD:-}
     volumes:
       - bisq-data:/home/appuser/.local/share/Bisq
+      # Optional bring-your-own Bisq account file:
+      # - ./dexUnifiedApi/bisqseed/secrets/UserPayload:/run/secrets/bisq_UserPayload:ro
+      # Set BISQ_ACCOUNT_FILE_PATH=/run/secrets/bisq_UserPayload when using that mount.
     deploy:
       resources:
         limits:
@@ -97,6 +102,9 @@ services:
       - POSTGRES_HOST=postgres
       - LISTEN_ADDR=:5010
       - TOR_PROXY_ADDR=tor:9050
+      - BISQ_GRPC_HOST=bisq:9998
+      - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
+      - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-60s}
     volumes:
       - ./dexUnifiedApi/.env:/app/.env:ro
     healthcheck:
@@ -213,6 +221,8 @@ services:
     depends_on:
       lnd:
         condition: service_healthy
+      unified-api:
+        condition: service_healthy
     environment:
       - DB_PATH=/app/mm-controller.db
       - API_ADDR=:5001
@@ -226,6 +236,7 @@ services:
       - LND_TLS_CERT_PATH=/lnd/tls.cert
       - LND_EXTENDED_MASTER_KEY_FILE=/run/secrets/lnd_extended_master_key
       - LND_EXTENDED_MASTER_KEY_BIRTHDAY_TIMESTAMP_FILE=/run/secrets/lnd_extended_master_key_birthday_timestamp
+      - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-60s}
       # Alternative to xprv/tprv:
       # - LND_SEED_MNEMONIC_FILE=/run/secrets/lnd_seed_mnemonic
       # - LND_AEZEED_PASSPHRASE_FILE=/run/secrets/lnd_aezeed_passphrase
@@ -288,7 +299,6 @@ services:
     environment:
       - PORT=8080
       - API_KEY=${TOTP_API_KEY:-}
-      - TOTP_SECRETS=${TOTP_SECRETS:-}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 10s
@@ -322,16 +332,6 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - TOTP_API_URL=http://totp-api:8080
       - TOTP_API_KEY=${TOTP_API_KEY:-}
-      - PAYPAL_EMAIL=${PAYPAL_EMAIL:-}
-      - PAYPAL_PASSWORD=${PAYPAL_PASSWORD:-}
-      - PAYPAL_TOTP_SECRET=${PAYPAL_TOTP_SECRET:-}
-      - WISE_EMAIL=${WISE_EMAIL:-}
-      - WISE_PASSWORD=${WISE_PASSWORD:-}
-      - WISE_TOTP_SECRET=${WISE_TOTP_SECRET:-}
-      - WISE_PHONE=${WISE_PHONE:-}
-      - REVOLUT_EMAIL=${REVOLUT_EMAIL:-}
-      - REVOLUT_PASSWORD=${REVOLUT_PASSWORD:-}
-      - REVOLUT_PHONE=${REVOLUT_PHONE:-}
       - SMS_PROVIDER=${SMS_PROVIDER:-}
       - SMS_ACCOUNT_SID=${SMS_ACCOUNT_SID:-}
       - SMS_AUTH_TOKEN=${SMS_AUTH_TOKEN:-}
