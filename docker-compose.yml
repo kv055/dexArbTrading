@@ -104,7 +104,7 @@ services:
       - TOR_PROXY_ADDR=tor:9050
       - BISQ_GRPC_HOST=bisq:9998
       - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
-      - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-60s}
+      - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
     volumes:
       - ./dexUnifiedApi/.env:/app/.env:ro
     healthcheck:
@@ -170,8 +170,10 @@ services:
       - DATABASE_URL=postgres://dex_monitor:${POSTGRES_MONITOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - SNAPSHOT_INTERVAL_MIN=1
       - FRONTEND_DIR=/app/react-frontend/dist
-      - MM_CONTROLLER_API_URL=http://mm-controller:5001
+      - MM_CONTROLLER_API_URL=http://host.docker.internal:5001
       - TOR_PROXY_ADDR=tor:9050
+      - BISQ_GRPC_HOST=bisq:9998
+      - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
       # - LND_HOST=https://localhost:8080
       # - LND_MACAROON_PATH=/lnd/admin.macaroon
       # - LND_TLS_CERT_PATH=/lnd/tls.cert
@@ -188,6 +190,8 @@ services:
         limits:
           memory: 128M
           cpus: '0.5'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   nginx:
@@ -236,7 +240,7 @@ services:
       - LND_TLS_CERT_PATH=/lnd/tls.cert
       - LND_EXTENDED_MASTER_KEY_FILE=/run/secrets/lnd_extended_master_key
       - LND_EXTENDED_MASTER_KEY_BIRTHDAY_TIMESTAMP_FILE=/run/secrets/lnd_extended_master_key_birthday_timestamp
-      - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-60s}
+      - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
       # Alternative to xprv/tprv:
       # - LND_SEED_MNEMONIC_FILE=/run/secrets/lnd_seed_mnemonic
       # - LND_AEZEED_PASSPHRASE_FILE=/run/secrets/lnd_aezeed_passphrase
