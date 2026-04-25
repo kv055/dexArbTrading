@@ -86,8 +86,8 @@ services:
     logging: *default-logging
     image: dexarbtrading/unified-api
     build:
-      context: ./dexUnifiedApi
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: dexUnifiedApi/Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
@@ -124,8 +124,8 @@ services:
     logging: *default-logging
     image: dexarbtrading/unified-snapshot
     build:
-      context: ./dexUnifiedApi
-      dockerfile: Dockerfile.snapshot
+      context: .
+      dockerfile: dexUnifiedApi/Dockerfile.snapshot
     depends_on:
       bisq:
         condition: service_started
@@ -194,8 +194,8 @@ services:
     logging: *default-logging
     image: dexarbtrading/app
     build:
-      context: ./dexMonitor
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: dexMonitor/Dockerfile
     depends_on:
       unified-api:
         condition: service_healthy
