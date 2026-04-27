@@ -1,63 +1,155 @@
 # dexArbTrading
 
-## VPS Auto-Deploy
+`dexArbTrading` is a Docker Compose workspace for monitoring Bitcoin DEX/CEX spreads and coordinating the supporting services for arbitrage experiments.
 
-This repo now includes a small webhook-based deploy flow in [`vps_deploy/`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy):
+The repository is organized as a parent deployment repo with several component repositories mounted as submodules:
 
-- [`vps_deploy/install.sh`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/install.sh) bootstraps the VPS, installs `webhook` when needed, renders the hook and `systemd` files from config, and safely reuses existing setup when it is already present.
-- [`vps_deploy/redeploy.sh`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/redeploy.sh) pulls the latest git changes and runs `docker compose up --build -d --remove-orphans`.
-- [`vps_deploy/hooks.json.example`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/hooks.json.example) is an `adnanh/webhook` hook definition that validates the GitHub signature and only triggers on the `light_setting` branch.
-- [`vps_deploy/dexarb-webhook.service`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/dexarb-webhook.service) is a `systemd` unit template for running `webhook` on your VPS.
-- [`vps_deploy/config.env.example`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/config.env.example) and [`vps_deploy/config.yaml.example`](/home/kili/Dokumente/Demo_Projects/dexArbTrading/vps_deploy/config.yaml.example) show the supported config format.
+- `dexUnifiedApi` owns the shared Postgres schema, live offer ingestion API, Bisq snapshot worker, payment notification receiver, and database backup sidecar.
+- `dexMonitor` serves the React dashboard plus monitor-facing REST and WebSocket APIs.
+- `dexMmController` tracks arbitrage transactions, wallet addresses, account health, premium offers, LND wallet access, and DEX offer execution.
+- `dexFiatController` automates fiat account monitoring and payment notification forwarding for PayPal, Wise, and Revolut.
+- `dexMmTradingLogicHummingBot` contains the Hummingbot strategy/controller code used for CEX-side BTC execution and withdrawal experiments.
+- `commons` is a shared Go module for price feeds, trade-cost calculation, hedge modelling, and Bitcoin fee analysis.
+- `vps_deploy` contains the VPS webhook deploy helper.
 
-### Setup
+## Architecture
 
-1. Clone this repo onto the VPS at the path you want to deploy from, for example `/opt/dexArbTrading`.
-2. Create a config file from either example:
+At runtime the stack centers on Postgres:
 
-```bash
-cp /opt/dexArbTrading/vps_deploy/config.env.example /opt/dexArbTrading/vps_deploy/config.env
+1. `dexUnifiedApi` bootstraps database roles and schema migrations.
+2. The Bisq and snapshot containers gather live and historical offers.
+3. `dexUnifiedApi` keeps live offer state in memory and exposes `/api/live_offers` plus `/ws/live_offers`.
+4. `dexMonitor` reads shared tables, serves the dashboard, enriches offer data with trade-cost and premium calculations, and proxies selected MM controller data.
+5. `dexMmController` consumes premium offer streams, records transactions, tracks account health, manages wallet-address state, and can take qualified DEX offers.
+6. `dexFiatController` reads connector credentials from the shared database, monitors fiat services, and forwards payment events to `dexUnifiedApi`.
+7. `postgres-backup` periodically creates compressed logical backups and uploads them with `rclone`.
+
+External dependencies include Tor, Bisq, LND, optional Hummingbot/OpenClaw services, CEX APIs, and fiat-provider web sessions.
+
+## Repository Layout
+
+```text
+.
++-- docker-compose.yml              # Full local/VPS runtime stack
++-- .env.example                    # Compose-level Postgres and backup settings
++-- commons/                        # Shared Go module for cost, price, hedge, and BTC fee logic
++-- dexUnifiedApi/                  # Schema, live API, snapshot worker, backup helper
++-- dexMonitor/                     # Dashboard server and React frontend
++-- dexMmController/                # Transaction, wallet, account-health, and offer execution service
++-- dexFiatController/              # Fiat connector automation and TOTP helper service
++-- dexMmTradingLogicHummingBot/    # Hummingbot strategy/controller code
++-- nginx/                          # Local reverse proxy for dashboard/API
++-- vps_deploy/                     # Webhook-based deployment scripts
 ```
 
-You can use YAML instead if you prefer:
+## Quick Start
+
+Initialize submodules if this is a fresh checkout:
 
 ```bash
-cp /opt/dexArbTrading/vps_deploy/config.yaml.example /opt/dexArbTrading/vps_deploy/config.yaml
+git submodule update --init --recursive
 ```
 
-3. Edit the config and set at least:
-
-- `REPO_DIR`
-- `REPO_FULL_NAME`
-- `WEBHOOK_SECRET`
-- `SERVICE_USER`
-- `BRANCH` if you do not want `light_setting`
-
-4. Run the installer:
+Create local env files from the examples:
 
 ```bash
-cd /opt/dexArbTrading
-./vps_deploy/install.sh
+cp .env.example .env
+cp dexUnifiedApi/.env.example dexUnifiedApi/.env
+cp dexMonitor/.env.example dexMonitor/.env
+cp dexMmController/.env.example dexMmController/.env
+cp dexFiatController/.env.example dexFiatController/.env
 ```
 
-Or point it at a specific config file:
+Fill in the generated files with real passwords, API keys, and wallet/account secrets. Then start the stack:
 
 ```bash
-cd /opt/dexArbTrading
-./vps_deploy/install.sh ./vps_deploy/config.yaml
+docker compose up --build -d
 ```
 
-5. In GitHub, add a repository webhook:
+Main local URLs:
 
-- Payload URL: `http://YOUR_VPS_IP:9000/hooks/dexarb-redeploy`
-- Content type: `application/json`
-- Secret: same value as `WEBHOOK_SECRET` in your config file
-- Event type: `Just the push event`
+- Dashboard and monitor API: `http://localhost:5000`
+- Unified API: `http://localhost:5010`
+- MM controller API: `http://localhost:5001`
 
-### Notes
+Useful health checks:
 
-- The deploy script refuses to run if the VPS checkout has local uncommitted changes.
-- Redeploys are serialized with a lock file so overlapping webhook calls do not launch multiple rebuilds at once.
-- The installer is idempotent: it checks the existing VPS state and only installs or rewrites pieces that are missing or out of date.
-- The installer currently auto-installs `webhook` only on apt-based systems. On other distros, install the binary yourself and point `WEBHOOK_BINARY` at it.
-- Set `OPEN_FIREWALL=true` in the config if you want the installer to open the webhook port with `ufw` or `firewalld`.
+```bash
+curl http://localhost:5000/health
+curl http://localhost:5010/health
+curl http://localhost:5001/health
+```
+
+## Configuration
+
+The root `.env` is consumed by Docker Compose and should contain stack-wide Postgres passwords plus backup configuration. Each service also has its own `.env.example` for service-local settings.
+
+Important root settings:
+
+- `POSTGRES_DB`
+- `POSTGRES_ADMIN_USER`
+- `POSTGRES_ADMIN_PASSWORD`
+- `POSTGRES_UNIFIED_API_PASSWORD`
+- `POSTGRES_MONITOR_PASSWORD`
+- `POSTGRES_MM_CONTROLLER_PASSWORD`
+- `POSTGRES_FIAT_CONTROLLER_PASSWORD`
+- `PG_BACKUP_*`
+- `RCLONE_CONFIG_*`
+
+The service-specific READMEs explain their own environment variables and runtime responsibilities.
+
+## Database And Backups
+
+`dexUnifiedApi` owns schema setup and application role creation. The Compose stack starts a `postgres-backup` sidecar that runs `pg_dump -Fc`, validates the archive with `pg_restore --list`, keeps local files in the `postgres-backups` volume, and optionally uploads with `rclone`.
+
+By default, backup upload targets Proton Drive:
+
+```env
+PG_BACKUP_ENABLED=true
+PG_BACKUP_UPLOAD=true
+PG_BACKUP_UPLOAD_REQUIRED=true
+PG_BACKUP_RCLONE_REMOTE=proton:postgres-backups/dexarb
+```
+
+Dropbox can be used by switching `PG_BACKUP_RCLONE_REMOTE` and providing the Dropbox rclone token. See `dexUnifiedApi/README.md` for detailed backup commands.
+
+## Deployment
+
+`vps_deploy` provides a small GitHub webhook flow for VPS deployments:
+
+- `install.sh` renders the webhook and systemd configuration from `config.env` or `config.yaml`.
+- `webhook-handler.sh` validates `ping` and `push` events.
+- `redeploy.sh` refuses dirty checkouts, fast-forwards the configured branch, updates submodules, and runs `docker compose up --build -d --remove-orphans`.
+
+The default hook URL is:
+
+```text
+http://YOUR_VPS_IP:9000/hooks/dexarb-redeploy
+```
+
+See `vps_deploy/README.md` for the complete setup procedure.
+
+## Development
+
+Run Go tests from the relevant module:
+
+```bash
+go test ./...
+```
+
+For the React dashboard:
+
+```bash
+cd dexMonitor/react-frontend
+npm install
+npm run dev
+```
+
+For full-stack verification, prefer Compose because several services expect the shared network, Postgres roles, and generated runtime credentials.
+
+## Security Notes
+
+- Do not commit `.env` files or files under service `secrets/` directories.
+- Fiat account passwords, TOTP secrets, passkeys, API keys, and Bisq seeds should be stored through the shared account/secret storage flow rather than hard-coded in service env files.
+- The MM controller's LND restore workflow requires an aezeed mnemonic or extended master key. A single raw private key is not enough to initialize LND.
+- The VPS deploy script intentionally refuses dirty worktrees before rebuilding containers.

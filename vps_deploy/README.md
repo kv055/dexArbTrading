@@ -21,6 +21,7 @@ This avoids a custom deploy app and keeps the VPS logic small and easy to inspec
 - [`webhook-handler.sh`](./webhook-handler.sh) is the webhook entrypoint. It records GitHub `ping` deliveries and forwards matching `push` events to deploy logic.
 - [`verify-webhook.sh`](./verify-webhook.sh) waits for GitHub's setup `ping` so you can confirm the webhook path works end to end.
 - [`redeploy.sh`](./redeploy.sh) performs the actual deploy.
+- [`upload-envs.sh`](./upload-envs.sh) copies local environment files to the VPS when you want to refresh service configuration without committing secrets.
 - [`hooks.json.example`](./hooks.json.example) shows the generated `webhook` hook shape.
 - [`dexarb-webhook.service`](./dexarb-webhook.service) is a static example of the `systemd` service layout.
 - [`config.env.example`](./config.env.example) and [`config.yaml.example`](./config.yaml.example) show the supported config inputs for the installer.
@@ -151,6 +152,20 @@ In GitHub create a webhook with:
 If you changed `WEBHOOK_PORT` or `HOOK_ID`, use those values instead.
 
 GitHub does not reserve or require port `9000` for webhooks. It will send the webhook to whatever full URL you configure in the repository webhook settings, so the port must match your VPS listener and firewall rules.
+
+## Environment File Uploads
+
+Runtime `.env` files are intentionally not committed. If you maintain them locally and want to push them to the VPS, use [`upload-envs.sh`](./upload-envs.sh).
+
+The helper is designed for the repo's current env layout:
+
+- root `.env`
+- `dexUnifiedApi/.env`
+- `dexMonitor/.env`
+- `dexMmController/.env`
+- `dexFiatController/.env`
+
+Review the script before running it on a new machine so the target host, target repo path, and SSH user match your VPS setup.
 
 ## Notes
 

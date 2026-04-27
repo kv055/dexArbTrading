@@ -390,6 +390,20 @@ services:
           cpus: '1.0'
     restart: unless-stopped
 
+  docs:
+    logging: *default-logging
+    image: dexarbtrading/docs
+    build:
+      context: .
+      dockerfile: docs/Dockerfile.docs
+    profiles:
+      - docs
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/docs
+    command: ["serve", "-f", "docs/mkdocs.yml", "--dev-addr=0.0.0.0:8000"]
+
 volumes:
   postgres-data:
   postgres-backups:

@@ -8,3 +8,4 @@ dexFiatController/.env
 vps_deploy/config.env
 vps_deploy/config.yaml
 vps_deploy/hooks.json
+site/

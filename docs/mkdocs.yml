@@ -1,0 +1,13 @@
+site_name: dexArbTrading Docs
+docs_dir: .
+site_dir: ../site
+
+plugins:
+  - search
+  - monorepo
+
+nav:
+  - Home: index.md
+  - dexMonitor: '!include ../dexMonitor/mkdocs.yml'
+  - dexUnifiedApi: '!include ../dexUnifiedApi/mkdocs.yml'
+  - dexMmController: '!include ../dexMmController/mkdocs.yml'
