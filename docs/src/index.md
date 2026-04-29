@@ -23,5 +23,5 @@ docker compose --profile docs up docs
 Validate the wiki build through Docker:
 
 ```bash
-docker compose run --rm docs build -f docs/mkdocs.yml --strict
+docker compose run --rm docs build -f /workspace/docs/mkdocs.yml --strict
 ```

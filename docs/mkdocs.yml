@@ -1,6 +1,6 @@
 site_name: dexArbTrading Docs
-docs_dir: .
-site_dir: ../site
+docs_dir: src
+site_dir: /tmp/mkdocs-site
 
 plugins:
   - search

@@ -401,8 +401,8 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - .:/docs
-    command: ["serve", "-f", "docs/mkdocs.yml", "--dev-addr=0.0.0.0:8000"]
+      - .:/workspace:ro
+    command: ["serve", "-f", "/workspace/docs/mkdocs.yml", "--dev-addr=0.0.0.0:8000"]
 
 volumes:
   postgres-data:
