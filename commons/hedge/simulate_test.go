@@ -23,6 +23,9 @@ func TestSimulatePositionSizesNotionalAndMargin(t *testing.T) {
 	cfg := simulateBaseConfig()
 	sim := SimulatePosition(cfg, 0.1, 50000)
 
+	if sim.Side != "short" {
+		t.Fatalf("side = %q, want short", sim.Side)
+	}
 	assertClose(t, sim.HedgeRatio, 1.0)
 	assertClose(t, sim.LeverageUsed, 10)
 	assertClose(t, sim.HedgeNotionalEUR, 5000)        // 0.1 BTC * 50000 * 1.0
@@ -30,6 +33,16 @@ func TestSimulatePositionSizesNotionalAndMargin(t *testing.T) {
 	assertClose(t, sim.StressLossEUR, 500)            // 5000 * 0.10
 	assertClose(t, sim.MaintenanceRequirementEUR, 50) // 5000 * 0.01
 	assertClose(t, sim.BTCPriceEUR, 50000)
+}
+
+func TestSimulatePositionWithSideKeepsLongSide(t *testing.T) {
+	cfg := simulateBaseConfig()
+	sim := SimulatePositionWithSide(cfg, 0.1, 50000, "long")
+
+	if sim.Side != "long" {
+		t.Fatalf("side = %q, want long", sim.Side)
+	}
+	assertClose(t, sim.HedgeNotionalEUR, 5000)
 }
 
 func TestSimulatePositionRecommendedCollateralSurvivesStress(t *testing.T) {

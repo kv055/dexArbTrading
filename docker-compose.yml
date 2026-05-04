@@ -159,8 +159,8 @@ services:
     logging: *default-logging
     image: dexarbtrading/postgres-backup
     build:
-      context: ./dexUnifiedApi
-      dockerfile: Dockerfile.backup
+      context: .
+      dockerfile: dexUnifiedApi/Dockerfile.backup
     depends_on:
       postgres:
         condition: service_healthy

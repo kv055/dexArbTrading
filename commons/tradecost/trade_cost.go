@@ -672,7 +672,7 @@ type TradeCostEstimator struct {
 	btcPredictor       *bitcoin.BitcoinFeePredictor
 	cexProfile         CexWithdrawalProfile
 	networkFeeOverride func(WithdrawalMethod, float64) networkFeeDetails
-	hedgeCostOverride  func(btcAmount float64, refPriceEUR float64, transferMinutes float64) hedgeCostDetails
+	hedgeCostOverride  func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails
 }
 
 type cachedHedgeInput struct {
@@ -781,7 +781,7 @@ func NewFixedEstimatorForTesting(exchange, dexExchange string, takerFeeFrac, wit
 				},
 			}
 		},
-		hedgeCostOverride: func(btcAmount float64, refPriceEUR float64, transferMinutes float64) hedgeCostDetails {
+		hedgeCostOverride: func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails {
 			return hedgeCostDetails{}
 		},
 	}
@@ -789,10 +789,11 @@ func NewFixedEstimatorForTesting(exchange, dexExchange string, takerFeeFrac, wit
 
 func NewFixedEstimatorWithHedgeForTesting(exchange, dexExchange string, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC, hedgeFeeBTC float64) *TradeCostEstimator {
 	est := NewFixedEstimatorForTesting(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
-	est.hedgeCostOverride = func(btcAmount float64, refPriceEUR float64, transferMinutes float64) hedgeCostDetails {
+	est.hedgeCostOverride = func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails {
 		return hedgeCostDetails{
 			feeBTC:          hedgeFeeBTC,
 			feePct:          hedgeFeeBTC / btcAmount * 100,
+			side:            side,
 			venue:           "coinbase_futures",
 			instrument:      "BTC-PERP",
 			transferMinutes: transferMinutes,
@@ -803,12 +804,14 @@ func NewFixedEstimatorWithHedgeForTesting(exchange, dexExchange string, takerFee
 
 func NewFixedEstimatorWithHedgeRatesForTesting(exchange, dexExchange string, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC float64, openRate, closeRate, fundingRate float64) *TradeCostEstimator {
 	est := NewFixedEstimatorForTesting(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
-	est.hedgeCostOverride = func(btcAmount float64, refPriceEUR float64, transferMinutes float64) hedgeCostDetails {
+	est.hedgeCostOverride = func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails {
+		fundingCostRate := nonNegativeFundingCostRate(fundingRate, side)
 		return hedgeCostDetails{
-			feeBTC:          btcAmount * (openRate + closeRate + fundingRate),
+			feeBTC:          btcAmount * (openRate + closeRate + fundingCostRate),
 			openFeeBTC:      btcAmount * openRate,
 			closeFeeBTC:     btcAmount * closeRate,
-			fundingFeeBTC:   btcAmount * fundingRate,
+			fundingFeeBTC:   btcAmount * fundingCostRate,
+			side:            side,
 			venue:           "kraken_futures",
 			instrument:      "PI_XBTUSD",
 			transferMinutes: transferMinutes,
@@ -855,7 +858,11 @@ func (e *TradeCostEstimator) DexFeeBTC(btcAmount float64, dexExchange string) fl
 }
 
 func (e *TradeCostEstimator) EstimateHedgeBreakdown(btcAmount float64, refPriceEUR float64, transferMinutes float64, coupledHedge bool) HedgeBreakdown {
-	hedgeCost := e.estimateBestHedgeCost(btcAmount, refPriceEUR, transferMinutes, coupledHedge)
+	return e.EstimateHedgeBreakdownForDirection(btcAmount, refPriceEUR, transferMinutes, coupledHedge, "buy")
+}
+
+func (e *TradeCostEstimator) EstimateHedgeBreakdownForDirection(btcAmount float64, refPriceEUR float64, transferMinutes float64, coupledHedge bool, direction string) HedgeBreakdown {
+	hedgeCost := e.estimateBestHedgeCost(btcAmount, refPriceEUR, transferMinutes, coupledHedge, hedgeSideForDirection(direction))
 	pct := func(btc float64) float64 {
 		if btcAmount <= 0 || btc == 0 {
 			return 0
@@ -871,6 +878,7 @@ func (e *TradeCostEstimator) EstimateHedgeBreakdown(btcAmount float64, refPriceE
 		FundingFeeBTC:   round8(hedgeCost.fundingFeeBTC),
 		FeeSumPct:       pct(hedgeCost.feeBTC),
 		FeeSumBTC:       round8(hedgeCost.feeBTC),
+		Side:            hedgeCost.side,
 		Venue:           hedgeCost.venue,
 		Instrument:      hedgeCost.instrument,
 		TransferMinutes: int(math.Round(hedgeCost.transferMinutes)),
@@ -941,10 +949,26 @@ type hedgeCostDetails struct {
 	closeFeePct     float64
 	fundingFeeBTC   float64
 	fundingFeePct   float64
+	side            string
 	venue           string
 	instrument      string
 	transferMinutes float64
 	position        *HedgePositionDetail
+}
+
+func hedgeSideForDirection(direction string) string {
+	if direction == "sell" {
+		return "long"
+	}
+	return "short"
+}
+
+func nonNegativeFundingCostRate(fundingRate float64, side string) float64 {
+	costRate := fundingRate
+	if side == "long" {
+		costRate = -fundingRate
+	}
+	return math.Max(costRate, 0)
 }
 
 func resolveRequiredConfirmations(direction string, requested int) int {
@@ -1130,19 +1154,21 @@ type HedgeBreakdown struct {
 	FundingFeeBTC   float64              `json:"funding_fee_btc"`  // perp funding cost over transfer window in BTC
 	FeeSumPct       float64              `json:"fee_sum_pct"`      // perp open+close+funding as % of trade
 	FeeSumBTC       float64              `json:"fee_sum_btc"`      // perp open+close+funding in BTC
+	Side            string               `json:"side"`             // "short" for bid-side hedges, "long" for ask-side hedges
 	Venue           string               `json:"venue"`            // chosen hedge venue
 	Instrument      string               `json:"instrument"`       // chosen perp instrument
 	TransferMinutes int                  `json:"transfer_minutes"` // transfer-time input used for hedge costing
-	Position        *HedgePositionDetail `json:"position"`         // position sizing simulation; nil when unavailable (e.g. ask side or missing ref price)
+	Position        *HedgePositionDetail `json:"position"`         // position sizing simulation; nil when unavailable (e.g. missing ref price)
 }
 
-// HedgePositionDetail is the per-offer simulation of how the short perp hedge
+// HedgePositionDetail is the per-offer simulation of how the perp hedge
 // would be executed: hedge notional, leverage, collateral, and liquidation
 // headroom. All EUR amounts are rounded to 2 decimals; rates are unrounded.
 type HedgePositionDetail struct {
+	Side                         string  `json:"side"`                             // "short" or "long"
 	HedgeRatio                   float64 `json:"hedge_ratio"`                      // fraction of spot transfer that is hedged (1.0 = full)
 	LeverageUsed                 float64 `json:"leverage_used"`                    // leverage assumed for sizing (venue max)
-	HedgeNotionalEUR             float64 `json:"hedge_notional_eur"`               // short perp notional in EUR
+	HedgeNotionalEUR             float64 `json:"hedge_notional_eur"`               // perp notional in EUR
 	InitialMarginEUR             float64 `json:"initial_margin_eur"`               // required initial margin = notional / leverage
 	RecommendedCollateralEUR     float64 `json:"recommended_collateral_eur"`       // collateral to post so the position survives the stress move
 	StressMovePct                float64 `json:"stress_move_pct"`                  // adverse BTC move assumed in the stress scenario (e.g. 0.10)
@@ -1226,14 +1252,11 @@ func (e *TradeCostEstimator) breakdownForMethodWithTier(btcAmount float64, refPr
 	takerBTC := btcAmount * takerFrac
 	dexBTC := btcAmount * dexFeeFrac
 	networkFeeBTC := netFee.feeBTC * float64(numNetworkTxs)
-	hedgeCost := hedgeCostDetails{}
-	if isBid {
-		transferMinutes := 0.0
-		if netFee.detail != nil && netFee.detail.SelectedFullConfirmationMinutes > 0 {
-			transferMinutes = float64(netFee.detail.SelectedFullConfirmationMinutes * numNetworkTxs)
-		}
-		hedgeCost = e.estimateBestHedgeCost(btcAmount, refPriceEUR, transferMinutes, coupledHedge)
+	transferMinutes := 0.0
+	if netFee.detail != nil && netFee.detail.SelectedFullConfirmationMinutes > 0 {
+		transferMinutes = float64(netFee.detail.SelectedFullConfirmationMinutes * numNetworkTxs)
 	}
+	hedgeCost := e.estimateBestHedgeCost(btcAmount, refPriceEUR, transferMinutes, coupledHedge, hedgeSideForDirection(direction))
 
 	totalBTC := takerBTC + withdrawalFee + networkFeeBTC + hedgeCost.feeBTC + dexBTC
 	totalPct := totalBTC / btcAmount * 100
@@ -1266,6 +1289,7 @@ func (e *TradeCostEstimator) breakdownForMethodWithTier(btcAmount float64, refPr
 			FundingFeeBTC:   round8(hedgeCost.fundingFeeBTC),
 			FeeSumPct:       pct(hedgeCost.feeBTC),
 			FeeSumBTC:       round8(hedgeCost.feeBTC),
+			Side:            hedgeCost.side,
 			Venue:           hedgeCost.venue,
 			Instrument:      hedgeCost.instrument,
 			TransferMinutes: int(math.Round(hedgeCost.transferMinutes)),
@@ -1285,9 +1309,9 @@ var cexToHedgeVenue = map[string]hedge.Venue{
 	"coinbase": hedge.VenueCoinbaseFutures,
 }
 
-func (e *TradeCostEstimator) estimateBestHedgeCost(btcAmount float64, refPriceEUR float64, transferMinutes float64, coupledHedge bool) hedgeCostDetails {
+func (e *TradeCostEstimator) estimateBestHedgeCost(btcAmount float64, refPriceEUR float64, transferMinutes float64, coupledHedge bool, side string) hedgeCostDetails {
 	if e.hedgeCostOverride != nil {
-		return e.hedgeCostOverride(btcAmount, refPriceEUR, transferMinutes)
+		return e.hedgeCostOverride(btcAmount, refPriceEUR, transferMinutes, side)
 	}
 	if btcAmount <= 0 {
 		return hedgeCostDetails{}
@@ -1317,6 +1341,7 @@ func (e *TradeCostEstimator) estimateBestHedgeCost(btcAmount float64, refPriceEU
 		cfg := hedge.Config{TransferMinutes: transferMinutes}
 		cfg = hedge.ApplyVenueProfile(cfg, profile)
 		cfg = hedge.ApplyLivePerpInputs(cfg, inputs)
+		cfg.FundingCostRate = nonNegativeFundingCostRate(cfg.FundingCostRate, side)
 		openFeeBTC := btcAmount * cfg.PerpOpenFeeRate
 		closeFeeBTC := btcAmount * cfg.PerpCloseFeeRate
 		fundingFeeBTC := btcAmount * cfg.FundingCostRate
@@ -1325,8 +1350,9 @@ func (e *TradeCostEstimator) estimateBestHedgeCost(btcAmount float64, refPriceEU
 
 		var position *HedgePositionDetail
 		if refPriceEUR > 0 {
-			sim := hedge.SimulatePosition(cfg, btcAmount, refPriceEUR)
+			sim := hedge.SimulatePositionWithSide(cfg, btcAmount, refPriceEUR, side)
 			position = &HedgePositionDetail{
+				Side:                         sim.Side,
 				HedgeRatio:                   round4(sim.HedgeRatio),
 				LeverageUsed:                 round4(sim.LeverageUsed),
 				HedgeNotionalEUR:             round2(sim.HedgeNotionalEUR),
@@ -1350,6 +1376,7 @@ func (e *TradeCostEstimator) estimateBestHedgeCost(btcAmount float64, refPriceEU
 			closeFeePct:     cfg.PerpCloseFeeRate * 100,
 			fundingFeeBTC:   fundingFeeBTC,
 			fundingFeePct:   cfg.FundingCostRate * 100,
+			side:            side,
 			venue:           inputs.Venue,
 			instrument:      inputs.Instrument,
 			transferMinutes: transferMinutes,

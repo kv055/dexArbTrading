@@ -41,7 +41,7 @@ func fixedCostEstimator(exchange, dexExchange string, takerFeeFrac, withdrawalFe
 				},
 			}
 		},
-		hedgeCostOverride: func(btcAmount float64, refPriceEUR float64, transferMinutes float64) hedgeCostDetails {
+		hedgeCostOverride: func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails {
 			return hedgeCostDetails{}
 		},
 	}
@@ -49,10 +49,11 @@ func fixedCostEstimator(exchange, dexExchange string, takerFeeFrac, withdrawalFe
 
 func fixedCostEstimatorWithHedge(exchange, dexExchange string, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC, hedgeFeeBTC float64) *TradeCostEstimator {
 	est := fixedCostEstimator(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
-	est.hedgeCostOverride = func(btcAmount float64, refPriceEUR float64, transferMinutes float64) hedgeCostDetails {
+	est.hedgeCostOverride = func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails {
 		return hedgeCostDetails{
 			feeBTC:          hedgeFeeBTC,
 			feePct:          hedgeFeeBTC / btcAmount * 100,
+			side:            side,
 			venue:           "coinbase_futures",
 			instrument:      "BTC-PERP",
 			transferMinutes: transferMinutes,
@@ -107,6 +108,9 @@ func TestTradeCostEstimatorBreakdownIncludesHedgeCostOnBidSide(t *testing.T) {
 
 	assertFloat(t, bd.Hedge.FeeSumBTC, 0.0002)
 	assertFloat(t, bd.Hedge.FeeSumPct, 0.2)
+	if bd.Hedge.Side != "short" {
+		t.Fatalf("hedge side = %q, want short", bd.Hedge.Side)
+	}
 	assertFloat(t, bd.TotalCostBTC, 0.0008)
 	assertFloat(t, bd.TotalCostPct, 0.8)
 	if bd.Hedge.Venue != "coinbase_futures" {
@@ -117,13 +121,35 @@ func TestTradeCostEstimatorBreakdownIncludesHedgeCostOnBidSide(t *testing.T) {
 	}
 }
 
-func TestTradeCostEstimatorDoesNotIncludeHedgeCostOnAskSide(t *testing.T) {
+func TestTradeCostEstimatorBreakdownIncludesLongHedgeCostOnAskSide(t *testing.T) {
 	est := fixedCostEstimatorWithHedge("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 
 	bd := est.Breakdown(0.1, "bisq", "sell")
 
-	assertFloat(t, bd.Hedge.FeeSumBTC, 0)
-	assertFloat(t, bd.Hedge.FeeSumPct, 0)
+	assertFloat(t, bd.WithdrawalFeeBTC, 0)
+	assertFloat(t, bd.NetworkFeeBTC, 0.00005)
+	assertFloat(t, bd.Hedge.FeeSumBTC, 0.0002)
+	assertFloat(t, bd.Hedge.FeeSumPct, 0.2)
+	if bd.Hedge.Side != "long" {
+		t.Fatalf("hedge side = %q, want long", bd.Hedge.Side)
+	}
+	assertFloat(t, bd.TotalCostBTC, 0.0006)
+	assertFloat(t, bd.TotalCostPct, 0.6)
+}
+
+func TestTradeCostEstimatorAskSideLongHedgeClampsFundingCredit(t *testing.T) {
+	est := NewFixedEstimatorWithHedgeRatesForTesting("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.001, 0.002, 0.003)
+
+	bid := est.Breakdown(0.1, "bisq", "buy")
+	ask := est.Breakdown(0.1, "bisq", "sell")
+
+	assertFloat(t, bid.Hedge.FundingFeeBTC, 0.0003)
+	assertFloat(t, bid.Hedge.FeeSumBTC, 0.0006)
+	assertFloat(t, ask.Hedge.FundingFeeBTC, 0)
+	assertFloat(t, ask.Hedge.FeeSumBTC, 0.0003)
+	if ask.Hedge.Side != "long" {
+		t.Fatalf("hedge side = %q, want long", ask.Hedge.Side)
+	}
 }
 
 func TestTradeCostEstimatorBreakdownRoundsBTCAndPercentFields(t *testing.T) {

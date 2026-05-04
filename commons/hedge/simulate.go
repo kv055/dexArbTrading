@@ -1,11 +1,12 @@
 package hedge
 
-// PositionSimulation describes how a short perp hedge would be sized for a
+// PositionSimulation describes how a perp hedge would be sized for a
 // fixed BTC transfer amount. Unlike Optimize, this helper does not search for
 // the maximum feasible transfer under a capital budget — the trade size is
 // already known, so it only reports the position parameters the trader would
 // need to execute.
 type PositionSimulation struct {
+	Side                         string
 	HedgeRatio                   float64
 	LeverageUsed                 float64
 	HedgeNotionalEUR             float64
@@ -29,8 +30,19 @@ type PositionSimulation struct {
 // StressMovePct, TargetHedgeRatio, and SafetyBufferEUR fall back to the
 // optimizer config defaults when unset.
 func SimulatePosition(cfg Config, btcAmount, btcPriceEUR float64) PositionSimulation {
+	return SimulatePositionWithSide(cfg, btcAmount, btcPriceEUR, "short")
+}
+
+// SimulatePositionWithSide computes the perp hedge sizing for a fixed BTC
+// transfer amount. side should be "short" for bid-side hedges or "long" for
+// ask-side hedges. The stress magnitude is symmetric; side is retained so API
+// consumers can describe the hedge correctly.
+func SimulatePositionWithSide(cfg Config, btcAmount, btcPriceEUR float64, side string) PositionSimulation {
 	if btcAmount <= 0 || btcPriceEUR <= 0 {
 		return PositionSimulation{}
+	}
+	if side != "long" {
+		side = "short"
 	}
 
 	cfg = applyDefaultOptimizerConfig(cfg)
@@ -63,7 +75,7 @@ func SimulatePosition(cfg Config, btcAmount, btcPriceEUR float64) PositionSimula
 	equityAfterStress := recommendedCollateral - stressLoss - openFee - closeFee - funding
 	freeCollateralAfterStress := equityAfterStress - maintenanceReq
 
-	// Liquidation threshold for a short at leverage L with maintenance m: the
+	// Liquidation threshold magnitude at leverage L with maintenance m: the
 	// position is liquidated when the adverse move consumes the margin down to
 	// the maintenance requirement, i.e. at (1/L − m).
 	liquidationMove := 0.0
@@ -75,6 +87,7 @@ func SimulatePosition(cfg Config, btcAmount, btcPriceEUR float64) PositionSimula
 	}
 
 	return PositionSimulation{
+		Side:                         side,
 		HedgeRatio:                   hedgeRatio,
 		LeverageUsed:                 leverage,
 		HedgeNotionalEUR:             notionalEUR,
