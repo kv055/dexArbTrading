@@ -317,6 +317,10 @@ services:
       - --bitcoin.active
       - --bitcoin.mainnet
       - --bitcoin.node=neutrino
+      - --neutrino.addpeer=btcd-mainnet.lightning.computer
+      - --neutrino.addpeer=neutrino.noderunner.wtf
+      - --neutrino.addpeer=node.eldamar.icu
+      - --neutrino.addpeer=btcd.lnolymp.us
       - --fee.url=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json
       - --restlisten=0.0.0.0:8080
       - --rpclisten=0.0.0.0:10009
