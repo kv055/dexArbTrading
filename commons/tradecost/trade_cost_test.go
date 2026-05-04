@@ -121,6 +121,28 @@ func TestTradeCostEstimatorBreakdownIncludesHedgeCostOnBidSide(t *testing.T) {
 	}
 }
 
+func TestAbortCostFromBreakdownIncludesBidUnwindComponents(t *testing.T) {
+	est := fixedCostEstimatorWithHedge("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
+
+	bd := est.Breakdown(0.1, "bisq", "buy")
+	abort := est.AbortCostFromBreakdown(bd)
+
+	assertFloat(t, abort.BTCAmount, 0.1)
+	assertFloat(t, abort.CexBuyTaker.BTC, 0.00025)
+	assertFloat(t, abort.CexSellTaker.BTC, 0.00025)
+	assertFloat(t, abort.Withdrawal.BTC, 0.00015)
+	assertFloat(t, abort.Network.BTC, 0.0001)
+	assertFloat(t, abort.Hedge.FeeSumBTC, 0.0002)
+	assertFloat(t, abort.Total.BTC, 0.00095)
+	assertFloat(t, abort.Total.Pct, 0.95)
+	if abort.TradeDirection != "bid" {
+		t.Fatalf("trade direction = %q, want bid", abort.TradeDirection)
+	}
+	if abort.NumNetworkTxs != 2 {
+		t.Fatalf("network txs = %d, want 2", abort.NumNetworkTxs)
+	}
+}
+
 func TestTradeCostEstimatorBreakdownIncludesLongHedgeCostOnAskSide(t *testing.T) {
 	est := fixedCostEstimatorWithHedge("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 
@@ -137,6 +159,27 @@ func TestTradeCostEstimatorBreakdownIncludesLongHedgeCostOnAskSide(t *testing.T)
 	assertFloat(t, bd.TotalCostPct, 0.6)
 }
 
+func TestAbortCostFromBreakdownAskSideOnlyIncludesTwoBTCTransfers(t *testing.T) {
+	est := fixedCostEstimatorWithHedge("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
+
+	bd := est.Breakdown(0.1, "bisq", "sell")
+	abort := est.AbortCostFromBreakdown(bd)
+
+	assertFloat(t, abort.CexBuyTaker.BTC, 0)
+	assertFloat(t, abort.CexSellTaker.BTC, 0)
+	assertFloat(t, abort.Withdrawal.BTC, 0)
+	assertFloat(t, abort.Hedge.FeeSumBTC, 0)
+	assertFloat(t, abort.Network.BTC, 0.0001)
+	assertFloat(t, abort.Total.BTC, 0.0001)
+	assertFloat(t, abort.Total.Pct, 0.1)
+	if abort.TradeDirection != "ask" {
+		t.Fatalf("trade direction = %q, want ask", abort.TradeDirection)
+	}
+	if abort.NumNetworkTxs != 2 {
+		t.Fatalf("network txs = %d, want 2", abort.NumNetworkTxs)
+	}
+}
+
 func TestTradeCostEstimatorAskSideLongHedgeClampsFundingCredit(t *testing.T) {
 	est := NewFixedEstimatorWithHedgeRatesForTesting("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.001, 0.002, 0.003)
 
@@ -150,6 +193,21 @@ func TestTradeCostEstimatorAskSideLongHedgeClampsFundingCredit(t *testing.T) {
 	if ask.Hedge.Side != "long" {
 		t.Fatalf("hedge side = %q, want long", ask.Hedge.Side)
 	}
+}
+
+func TestAbortCostFromBreakdownRecalculatesPercentForCappedSize(t *testing.T) {
+	est := fixedCostEstimatorWithHedge("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
+
+	abort := est.AbortCostFromBreakdown(est.Breakdown(0.05, "bisq", "buy"))
+
+	assertFloat(t, abort.BTCAmount, 0.05)
+	assertFloat(t, abort.CexBuyTaker.BTC, 0.000125)
+	assertFloat(t, abort.CexSellTaker.BTC, 0.000125)
+	assertFloat(t, abort.Withdrawal.BTC, 0.00015)
+	assertFloat(t, abort.Network.BTC, 0.0001)
+	assertFloat(t, abort.Hedge.FeeSumBTC, 0.0002)
+	assertFloat(t, abort.Total.BTC, 0.0007)
+	assertFloat(t, abort.Total.Pct, 1.4)
 }
 
 func TestTradeCostEstimatorBreakdownRoundsBTCAndPercentFields(t *testing.T) {

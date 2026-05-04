@@ -1145,6 +1145,23 @@ type CostBreakdown struct {
 	TotalCostBTC         float64              `json:"total_cost_btc"`         // sum of all components in BTC
 }
 
+type AbortCostComponent struct {
+	Pct float64 `json:"pct"`
+	BTC float64 `json:"btc"`
+}
+
+type AbortCostBreakdown struct {
+	BTCAmount      float64            `json:"btc_amount"`
+	TradeDirection string             `json:"trade_direction"`
+	NumNetworkTxs  int                `json:"num_network_txs"`
+	CexBuyTaker    AbortCostComponent `json:"cex_buy_taker"`
+	CexSellTaker   AbortCostComponent `json:"cex_sell_taker"`
+	Withdrawal     AbortCostComponent `json:"withdrawal"`
+	Network        AbortCostComponent `json:"network"`
+	Hedge          HedgeBreakdown     `json:"hedge"`
+	Total          AbortCostComponent `json:"total"`
+}
+
 type HedgeBreakdown struct {
 	OpenFeePct      float64              `json:"open_fee_pct"`     // perp opening fee as % of trade
 	OpenFeeBTC      float64              `json:"open_fee_btc"`     // perp opening fee in BTC
@@ -1302,6 +1319,54 @@ func (e *TradeCostEstimator) breakdownForMethodWithTier(btcAmount float64, refPr
 	}
 }
 
+func AbortCostFromBreakdown(bd CostBreakdown) AbortCostBreakdown {
+	if bd.BTCAmount <= 0 {
+		return AbortCostBreakdown{}
+	}
+
+	pct := func(btc float64) float64 {
+		if btc == 0 {
+			return 0
+		}
+		return round4(btc / bd.BTCAmount * 100)
+	}
+
+	isAsk := bd.TradeDirection == "ask"
+	networkBTC := bd.NetworkFeeBTC
+	if isAsk {
+		// Normal ask-side trade cost has one BTC transfer; abort risk models two.
+		networkBTC = bd.NetworkFeeBTC * 2
+	}
+
+	abort := AbortCostBreakdown{
+		BTCAmount:      bd.BTCAmount,
+		TradeDirection: bd.TradeDirection,
+		NumNetworkTxs:  2,
+		Network: AbortCostComponent{
+			Pct: pct(networkBTC),
+			BTC: round8(networkBTC),
+		},
+	}
+
+	if !isAsk {
+		abort.CexBuyTaker = AbortCostComponent{Pct: bd.CexTakerFeePct, BTC: bd.CexTakerFeeBTC}
+		abort.CexSellTaker = AbortCostComponent{Pct: bd.CexTakerFeePct, BTC: bd.CexTakerFeeBTC}
+		abort.Withdrawal = AbortCostComponent{Pct: bd.WithdrawalFeePct, BTC: bd.WithdrawalFeeBTC}
+		abort.Hedge = bd.Hedge
+	}
+
+	totalBTC := abort.CexBuyTaker.BTC + abort.CexSellTaker.BTC + abort.Withdrawal.BTC + abort.Network.BTC + abort.Hedge.FeeSumBTC
+	abort.Total = AbortCostComponent{
+		Pct: pct(totalBTC),
+		BTC: round8(totalBTC),
+	}
+	return abort
+}
+
+func (e *TradeCostEstimator) AbortCostFromBreakdown(bd CostBreakdown) AbortCostBreakdown {
+	return AbortCostFromBreakdown(bd)
+}
+
 // cexToHedgeVenue maps a spot CEX name to its paired perp hedge venue.
 // Used in coupled mode to ensure the same exchange is used for both legs.
 var cexToHedgeVenue = map[string]hedge.Venue{
@@ -1444,4 +1509,8 @@ func (o *TradeRouteOptimizer) BestBreakdownFull(btcAmount float64, refPriceEUR f
 		return CostBreakdown{}
 	}
 	return best
+}
+
+func (o *TradeRouteOptimizer) AbortCostFromBreakdown(bd CostBreakdown) AbortCostBreakdown {
+	return AbortCostFromBreakdown(bd)
 }
