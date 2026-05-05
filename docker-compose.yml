@@ -206,6 +206,7 @@ services:
       - SNAPSHOT_INTERVAL_MIN=1
       - FRONTEND_DIR=/app/react-frontend/dist
       - MM_CONTROLLER_API_URL=http://host.docker.internal:5001
+      - UNIFIED_API_URL=http://unified-api:5010
       - TOR_PROXY_ADDR=tor:9050
       - BISQ_GRPC_HOST=bisq:9998
       - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
