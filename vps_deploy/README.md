@@ -1,19 +1,20 @@
 # VPS Deploy
 
-This folder contains a lightweight VPS-side auto-deploy setup built around [`adnanh/webhook`](https://github.com/adnanh/webhook) and a guarded rebuild script.
+This folder contains a lightweight VPS-side auto-deploy setup built around [`adnanh/webhook`](https://github.com/adnanh/webhook) and a guarded pull script.
 
 ## What It Does
 
-The goal is simple:
+Tests and image builds run in GitHub Actions ([`.github/workflows/ci-cd.yml`](../.github/workflows/ci-cd.yml)). The VPS only pulls pre-built images from GHCR and restarts the stack:
 
-1. GitHub sends a `push` webhook to your VPS.
-2. `webhook` validates the request signature and checks that the event and repository match the generated hook rules.
-3. If the request matches, `webhook` runs [`webhook-handler.sh`](./webhook-handler.sh).
-4. On GitHub `ping`, the handler records a local confirmation marker for verification.
-5. On a matching `push`, the handler runs [`redeploy.sh`](./redeploy.sh).
-6. `redeploy.sh` pulls the latest git changes and rebuilds the Docker Compose stack.
+1. The CI/CD workflow finishes a successful build and pushes images to `ghcr.io/<owner>/dexarbtrading-<service>:latest` (and `:<sha>`).
+2. The workflow's final `notify-vps` job POSTs a signed payload to the VPS webhook.
+3. `webhook` validates the request signature and checks that the event and repository match the generated hook rules.
+4. If the request matches, `webhook` runs [`webhook-handler.sh`](./webhook-handler.sh).
+5. On GitHub `ping`, the handler records a local confirmation marker for verification.
+6. On a matching `push`, the handler runs [`redeploy.sh`](./redeploy.sh).
+7. `redeploy.sh` fast-forwards the repo (to pick up `docker-compose.yml` changes), runs `docker compose pull`, and restarts the stack with `docker compose up -d`.
 
-This avoids a custom deploy app and keeps the VPS logic small and easy to inspect.
+This keeps the VPS thin: no builds, no test runs — just pull and restart.
 
 ## Files
 
@@ -97,27 +98,19 @@ If any of those checks fail, the deploy command is not run.
 
 ## Redeploy Logic
 
-[`redeploy.sh`](./redeploy.sh) is intentionally strict.
+[`redeploy.sh`](./redeploy.sh) is intentionally minimal — it only pulls images and recreates containers. Everything else (tests, builds, image publishing) happens in GitHub Actions.
 
-Before rebuilding containers, it:
+It:
 
-- verifies `git`, `docker`, and `flock` exist
+- verifies `docker` and `flock` exist
 - acquires a lock file so two deploys cannot run at the same time
-- verifies the repo path is really a git checkout
 - verifies the compose file exists
-- verifies the checked-out branch matches `BRANCH`
-- refuses to deploy if the worktree is dirty
+- runs `docker compose -f <compose-file> pull`
+- runs `docker compose -f <compose-file> up -d --remove-orphans`
 
-Then it:
+No git, no branch checks, no source tree on the VPS. The compose file and `.env` are maintained on the VPS by the operator (or shipped with [`upload-envs.sh`](./upload-envs.sh)).
 
-- fetches from the configured remote
-- verifies the configured remote branch exists
-- fast-forward pulls the configured branch if needed
-- syncs and updates git submodules when `.gitmodules` exists
-- refuses to continue if pull or submodule update leaves the checkout dirty
-- runs `docker compose -f <compose-file> up --build -d --remove-orphans`
-
-This means it is safe to rerun, and it also helps prevent accidentally deploying from a locally modified checkout.
+To pull private GHCR images, run `docker login ghcr.io` once on the VPS using a read-only PAT (classic token with `read:packages` scope).
 
 ## Existing Setup Detection
 
@@ -137,21 +130,23 @@ On the VPS:
 
 ```bash
 cp vps_deploy/config.env.example vps_deploy/config.env
+# Edit BRANCH to match the branch CI builds from (e.g. `main`).
+cp .env.example .env
+# Set IMAGE_OWNER to the lowercase GitHub owner that hosts the GHCR packages.
+docker login ghcr.io   # one-time, using a PAT with read:packages
 ./vps_deploy/install.sh
 ```
 
-In an interactive shell, the installer then launches [`verify-webhook.sh`](./verify-webhook.sh), prints the webhook details, and waits for GitHub's automatic `ping`.
+In an interactive shell, the installer then launches [`verify-webhook.sh`](./verify-webhook.sh), prints the webhook details, and waits for the first signed `ping` (sent by GitHub when you save the webhook, or by the `notify-vps` job after a successful build).
 
-In GitHub create a webhook with:
+Instead of a GitHub repository webhook, the trigger is now the **GitHub Actions `notify-vps` job**. Add these repository secrets so the workflow can call your VPS:
 
-- Payload URL: `http://YOUR_VPS_IP:9000/hooks/dexarb-redeploy`
-- Content type: `application/json`
-- Secret: same value as `WEBHOOK_SECRET`
-- Event: push only
+- `VPS_WEBHOOK_URL`: e.g. `http://YOUR_VPS_IP:9000/hooks/dexarb-redeploy`
+- `VPS_WEBHOOK_SECRET`: same value as `WEBHOOK_SECRET` on the VPS
 
-If you changed `WEBHOOK_PORT` or `HOOK_ID`, use those values instead.
+GitHub does not reserve or require port `9000` for webhooks. The Actions runner just `curl`s whatever URL you configure, so the port must match your VPS listener and firewall rules.
 
-GitHub does not reserve or require port `9000` for webhooks. It will send the webhook to whatever full URL you configure in the repository webhook settings, so the port must match your VPS listener and firewall rules.
+If you also want the legacy GitHub-side webhook for ad-hoc redeploys, you can still configure it in the repo settings (push event, same secret). The trigger rules accept either source.
 
 ## Environment File Uploads
 
