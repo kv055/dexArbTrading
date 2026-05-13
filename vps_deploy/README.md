@@ -43,19 +43,100 @@ The `pre-deploy` and `deploy` jobs in [`.github/workflows/ci-cd.yml`](../.github
 - `VPS_SSH_KNOWN_HOSTS`: output of `ssh-keyscan -t ed25519 <vps-host>` from a trusted machine. Prevents TOFU prompts and MITM during deploy.
 - `VPS_REPO_DIR`: absolute path to the repo checkout on the VPS (e.g. `/opt/dexArbTrading`).
 
-## Environment File Uploads
+## Secrets Management
 
-Runtime `.env` files are intentionally not committed. If you maintain them locally and want to push them to the VPS, use [`upload-envs.sh`](./upload-envs.sh).
+Plaintext `.env` files are gitignored everywhere. Instead, each repo carries an encrypted `.env.enc` that is committed and safe to push. The private decryption keys live only in your local `.env.keys` files and in GitHub repository secrets. The CI/CD pipeline decrypts at deploy time and uploads the plaintext only to the VPS over SSH.
 
-The helper covers the repo's env layout:
+### Local setup — lefthook + dotenvx
 
-- root `.env`
-- `dexUnifiedApi/.env`
-- `dexMonitor/.env`
-- `dexMmController/.env`
-- `dexFiatController/.env`
+Every developer machine that commits to this monorepo (or any submodule) needs two CLI tools installed and the git hooks wired up.
 
-Review the script before running it on a new machine so the target host, target repo path, and SSH user match your VPS setup.
+**Install tools** (one-time per machine):
+
+```bash
+# dotenvx — encrypts/decrypts .env files
+curl -sfS "https://dotenvx.sh?directory=$HOME/.local/bin" | sh
+
+# lefthook — git hook manager
+curl -sL "https://github.com/evilmartians/lefthook/releases/latest/download/lefthook_Linux_x86_64" \
+  -o "$HOME/.local/bin/lefthook" && chmod +x "$HOME/.local/bin/lefthook"
+```
+
+**Install hooks** — run once in each repo after cloning:
+
+```bash
+# Parent repo
+lefthook install
+
+# Each submodule
+for repo in dexFiatController dexMmController dexMonitor dexUnifiedApi dexMmTradingLogicHummingBot; do
+  (cd "$repo" && lefthook install)
+done
+```
+
+**What the hook does on every commit:**
+
+The `post-commit` hook defined in each repo's [`lefthook.yml`](../lefthook.yml) runs `.lefthook/post-commit/encrypt-env.sh` automatically after every commit. It:
+
+1. Skips if the commit message starts with `.env values update` (loop guard).
+2. Skips if no `.env` file exists in the repo root.
+3. Copies `.env` → `.env.enc` and encrypts the copy in-place with `dotenvx encrypt -f .env.enc`.
+4. Stages `.env.enc` and creates a follow-up commit: `.env values update <reponame>`.
+
+The original `.env` is never modified. The private key is written to `.env.keys` (gitignored). Only `.env.enc` is committed.
+
+### Extracting private keys for GitHub secrets
+
+After the first encryption in each repo, the private key is stored in `.env.keys`. You need to add these to GitHub repository secrets so CI can decrypt at deploy time.
+
+The key name dotenvx uses for a file named `.env.enc` is `DOTENV_PRIVATE_KEY_ENC`. Extract it per repo:
+
+```bash
+# Root repo
+grep DOTENV_PRIVATE_KEY_ENC .env.keys
+
+# Submodules
+grep DOTENV_PRIVATE_KEY_ENC dexUnifiedApi/.env.keys
+grep DOTENV_PRIVATE_KEY_ENC dexMonitor/.env.keys
+grep DOTENV_PRIVATE_KEY_ENC dexMmController/.env.keys
+grep DOTENV_PRIVATE_KEY_ENC dexFiatController/.env.keys
+```
+
+Add each value to **Settings → Secrets and variables → Actions** in the GitHub repo:
+
+| Secret name | Source |
+|---|---|
+| `DOTENV_PRIVATE_KEY_ROOT` | root `.env.keys` |
+| `DOTENV_PRIVATE_KEY_UNIFIED_API` | `dexUnifiedApi/.env.keys` |
+| `DOTENV_PRIVATE_KEY_MONITOR` | `dexMonitor/.env.keys` |
+| `DOTENV_PRIVATE_KEY_MM_CONTROLLER` | `dexMmController/.env.keys` |
+| `DOTENV_PRIVATE_KEY_FIAT_CONTROLLER` | `dexFiatController/.env.keys` |
+
+Keep `.env.keys` backed up securely (password manager, encrypted vault). If a key is lost the `.env.enc` cannot be decrypted and secrets must be rotated.
+
+### CI/CD decryption flow
+
+The `deploy` job in [`.github/workflows/ci-cd.yml`](../.github/workflows/ci-cd.yml) handles secrets delivery to the VPS without ever storing plaintext in the repo or in CI logs:
+
+1. **Verify** — checks that all five `.env.enc` files are present in the checkout. If any is missing the job fails with a hint to run the encryption locally.
+2. **Install dotenvx** on the runner (`curl -sfS https://dotenvx.sh | sh`).
+3. **Decrypt** — each `.env.enc` is decrypted in-place using its corresponding private key injected as an environment variable:
+   ```
+   DOTENV_PRIVATE_KEY_ENC=<key>  dotenvx decrypt -f <path>/.env.enc
+   ```
+   After this step the files on the runner contain plaintext values.
+4. **Upload** — each decrypted file is SCPed to the VPS as `.env` in the correct location under `$REPO_DIR`.
+5. **Permissions** — a final SSH command sets `chmod 600` on every uploaded `.env`.
+
+The decrypted files exist only in the runner's ephemeral workspace and are never logged, cached, or uploaded as artifacts.
+
+### Manual env upload (without CI)
+
+[`upload-envs.sh`](./upload-envs.sh) copies local plaintext `.env` files directly to the VPS over SCP. Use this only when CI is not available or for a one-off refresh outside the normal deploy flow.
+
+```bash
+./vps_deploy/upload-envs.sh deploy@<vps-host> /opt/dexArbTrading
+```
 
 ## One-time VPS Setup
 
