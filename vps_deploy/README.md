@@ -7,7 +7,7 @@ This folder contains the VPS-side deploy script that GitHub Actions invokes over
 Tests and image builds run in GitHub Actions ([`.github/workflows/ci-cd.yml`](../.github/workflows/ci-cd.yml)). The VPS only pulls pre-built images from GHCR and restarts the stack:
 
 1. The CI/CD workflow finishes a successful build and pushes images to `ghcr.io/<owner>/dexarbtrading-<service>:latest` (and `:<sha>`).
-2. The `pre-deploy` job verifies every image SHA tag is present in GHCR, then SSHes into the VPS to confirm docker, compose, env files, disk, and memory are all healthy.
+2. The `pre-deploy` job verifies every image SHA tag is present in GHCR, then SSHes into the VPS to confirm docker, compose, disk, and memory are all healthy.
 3. The `deploy` job SCPs `docker-compose.yml` to the VPS and runs [`redeploy.sh`](./redeploy.sh) over SSH.
 4. `redeploy.sh` acquires a `flock`, runs `docker compose pull`, and restarts the stack with `docker compose up -d --remove-orphans`.
 5. Post-deploy smoke tests hit `http://<vps>:5010/health` and `http://<vps>:5000/` from the runner to confirm the stack is reachable.
@@ -17,7 +17,6 @@ This keeps the VPS thin: no builds, no test runs — just an SSH endpoint that r
 ## Files
 
 - [`redeploy.sh`](./redeploy.sh) performs the actual deploy (pull + recreate). Invoked over SSH by the `deploy` job, and also usable manually by an operator.
-- [`upload-envs.sh`](./upload-envs.sh) copies local `.env` files to the VPS when you want to refresh service configuration without committing secrets.
 
 ## Redeploy Logic
 
@@ -132,10 +131,24 @@ The decrypted files exist only in the runner's ephemeral workspace and are never
 
 ### Manual env upload (without CI)
 
-[`upload-envs.sh`](./upload-envs.sh) copies local plaintext `.env` files directly to the VPS over SCP. Use this only when CI is not available or for a one-off refresh outside the normal deploy flow.
+If CI is unavailable, decrypt the `.env.enc` files locally and SCP them manually:
 
 ```bash
-./vps_deploy/upload-envs.sh deploy@<vps-host> /opt/dexArbTrading
+# Decrypt (requires .env.keys in each directory)
+dotenvx decrypt -f .env.enc
+dotenvx decrypt -f dexUnifiedApi/.env.enc
+dotenvx decrypt -f dexMonitor/.env.enc
+dotenvx decrypt -f dexMmController/.env.enc
+dotenvx decrypt -f dexFiatController/.env.enc
+
+# Upload
+scp .env.enc                  deploy@<vps-host>:/opt/dexArbTrading/.env
+scp dexUnifiedApi/.env.enc    deploy@<vps-host>:/opt/dexArbTrading/dexUnifiedApi/.env
+scp dexMonitor/.env.enc       deploy@<vps-host>:/opt/dexArbTrading/dexMonitor/.env
+scp dexMmController/.env.enc  deploy@<vps-host>:/opt/dexArbTrading/dexMmController/.env
+scp dexFiatController/.env.enc deploy@<vps-host>:/opt/dexArbTrading/dexFiatController/.env
+
+ssh deploy@<vps-host> "chmod 600 /opt/dexArbTrading/.env /opt/dexArbTrading/{dexUnifiedApi,dexMonitor,dexMmController,dexFiatController}/.env"
 ```
 
 ## One-time VPS Setup
@@ -161,10 +174,4 @@ chmod +x /opt/dexArbTrading/vps_deploy/redeploy.sh
 sudo -u deploy docker login ghcr.io
 ```
 
-From your dev machine:
-
-```bash
-./vps_deploy/upload-envs.sh deploy@<vps-host> /opt/dexArbTrading
-```
-
-In the GitHub repo settings, add the five secrets listed above. The next push to `main` will deploy.
+In the GitHub repo settings, add the five secrets listed above. The next push to `main` will deploy — CI will decrypt and upload the `.env` files automatically.

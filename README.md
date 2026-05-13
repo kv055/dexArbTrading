@@ -115,19 +115,16 @@ Dropbox can be used by switching `PG_BACKUP_RCLONE_REMOTE` and providing the Dro
 
 ## Deployment
 
-`vps_deploy` provides a small GitHub webhook flow for VPS deployments:
+Deployments to the VPS are fully automated via GitHub Actions on every push to `main`:
 
-- `install.sh` renders the webhook and systemd configuration from `config.env` or `config.yaml`.
-- `webhook-handler.sh` validates `ping` and `push` events.
-- `redeploy.sh` refuses dirty checkouts, fast-forwards the configured branch, updates submodules, and runs `docker compose up --build -d --remove-orphans`.
+1. **Tests** — Go tests run for all modules; frontend lints, builds, and runs Playwright e2e tests.
+2. **Build & push** — Docker images for all services are built and pushed to GHCR tagged with `:latest` and `:<sha>`.
+3. **Pre-deploy checks** — the runner SSHes into the VPS to verify docker, compose, disk space, and memory are healthy.
+4. **Decrypt & upload secrets** — each `.env.enc` (committed, encrypted) is decrypted on the CI runner using private keys from GitHub Secrets, then SCPed to the VPS as a plain `.env` file.
+5. **Deploy** — `docker-compose.yml` is pushed to the VPS and `vps_deploy/redeploy.sh` is invoked over SSH, which pulls new images and restarts the stack.
+6. **Smoke tests** — the runner hits `/health` endpoints to confirm the stack came up.
 
-The default hook URL is:
-
-```text
-http://YOUR_VPS_IP:9000/hooks/dexarb-redeploy
-```
-
-See `vps_deploy/README.md` for the complete setup procedure.
+See `vps_deploy/README.md` for required GitHub Secrets, the one-time VPS setup, and the dotenvx secrets management workflow.
 
 ## Development
 
