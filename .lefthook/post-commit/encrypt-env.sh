@@ -12,10 +12,24 @@ if [[ ! -f ".env" ]]; then
   exit 0
 fi
 
+GIT_DIR=$(git rev-parse --git-dir)
+HASH_FILE="$GIT_DIR/env.hash"
+CURRENT_HASH=$(sha256sum .env | awk '{print $1}')
+
+if [[ -f "$HASH_FILE" ]]; then
+  STORED_HASH=$(cat "$HASH_FILE")
+  if [[ "$CURRENT_HASH" == "$STORED_HASH" ]]; then
+    exit 0  # .env has not changed, skip encryption
+  fi
+fi
+
 REPO_NAME=$(basename "$(git rev-parse --show-toplevel)")
 
 cp .env .env.enc
 dotenvx encrypt -f .env.enc
 
+echo "$CURRENT_HASH" > "$HASH_FILE"
+
 git add .env.enc
 git commit -m ".env values update $REPO_NAME"
+
