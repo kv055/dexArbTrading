@@ -4,6 +4,7 @@
 .env
 .env.keys
 .env.hash
+.env.vps
 vps_deploy/config.env
 vps_deploy/config.yaml
 vps_deploy/hooks.json

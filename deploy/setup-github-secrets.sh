@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+cd "$SCRIPT_DIR/.."
 
 extract_key() {
   local file="$1"
@@ -13,6 +13,10 @@ extract_key() {
   grep '^DOTENV_PRIVATE_KEY_ENC=' "$file" | cut -d= -f2-
 }
 
+read_vps_var() {
+  grep "^${1}=" deploy/.env.vps | cut -d= -f2- | sed 's/^"\(.*\)"$/\1/'
+}
+
 if [[ ! -f .env ]]; then
   echo "ERROR: .env not found" >&2
   exit 1
@@ -20,6 +24,11 @@ fi
 TOKEN=$(grep '^GH_PAT=' .env | cut -d= -f2-)
 if [[ -z "$TOKEN" ]]; then
   echo "ERROR: GH_PAT not set in .env" >&2
+  exit 1
+fi
+
+if [[ ! -f deploy/.env.vps ]]; then
+  echo "ERROR: deploy/.env.vps not found — copy deploy/.env.vps.example and fill in the values" >&2
   exit 1
 fi
 
@@ -51,6 +60,11 @@ set_secret DOTENV_PRIVATE_KEY_MONITOR         "$(extract_key dexMonitor/.env.key
 set_secret DOTENV_PRIVATE_KEY_MM_CONTROLLER   "$(extract_key dexMmController/.env.keys)"
 set_secret DOTENV_PRIVATE_KEY_FIAT_CONTROLLER "$(extract_key dexFiatController/.env.keys)"
 set_secret GH_PAT                             "$TOKEN"
+set_secret VPS_SSH_PRIVATE_KEY                "$(read_vps_var VPS_SSH_PRIVATE_KEY)"
+set_secret VPS_SSH_KNOWN_HOSTS                "$(read_vps_var VPS_SSH_KNOWN_HOSTS)"
+set_secret VPS_SSH_HOST                       "$(read_vps_var VPS_SSH_HOST)"
+set_secret VPS_SSH_USER                       "$(read_vps_var VPS_SSH_USER)"
+set_secret VPS_REPO_DIR                       "$(read_vps_var VPS_REPO_DIR)"
 
 echo ""
-echo "Done — 6 secrets written to github:$REPO"
+echo "Done — 11 secrets written to github:$REPO"
