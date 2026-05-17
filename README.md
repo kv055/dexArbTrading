@@ -10,7 +10,7 @@ The repository is organized as a parent deployment repo with several component r
 - `dexFiatController` automates fiat account monitoring and payment notification forwarding for PayPal, Wise, and Revolut.
 - `dexMmTradingLogicHummingBot` contains the Hummingbot strategy/controller code used for CEX-side BTC execution and withdrawal experiments.
 - `commons` is a shared Go module for price feeds, trade-cost calculation, hedge modelling, and Bitcoin fee analysis.
-- `vps_deploy` contains the VPS webhook deploy helper.
+- `deploy` contains the VPS webhook deploy helper.
 
 ## Architecture
 
@@ -39,7 +39,7 @@ External dependencies include Tor, Bisq, LND, optional Hummingbot/OpenClaw servi
 +-- dexFiatController/              # Fiat connector automation and TOTP helper service
 +-- dexMmTradingLogicHummingBot/    # Hummingbot strategy/controller code
 +-- nginx/                          # Local reverse proxy for dashboard/API
-+-- vps_deploy/                     # Webhook-based deployment scripts
++-- deploy/                     # Webhook-based deployment scripts
 ```
 
 ## Quick Start
@@ -121,10 +121,10 @@ Deployments to the VPS are fully automated via GitHub Actions on every push to `
 2. **Build & push** — Docker images for all services are built and pushed to GHCR tagged with `:latest` and `:<sha>`.
 3. **Pre-deploy checks** — the runner SSHes into the VPS to verify docker, compose, disk space, and memory are healthy.
 4. **Decrypt & upload secrets** — each `.env.enc` (committed, encrypted) is decrypted on the CI runner using private keys from GitHub Secrets, then SCPed to the VPS as a plain `.env` file.
-5. **Deploy** — `docker-compose.yml` is pushed to the VPS and `vps_deploy/redeploy.sh` is invoked over SSH, which pulls new images and restarts the stack.
+5. **Deploy** — `docker-compose.yml` is pushed to the VPS and `deploy/redeploy.sh` is invoked over SSH, which pulls new images and restarts the stack.
 6. **Smoke tests** — the runner hits `/health` endpoints to confirm the stack came up.
 
-See `vps_deploy/README.md` for required GitHub Secrets, the one-time VPS setup, and the dotenvx secrets management workflow.
+See `deploy/README.md` for required GitHub Secrets, the one-time VPS setup, and the dotenvx secrets management workflow.
 
 ## Development
 

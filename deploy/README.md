@@ -84,6 +84,20 @@ The `post-commit` hook defined in each repo's [`lefthook.yml`](../lefthook.yml) 
 
 The original `.env` is never modified. The private key is written to `.env.keys` (gitignored). Only `.env.enc` is committed.
 
+### Automated secrets upload
+
+Instead of copying keys manually, run the appropriate bootstrap script from the repo root:
+
+```bash
+# GitHub
+./setup-github-secrets.sh
+
+# Gitea
+./setup-gitea-secrets.sh
+```
+
+Both scripts read `GH_PAT` from `.env` for authentication and derive the repo slug from `git remote get-url origin`. The GitHub script installs `gh` CLI automatically if missing (Debian/Ubuntu only — install it manually for other distros). The Gitea script uses plain `curl` with no extra dependencies.
+
 ### Extracting private keys for GitHub secrets
 
 After the first encryption in each repo, the private key is stored in `.env.keys`. You need to add these to GitHub repository secrets so CI can decrypt at deploy time.
@@ -112,6 +126,44 @@ Add each value to **Settings → Secrets and variables → Actions** in the GitH
 | `DOTENV_PRIVATE_KEY_FIAT_CONTROLLER` | `dexFiatController/.env.keys` |
 
 Keep `.env.keys` backed up securely (password manager, encrypted vault). If a key is lost the `.env.enc` cannot be decrypted and secrets must be rotated.
+
+### Rotating keys
+
+To generate a fresh keypair and re-encrypt a file:
+
+```bash
+# Root repo
+dotenvx rotate -f .env.enc
+
+# Submodules
+dotenvx rotate -f dexUnifiedApi/.env.enc
+dotenvx rotate -f dexMonitor/.env.enc
+dotenvx rotate -f dexMmController/.env.enc
+dotenvx rotate -f dexFiatController/.env.enc
+```
+
+Each `rotate` call:
+1. Generates a new keypair.
+2. Re-encrypts the file in-place with the new public key.
+3. Prints the new private key.
+
+After rotating, update the corresponding GitHub secret with the newly printed private key and commit the changed `.env.enc` files. The old private key is immediately invalid.
+
+To inspect the current keypair for a file without rotating it:
+
+```bash
+dotenvx keypair -f .env.enc
+```
+
+### GitHub Actions submodule access
+
+The CI checkout steps that clone submodules require a GitHub Personal Access Token (classic with `repo` scope, or a fine-grained token with `Contents: read` for each submodule repo). Add it as a repository secret:
+
+| Secret name | Value |
+|---|---|
+| `GH_PAT` | PAT with read access to all submodule repositories |
+
+The token is passed to `actions/checkout` via `token: ${{ secrets.GH_PAT }}` in the `test-go`, `test-frontend`, and `build-and-push` jobs.
 
 ### CI/CD decryption flow
 
@@ -168,7 +220,7 @@ usermod -aG docker deploy
 
 # Clone the repo
 git clone https://github.com/<owner>/dexArbTrading.git /opt/dexArbTrading
-chmod +x /opt/dexArbTrading/vps_deploy/redeploy.sh
+chmod +x /opt/dexArbTrading/deploy/redeploy.sh
 
 # Authenticate for GHCR pulls (one-time, using a PAT with read:packages)
 sudo -u deploy docker login ghcr.io
