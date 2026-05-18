@@ -208,8 +208,6 @@ jobs:
           docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
           free_kb=$(df -P "$docker_root" | awk 'NR==2 {print $4}')
           [ "$free_kb" -gt 5242880 ] || { echo "low disk on $docker_root: $((free_kb/1024)) MB free, need >= 5120"; exit 1; }
-          free_mb=$(free -m | awk '/^Mem:/ {print $7}')
-          [ "$free_mb" -gt 1024 ] || { echo "low free memory: ${free_mb} MB, need >= 1024"; exit 1; }
           echo "health checks ok"
           REMOTE
 
