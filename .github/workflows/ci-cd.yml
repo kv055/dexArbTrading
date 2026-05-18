@@ -193,6 +193,55 @@ jobs:
           printf '%b\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
+      - name: Egress reachability check (VPS)
+        env:
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_USER: ${{ secrets.VPS_SSH_USER }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+
+          check_ws() {
+            local url="$1"
+            local key
+            key=$(openssl rand -base64 16)
+            local out
+            if ! out=$(curl -sS --http1.1 --include --max-time 10 \
+                -H "Connection: Upgrade" \
+                -H "Upgrade: websocket" \
+                -H "Sec-WebSocket-Key: $key" \
+                -H "Sec-WebSocket-Version: 13" \
+                "$url" 2>&1); then
+              echo "WSS unreachable: $url"
+              echo "$out" | head -5
+              return 1
+            fi
+            if ! printf '%s' "$out" | head -1 | grep -q ' 101 '; then
+              echo "WSS no 101 upgrade: $url"
+              printf '%s' "$out" | head -5
+              return 1
+            fi
+            echo "ok wss $url"
+          }
+
+          check_https() {
+            local url="$1"
+            if ! curl -fsS --max-time 10 "$url" >/dev/null; then
+              echo "HTTPS unreachable: $url"
+              return 1
+            fi
+            echo "ok https $url"
+          }
+
+          check_ws    "https://ws.kraken.com/v2"
+          check_ws    "https://ws.bitstamp.net/"
+          check_ws    "https://advanced-trade-ws.coinbase.com/"
+          check_https "https://api.kraken.com/0/public/SystemStatus"
+
+          echo "egress reachability ok"
+          REMOTE
+
       - name: VPS health checks
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
