@@ -242,6 +242,8 @@ services:
         condition: service_healthy
       unified-api:
         condition: service_healthy
+      grafana:
+        condition: service_started
     deploy:
       resources:
         limits:
@@ -395,6 +397,94 @@ services:
   #         cpus: '1.0'
   #   restart: unless-stopped
 
+  prometheus:
+    logging: *default-logging
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./deploy/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    restart: unless-stopped
+
+  grafana:
+    logging: *default-logging
+    image: grafana/grafana:11.3.0
+    depends_on:
+      - prometheus
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s:%(http_port)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./deploy/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+          cpus: '0.25'
+    restart: unless-stopped
+
+  node-exporter:
+    logging: *default-logging
+    image: prom/node-exporter:v1.8.2
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|var/lib/docker/.+)($$|/)
+    volumes:
+      - /:/host:ro,rslave
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+    restart: unless-stopped
+
+  cadvisor:
+    logging: *default-logging
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+    restart: unless-stopped
+
+  postgres-exporter:
+    logging: *default-logging
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATA_SOURCE_NAME=postgres://${POSTGRES_ADMIN_USER}:${POSTGRES_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+    restart: unless-stopped
+
   docs:
     logging: *default-logging
     image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-docs:${IMAGE_TAG:-latest}
@@ -415,6 +505,8 @@ volumes:
   bisq-data:
   # mm-controller-data:
   lnd-data:
+  prometheus-data:
+  grafana-data:
 
 networks:
   default:
