@@ -206,20 +206,22 @@ jobs:
             local url="$1"
             local key
             key=$(openssl rand -base64 16)
-            local out
-            if ! out=$(curl -sS --http1.1 --include --max-time 10 \
+            local out curl_exit=0
+            out=$(curl -sS --http1.1 --include --max-time 10 \
                 -H "Connection: Upgrade" \
                 -H "Upgrade: websocket" \
                 -H "Sec-WebSocket-Key: $key" \
                 -H "Sec-WebSocket-Version: 13" \
-                "$url" 2>&1); then
+                "$url" 2>&1) || curl_exit=$?
+            # 28 = CURLE_OPERATION_TIMEDOUT — expected after a successful WS handshake
+            if [ "$curl_exit" -ne 0 ] && [ "$curl_exit" -ne 28 ]; then
               echo "WSS unreachable: $url"
-              echo "$out" | head -5
+              printf '%s\n' "$out" | head -5
               return 1
             fi
-            if ! printf '%s' "$out" | head -1 | grep -q ' 101 '; then
+            if ! printf '%s\n' "$out" | grep -q ' 101 '; then
               echo "WSS no 101 upgrade: $url"
-              printf '%s' "$out" | head -5
+              printf '%s\n' "$out" | head -5
               return 1
             fi
             echo "ok wss $url"
