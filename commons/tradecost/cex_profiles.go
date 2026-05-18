@@ -69,9 +69,10 @@ var defaultCexProfile = CexWithdrawalProfile{
 // dexAcceptsLightning lists DEX platforms that support Lightning Network settlement.
 // When both the CEX and DEX support Lightning, it is preferred over onchain.
 var dexAcceptsLightning = map[string]bool{
-	"robosats": true,
-	"bisq":     false,
-	"hodlhodl": false,
+	"robosats":     true,
+	"bisq":         false,
+	"hodlhodl":     false,
+	"peachbitcoin": false,
 }
 
 // cexProfileFor returns the withdrawal profile for the given exchange,
