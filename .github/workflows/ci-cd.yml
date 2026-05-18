@@ -276,11 +276,15 @@ jobs:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
           SSH_USER: ${{ secrets.VPS_SSH_USER }}
           REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
+          GHCR_TOKEN: ${{ secrets.GH_PAT }}
+          GHCR_USER: ${{ github.actor }}
         run: |
           set -Eeuo pipefail
           scp -i ~/.ssh/id_ed25519 docker-compose.yml "$SSH_USER@$SSH_HOST:$REPO_DIR/docker-compose.yml"
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "REPO_DIR='$REPO_DIR' bash -s" <<'REMOTE'
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
+            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' bash -s" <<'REMOTE'
           set -Eeuo pipefail
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
           docker compose -f "$REPO_DIR/docker-compose.yml" pull
           docker compose -f "$REPO_DIR/docker-compose.yml" up -d --remove-orphans
           REMOTE
