@@ -219,7 +219,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          submodules: false
+          submodules: recursive
+          token: ${{ secrets.GH_PAT }}
 
       - name: Install SSH key & known_hosts
         env:
