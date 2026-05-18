@@ -1,6 +1,6 @@
 # VPS Deploy
 
-This folder contains the VPS-side deploy script that GitHub Actions invokes over SSH.
+This folder contains secrets bootstrap scripts for the CI/CD pipeline.
 
 ## What It Does
 
@@ -8,27 +8,10 @@ Tests and image builds run in GitHub Actions ([`.github/workflows/ci-cd.yml`](..
 
 1. The CI/CD workflow finishes a successful build and pushes images to `ghcr.io/<owner>/dexarbtrading-<service>:latest` (and `:<sha>`).
 2. The `pre-deploy` job verifies every image SHA tag is present in GHCR, then SSHes into the VPS to confirm docker, compose, disk, and memory are all healthy.
-3. The `deploy` job SCPs `docker-compose.yml` to the VPS and runs [`redeploy.sh`](./redeploy.sh) over SSH.
-4. `redeploy.sh` acquires a `flock`, runs `docker compose pull`, and restarts the stack with `docker compose up -d --remove-orphans`.
-5. Post-deploy smoke tests hit `http://<vps>:5010/health` and `http://<vps>:5000/` from the runner to confirm the stack is reachable.
+3. The `deploy` job SCPs `docker-compose.yml` to the VPS and runs `docker compose pull` + `docker compose up -d --remove-orphans` over SSH.
+4. Post-deploy smoke tests hit `http://<vps>:5010/health` and `http://<vps>:5000/` from the runner to confirm the stack is reachable.
 
-This keeps the VPS thin: no builds, no test runs — just an SSH endpoint that runs `redeploy.sh`.
-
-## Files
-
-- [`redeploy.sh`](./redeploy.sh) performs the actual deploy (pull + recreate). Invoked over SSH by the `deploy` job, and also usable manually by an operator.
-
-## Redeploy Logic
-
-[`redeploy.sh`](./redeploy.sh) is intentionally minimal — it only pulls images and recreates containers. Everything else (tests, builds, image publishing, pre-flight validation) happens in GitHub Actions.
-
-It:
-
-- verifies `docker` and `flock` exist
-- acquires a lock file so two deploys cannot run at the same time
-- verifies the compose file exists
-- runs `docker compose -f <compose-file> pull`
-- runs `docker compose -f <compose-file> up -d --remove-orphans`
+This keeps the VPS thin: no builds, no test runs — just an SSH endpoint for docker compose commands.
 
 To pull private GHCR images, run `docker login ghcr.io` once as the deploy user on the VPS using a read-only PAT (classic token with `read:packages` scope).
 
@@ -220,7 +203,6 @@ usermod -aG docker deploy
 
 # Clone the repo
 git clone https://github.com/<owner>/dexArbTrading.git /opt/dexArbTrading
-chmod +x /opt/dexArbTrading/deploy/redeploy.sh
 
 # Authenticate for GHCR pulls (one-time, using a PAT with read:packages)
 sudo -u deploy docker login ghcr.io

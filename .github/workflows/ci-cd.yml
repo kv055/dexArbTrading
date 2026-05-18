@@ -204,7 +204,7 @@ jobs:
           set -Eeuo pipefail
           docker info >/dev/null
           docker compose version >/dev/null
-          test -x "$REPO_DIR/deploy/redeploy.sh" || { echo "missing or non-executable $REPO_DIR/deploy/redeploy.sh"; exit 1; }
+          test -d "$REPO_DIR" || { echo "missing repo dir $REPO_DIR on VPS"; exit 1; }
           docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
           free_kb=$(df -P "$docker_root" | awk 'NR==2 {print $4}')
           [ "$free_kb" -gt 5242880 ] || { echo "low disk on $docker_root: $((free_kb/1024)) MB free, need >= 5120"; exit 1; }
@@ -280,7 +280,11 @@ jobs:
         run: |
           set -Eeuo pipefail
           scp -i ~/.ssh/id_ed25519 docker-compose.yml "$SSH_USER@$SSH_HOST:$REPO_DIR/docker-compose.yml"
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "bash '$REPO_DIR/deploy/redeploy.sh'"
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "REPO_DIR='$REPO_DIR' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          docker compose -f "$REPO_DIR/docker-compose.yml" pull
+          docker compose -f "$REPO_DIR/docker-compose.yml" up -d --remove-orphans
+          REMOTE
 
       - name: Post-deploy smoke tests
         env:
