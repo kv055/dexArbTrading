@@ -1,0 +1,12 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# terraform.tfvars is gitignored — never commit it.
+
+hcloud_token   = "your_hetzner_api_token_here"
+ssh_public_key = "ssh-ed25519 AAAA... your-comment"
+
+# Optional overrides (defaults are fine for most cases):
+# server_name   = "dexarbtrading"
+# location      = "hel1"
+
+# Uncomment and add your IP to open Postgres/Grafana/Prometheus:
+# trusted_cidrs = ["1.2.3.4/32"]

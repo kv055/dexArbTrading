@@ -1,0 +1,158 @@
+---
+- name: Bootstrap dexArbTrading VPS
+  hosts: vps
+  become: true
+
+  vars:
+    app_dir: /opt/dexArbTrading
+    deploy_user: deploy
+
+  tasks:
+
+    - name: Update apt cache and upgrade packages
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+        cache_valid_time: 3600
+
+    - name: Install base packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - git
+        state: present
+
+    - name: Create /etc/apt/keyrings
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Download Docker GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/debian/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+        force: false
+
+    - name: Add Docker apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc]
+          https://download.docker.com/linux/debian
+          {{ ansible_distribution_release }} stable
+        state: present
+        filename: docker
+
+    - name: Install Docker CE and Compose plugin
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        update_cache: true
+        state: present
+
+    - name: Enable and start Docker
+      ansible.builtin.systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Add deploy user to docker group
+      ansible.builtin.user:
+        name: "{{ deploy_user }}"
+        groups: docker
+        append: true
+
+    - name: Configure Docker log rotation
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        content: |
+          {
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "10m",
+              "max-file": "3"
+            }
+          }
+        mode: "0644"
+      notify: Restart Docker
+
+    - name: Create app directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: "0750"
+
+    - name: Clone repo with submodules
+      ansible.builtin.git:
+        repo: https://github.com/kv055/dexArbTrading.git
+        dest: "{{ app_dir }}"
+        recursive: true
+        version: main
+        update: false
+      become_user: "{{ deploy_user }}"
+
+    - name: Print next steps
+      ansible.builtin.debug:
+        msg: |
+          Server is ready. Next steps:
+            1. Upload .env files via CI/CD or manually (see deploy/README.md).
+            2. Run: ssh deploy@{{ inventory_hostname }} "cd {{ app_dir }} && docker compose pull && docker compose up -d"
+            3. Smoke-test: curl http://{{ inventory_hostname }}:5010/health  &&  curl http://{{ inventory_hostname }}:5000/
+
+  handlers:
+    - name: Restart Docker
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
+
+# ---------------------------------------------------------------------------
+# TODO: uncomment the play below to auto-update deploy/.env.vps after
+#       provisioning. Requires .env.vps to already exist locally (copy from
+#       deploy/.env.vps.example and fill in VPS_SSH_PRIVATE_KEY / VPS_REPO_DIR
+#       beforehand — those are not touched here).
+# ---------------------------------------------------------------------------
+#
+# - name: Update deploy/.env.vps with provisioned server details
+#   hosts: vps
+#   gather_facts: false
+#
+#   tasks:
+#
+#     - name: Scan ed25519 host key
+#       ansible.builtin.command: ssh-keyscan -t ed25519 {{ inventory_hostname }}
+#       register: keyscan_result
+#       delegate_to: localhost
+#       changed_when: false
+#
+#     - name: Set VPS_SSH_HOST in .env.vps
+#       ansible.builtin.lineinfile:
+#         path: "{{ playbook_dir }}/../.env.vps"
+#         regexp: '^VPS_SSH_HOST='
+#         line: 'VPS_SSH_HOST="{{ inventory_hostname }}"'
+#         create: false
+#       delegate_to: localhost
+#
+#     - name: Set VPS_SSH_USER in .env.vps
+#       ansible.builtin.lineinfile:
+#         path: "{{ playbook_dir }}/../.env.vps"
+#         regexp: '^VPS_SSH_USER='
+#         line: 'VPS_SSH_USER="deploy"'
+#         create: false
+#       delegate_to: localhost
+#
+#     - name: Set VPS_SSH_KNOWN_HOSTS in .env.vps
+#       ansible.builtin.lineinfile:
+#         path: "{{ playbook_dir }}/../.env.vps"
+#         regexp: '^VPS_SSH_KNOWN_HOSTS='
+#         line: 'VPS_SSH_KNOWN_HOSTS="{{ keyscan_result.stdout }}"'
+#         create: false
+#       delegate_to: localhost

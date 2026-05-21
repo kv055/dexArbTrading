@@ -1,5 +1,65 @@
 # VPS Deploy
 
+## Infrastructure as Code (Terraform + Ansible)
+
+The `terraform/` and `ansible/` subdirectories provision and configure the VPS from scratch. Run these once before the CI/CD pipeline takes over.
+
+### Prerequisites
+
+- [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.5
+- [Ansible](https://docs.ansible.com/ansible/latest/installation_guide/) ≥ 2.14
+- A Hetzner Cloud API token (read/write) from [console.hetzner.cloud](https://console.hetzner.cloud)
+- An SSH keypair for the deploy user
+
+### 1 — Provision with Terraform
+
+```bash
+cd deploy/terraform
+cp terraform.tfvars.example terraform.tfvars   # fill in token + SSH public key
+terraform init
+terraform apply
+```
+
+This creates a **cx32** server (4 vCPU, 8 GB RAM, Debian 12) in `hel1` (Helsinki, cheapest region), a firewall, and uploads your SSH key. Takes ~30 seconds.
+
+```bash
+# Capture the IP for the next step
+SERVER_IP=$(terraform output -raw server_ip)
+```
+
+### 2 — Configure with Ansible
+
+```bash
+cd deploy/ansible
+sed "s/SERVER_IP/$SERVER_IP/" inventory.ini.tpl > inventory.ini
+ansible-playbook -i inventory.ini playbook.yml --private-key ~/.ssh/your_key
+```
+
+Ansible installs Docker CE, adds the `deploy` user to the `docker` group, configures log rotation, and clones the repo to `/opt/dexArbTrading`.
+
+### 3 — Wire up CI/CD
+
+After Ansible completes, add or update these GitHub repository secrets (see [GitHub Actions Wiring](#github-actions-wiring) below):
+
+| Secret | Value |
+|--------|-------|
+| `VPS_SSH_HOST` | value of `$SERVER_IP` |
+| `VPS_SSH_USER` | `deploy` |
+| `VPS_SSH_PRIVATE_KEY` | private half of the keypair you used above |
+| `VPS_SSH_KNOWN_HOSTS` | `ssh-keyscan -t ed25519 $SERVER_IP` |
+| `VPS_REPO_DIR` | `/opt/dexArbTrading` |
+
+The next push to `main` will deploy the full compose stack automatically.
+
+### Teardown
+
+```bash
+cd deploy/terraform
+terraform destroy
+```
+
+---
+
 This folder contains secrets bootstrap scripts for the CI/CD pipeline.
 
 ## What It Does
