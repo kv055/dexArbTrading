@@ -50,37 +50,37 @@ services:
           cpus: '0.5'
     restart: unless-stopped
 
-  bisq:
-    logging: *default-logging
-    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-bisq:${IMAGE_TAG:-latest}
-    build:
-      context: ./dexUnifiedApi
-      dockerfile: Dockerfile.bisq
-    depends_on:
-      tor:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      unified-api:
-        condition: service_healthy
-    environment:
-      - BISQ_VERSION=1.9.22
-      - BISQ_ACCOUNT_PROVIDER=Bisq
-      - BISQ_ACCOUNT_FILE_PATH=${BISQ_ACCOUNT_FILE_PATH:-}
-      - BISQ_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
-      - BISQ_SEED_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
-      - BISQ_WALLET_PASSWORD=${BISQ_WALLET_PASSWORD:-}
-    volumes:
-      - bisq-data:/home/appuser/.local/share/Bisq
-      # Optional bring-your-own Bisq account file:
-      # - ./dexUnifiedApi/bisqseed/secrets/UserPayload:/run/secrets/bisq_UserPayload:ro
-      # Set BISQ_ACCOUNT_FILE_PATH=/run/secrets/bisq_UserPayload when using that mount.
-    deploy:
-      resources:
-        limits:
-          memory: 3072M
-          cpus: '1.5'
-    restart: unless-stopped
+  # bisq:
+  #   logging: *default-logging
+  #   image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-bisq:${IMAGE_TAG:-latest}
+  #   build:
+  #     context: ./dexUnifiedApi
+  #     dockerfile: Dockerfile.bisq
+  #   depends_on:
+  #     tor:
+  #       condition: service_healthy
+  #     postgres:
+  #       condition: service_healthy
+  #     unified-api:
+  #       condition: service_healthy
+  #   environment:
+  #     - BISQ_VERSION=1.9.22
+  #     - BISQ_ACCOUNT_PROVIDER=Bisq
+  #     - BISQ_ACCOUNT_FILE_PATH=${BISQ_ACCOUNT_FILE_PATH:-}
+  #     - BISQ_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+  #     - BISQ_SEED_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+  #     - BISQ_WALLET_PASSWORD=${BISQ_WALLET_PASSWORD:-}
+  #   volumes:
+  #     - bisq-data:/home/appuser/.local/share/Bisq
+  #     # Optional bring-your-own Bisq account file:
+  #     # - ./dexUnifiedApi/bisqseed/secrets/UserPayload:/run/secrets/bisq_UserPayload:ro
+  #     # Set BISQ_ACCOUNT_FILE_PATH=/run/secrets/bisq_UserPayload when using that mount.
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 3072M
+  #         cpus: '1.5'
+  #   restart: unless-stopped
 
   unified-api:
     logging: *default-logging
