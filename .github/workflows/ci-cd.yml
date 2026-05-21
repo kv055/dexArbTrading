@@ -332,6 +332,8 @@ jobs:
         run: |
           set -Eeuo pipefail
           scp -i ~/.ssh/id_ed25519 docker-compose.yml "$SSH_USER@$SSH_HOST:$REPO_DIR/docker-compose.yml"
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "mkdir -p '$REPO_DIR/deploy/monitoring'"
+          scp -r -i ~/.ssh/id_ed25519 deploy/monitoring "$SSH_USER@$SSH_HOST:$REPO_DIR/deploy/"
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
             "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' bash -s" <<'REMOTE'
           set -Eeuo pipefail
