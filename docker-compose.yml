@@ -127,8 +127,6 @@ services:
       context: .
       dockerfile: dexUnifiedApi/Dockerfile.snapshot
     depends_on:
-      bisq:
-        condition: service_started
       postgres:
         condition: service_healthy
       tor:
