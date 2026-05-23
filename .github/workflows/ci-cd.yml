@@ -333,7 +333,9 @@ jobs:
           set -Eeuo pipefail
           scp -i ~/.ssh/id_ed25519 docker-compose.yml "$SSH_USER@$SSH_HOST:$REPO_DIR/docker-compose.yml"
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "sudo rm -rf '$REPO_DIR/deploy/monitoring' && \
+            "sudo rm -rf '$REPO_DIR/deploy' && \
+             sudo mkdir -p '$REPO_DIR/deploy' && \
+             sudo chown -R '$SSH_USER:$SSH_USER' '$REPO_DIR/deploy' && \
              mkdir -p '$REPO_DIR/deploy/monitoring/grafana/provisioning/dashboards' \
                       '$REPO_DIR/deploy/monitoring/grafana/provisioning/datasources' \
                       '$REPO_DIR/deploy/monitoring/grafana/dashboards'"
