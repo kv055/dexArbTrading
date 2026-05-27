@@ -35,6 +35,16 @@ cd deploy/provision/terraform
 terraform destroy
 ```
 
+### Regenerating DBeaver connection files
+
+The VPS IP changes whenever Terraform recreates the box. `deploy/provision/dbeaver-sync.sh` generates a DBeaver project archive (`dexarb-vps.dbp`, with the connection details and an AES-encrypted password bundled) from the current `deploy/provision/.env.vps` and the root `.env`. Output lands in `deploy/provision/dbeaver-out/` (gitignored).
+
+```bash
+deploy/provision/dbeaver-sync.sh
+```
+
+Import it via DBeaver: **File → Import → DBeaver → Project**, then select `deploy/provision/dbeaver-out/dexarb-vps.dbp`. It imports as a separate project (`dexArbTrading-vps-import`) with the password bundled. The import always creates a new project, so to re-import after an IP change, delete the existing `dexArbTrading-vps-import` project first.
+
 ---
 
 ### Manual steps (alternative)

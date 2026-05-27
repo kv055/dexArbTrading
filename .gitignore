@@ -11,6 +11,8 @@ deploy/provision/terraform/.terraform/
 deploy/provision/terraform/.terraform.lock.hcl
 deploy/provision/terraform/terraform.tfstate
 deploy/provision/terraform/terraform.tfstate.backup
+deploy/provision/dbeaver-out/*
+!deploy/provision/dbeaver-out/.gitkeep
 vps_deploy/config.env
 vps_deploy/config.yaml
 vps_deploy/hooks.json
