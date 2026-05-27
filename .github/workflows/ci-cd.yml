@@ -127,6 +127,8 @@ jobs:
     needs: [test-go, test-frontend]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    env:
+      DOCKER_BUILD_SUMMARY: false
     strategy:
       fail-fast: false
       matrix:
@@ -190,6 +192,40 @@ jobs:
             ${{ env.REGISTRY }}/${{ steps.owner.outputs.value }}/dexarbtrading-${{ matrix.service }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  build-report:
+    name: Build report
+    needs: build-and-push
+    if: always() && needs.build-and-push.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write consolidated summary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo "## Docker Build Summary"
+            echo ""
+            echo "| Service | Status | Duration |"
+            echo "|---------|:------:|:--------:|"
+            gh api "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+              --paginate --jq '
+                .jobs[]
+                | select(.name | startswith("Build & push "))
+                | {
+                    svc:        (.name | ltrimstr("Build & push ")),
+                    conclusion: .conclusion,
+                    duration: (
+                      if .started_at and .completed_at then
+                        ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601)) | "\(.)s"
+                      else "—" end
+                    )
+                  }
+                | "| \(.svc) | \(if .conclusion == "success" then "✅ success" elif .conclusion == "failure" then "❌ failure" elif .conclusion == null then "🔄 running" else "⚠️ \(.conclusion)" end) | \(.duration) |"
+              '
+            echo ""
+            echo "_Run: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   pre-deploy:
     name: Pre-deploy checks
