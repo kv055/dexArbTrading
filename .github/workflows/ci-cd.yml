@@ -332,11 +332,11 @@ jobs:
         run: |
           set -Eeuo pipefail
           scp -i ~/.ssh/id_ed25519 docker-compose.yml "$SSH_USER@$SSH_HOST:$REPO_DIR/docker-compose.yml"
+          # Monitoring configs must exist on disk BEFORE 'docker compose up' below,
+          # otherwise the daemon auto-creates the bind-mount paths as empty
+          # root-owned dirs and locks the deploy user out. Do not reorder.
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "sudo rm -rf '$REPO_DIR/deploy' && \
-             sudo mkdir -p '$REPO_DIR/deploy' && \
-             sudo chown -R '$SSH_USER:$SSH_USER' '$REPO_DIR/deploy' && \
-             mkdir -p '$REPO_DIR/deploy/monitoring/grafana/provisioning/dashboards' \
+            "mkdir -p '$REPO_DIR/deploy/monitoring/grafana/provisioning/dashboards' \
                       '$REPO_DIR/deploy/monitoring/grafana/provisioning/datasources' \
                       '$REPO_DIR/deploy/monitoring/grafana/dashboards'"
           scp -r -O -i ~/.ssh/id_ed25519 deploy/monitoring/ "$SSH_USER@$SSH_HOST:$REPO_DIR/deploy/monitoring/"

@@ -91,6 +91,14 @@
         group: "{{ deploy_user }}"
         mode: "0750"
 
+    - name: Configure token-based github.com URL rewrite for deploy user
+      ansible.builtin.command:
+        cmd: git config --global url.https://x-access-token:{{ gh_pat }}@github.com/.insteadOf https://github.com/
+      become_user: "{{ deploy_user }}"
+      changed_when: false
+      no_log: true
+      when: gh_pat | default('') | length > 0
+
     - name: Clone repo with submodules
       ansible.builtin.git:
         repo: https://github.com/kv055/dexArbTrading.git
@@ -98,6 +106,8 @@
         recursive: true
         version: main
         update: false
+      environment:
+        GIT_TERMINAL_PROMPT: "0"
       become_user: "{{ deploy_user }}"
 
     - name: Print next steps

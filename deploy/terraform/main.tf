@@ -77,7 +77,7 @@ resource "hcloud_firewall" "main" {
 
 resource "hcloud_server" "main" {
   name        = var.server_name
-  server_type = "cx32"
+  server_type = "cx33"
   image       = "debian-12"
   location    = var.location
   ssh_keys    = [hcloud_ssh_key.deploy.id]
