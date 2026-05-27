@@ -14,7 +14,9 @@ extract_key() {
 }
 
 read_vps_var() {
-  grep "^${1}=" deploy/.env.vps | cut -d= -f2- | sed 's/^"\(.*\)"$/\1/'
+  # Use the already-sourced variables so multi-line quoted values
+  # (e.g. VPS_SSH_KNOWN_HOSTS, VPS_SSH_PRIVATE_KEY) are preserved.
+  printf '%s' "${!1-}"
 }
 
 if [[ ! -f .env ]]; then
@@ -31,6 +33,9 @@ if [[ ! -f deploy/.env.vps ]]; then
   echo "ERROR: deploy/.env.vps not found — copy deploy/.env.vps.example and fill in the values" >&2
   exit 1
 fi
+
+# shellcheck disable=SC1091
+set -a; . deploy/.env.vps; set +a
 
 REMOTE=$(git remote get-url origin)
 REPO=$(echo "$REMOTE" | sed 's|.*github\.com[:/]||; s|\.git$||')
