@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Automates deploy/README.md steps 1-3: terraform apply -> ansible playbook -> github secrets.
+# Runs inside the dexarb-provision Docker container; invoke via deploy/provision/run.sh.
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/id_ed25519}"
 
@@ -12,11 +13,11 @@ usage() {
 Usage: $0 [--key <path-to-ssh-private-key>]
 
 Runs Terraform (provision VPS), Ansible (configure VPS), and writes
-GitHub repository secrets via deploy/setup-github-secrets.sh.
+GitHub repository secrets via deploy/provision/secrets/setup-github-secrets.sh.
 
 Options:
   --key <path>   Path to the SSH private key whose public half is in
-                 deploy/terraform/terraform.tfvars. Default: ~/.ssh/id_ed25519
+                 deploy/provision/terraform/terraform.tfvars. Default: ~/.ssh/id_ed25519
                  Can also be set via SSH_PRIVATE_KEY env var.
   -h, --help     Show this help.
 EOF
@@ -96,7 +97,7 @@ ANSIBLE_HOST_KEY_CHECKING=False \
 # ---------------------------------------------------------------------------
 # Step 3: GitHub secrets
 # ---------------------------------------------------------------------------
-log "Step 3/3: Generating deploy/.env.vps and uploading GitHub secrets"
+log "Step 3/3: Generating deploy/provision/.env.vps and uploading GitHub secrets"
 
 ENV_VPS="$SCRIPT_DIR/.env.vps"
 if [[ -f "$ENV_VPS" ]]; then
@@ -132,4 +133,4 @@ echo "  inventory        : $INVENTORY"
 echo "  env.vps          : $ENV_VPS"
 echo ""
 echo "Delegating to setup-github-secrets.sh..."
-exec "$SCRIPT_DIR/setup-github-secrets.sh"
+exec "$SCRIPT_DIR/secrets/setup-github-secrets.sh"

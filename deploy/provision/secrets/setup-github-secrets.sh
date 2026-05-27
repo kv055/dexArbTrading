@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR/.."
+cd "$SCRIPT_DIR/../../.."
 
 extract_key() {
   local file="$1"
@@ -29,13 +29,13 @@ if [[ -z "$TOKEN" ]]; then
   exit 1
 fi
 
-if [[ ! -f deploy/.env.vps ]]; then
-  echo "ERROR: deploy/.env.vps not found — copy deploy/.env.vps.example and fill in the values" >&2
+if [[ ! -f deploy/provision/.env.vps ]]; then
+  echo "ERROR: deploy/provision/.env.vps not found — copy deploy/provision/.env.vps.example and fill in the values" >&2
   exit 1
 fi
 
 # shellcheck disable=SC1091
-set -a; . deploy/.env.vps; set +a
+set -a; . deploy/provision/.env.vps; set +a
 
 REMOTE=$(git remote get-url origin)
 REPO=$(echo "$REMOTE" | sed 's|.*github\.com[:/]||; s|\.git$||')

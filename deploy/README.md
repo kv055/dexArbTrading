@@ -4,23 +4,53 @@
 
 The `terraform/` and `ansible/` subdirectories provision and configure the VPS from scratch. Run these once before the CI/CD pipeline takes over.
 
-### Prerequisites
+### Automated provisioning (recommended)
 
-- [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.5
-- [Ansible](https://docs.ansible.com/ansible/latest/installation_guide/) ≥ 2.14
+A single script runs all three steps (Terraform, Ansible, GitHub secrets) inside a Docker container — no host-side Terraform or Ansible required.
+
+**Prerequisites:**
+
+- Docker
 - A Hetzner Cloud API token (read/write) from [console.hetzner.cloud](https://console.hetzner.cloud)
 - An SSH keypair for the deploy user
+- `GH_PAT` set in the root `.env` file (used by Ansible to clone private submodules and by the secrets upload step)
+
+```bash
+# Fill in your Hetzner token and SSH public key
+cp deploy/provision/terraform/terraform.tfvars.example deploy/provision/terraform/terraform.tfvars
+$EDITOR deploy/provision/terraform/terraform.tfvars
+
+# Run — defaults to ~/.ssh/id_ed25519; override with --key <path>
+deploy/provision/run.sh [--key ~/.ssh/your_key]
+```
+
+This creates a **cx33** server (4 vCPU, 8 GB RAM, 80 GB disk, Debian 12) in `hel1` (Helsinki), configures it with Docker CE and the `deploy` user, clones the repo to `/opt/dexArbTrading`, and writes all 11 GitHub repository secrets. The next push to `main` deploys the full compose stack automatically.
+
+The script is idempotent — safe to re-run if it fails partway through.
+
+### Teardown
+
+```bash
+cd deploy/provision/terraform
+terraform destroy
+```
+
+---
+
+### Manual steps (alternative)
+
+If you prefer to run the steps individually, install [Terraform](https://developer.hashicorp.com/terraform/install) ≥ 1.5 and [Ansible](https://docs.ansible.com/ansible/latest/installation_guide/) ≥ 2.14 on your host, then follow the steps below.
 
 ### 1 — Provision with Terraform
 
 ```bash
-cd deploy/terraform
+cd deploy/provision/terraform
 cp terraform.tfvars.example terraform.tfvars   # fill in token + SSH public key
 terraform init
 terraform apply
 ```
 
-This creates a **cx32** server (4 vCPU, 8 GB RAM, Debian 12) in `hel1` (Helsinki, cheapest region), a firewall, and uploads your SSH key. Takes ~30 seconds.
+This creates a **cx33** server (4 vCPU, 8 GB RAM, Debian 12) in `hel1` (Helsinki, cheapest region), a firewall, and uploads your SSH key. Takes ~30 seconds.
 
 ```bash
 # Capture the IP for the next step
@@ -30,12 +60,14 @@ SERVER_IP=$(terraform output -raw server_ip)
 ### 2 — Configure with Ansible
 
 ```bash
-cd deploy/ansible
+cd deploy/provision/ansible
 sed "s/SERVER_IP/$SERVER_IP/" inventory.ini.tpl > inventory.ini
-ansible-playbook -i inventory.ini playbook.yml --private-key ~/.ssh/your_key
+ansible-playbook -i inventory.ini playbook.yml \
+  --private-key ~/.ssh/your_key \
+  --extra-vars "gh_pat=<your-GH_PAT>"
 ```
 
-Ansible installs Docker CE, adds the `deploy` user to the `docker` group, configures log rotation, and clones the repo to `/opt/dexArbTrading`.
+Ansible installs Docker CE, adds the `deploy` user to the `docker` group, configures log rotation, and clones the repo (including private submodules) to `/opt/dexArbTrading`. The `gh_pat` extra-var is required for the submodule clone to authenticate.
 
 ### 3 — Wire up CI/CD
 
@@ -46,17 +78,12 @@ After Ansible completes, add or update these GitHub repository secrets (see [Git
 | `VPS_SSH_HOST` | value of `$SERVER_IP` |
 | `VPS_SSH_USER` | `deploy` |
 | `VPS_SSH_PRIVATE_KEY` | private half of the keypair you used above |
-| `VPS_SSH_KNOWN_HOSTS` | `ssh-keyscan -t ed25519 $SERVER_IP` |
+| `VPS_SSH_KNOWN_HOSTS` | output of `ssh-keyscan $SERVER_IP` (all key types) |
 | `VPS_REPO_DIR` | `/opt/dexArbTrading` |
 
+> **Note:** `VPS_SSH_KNOWN_HOSTS` must include all three host key types (RSA, ECDSA, ED25519) from `ssh-keyscan`. A single-type scan will cause "Host key verification failed" in CI because OpenSSH negotiates ED25519 by default.
+
 The next push to `main` will deploy the full compose stack automatically.
-
-### Teardown
-
-```bash
-cd deploy/terraform
-terraform destroy
-```
 
 ---
 

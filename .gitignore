@@ -6,11 +6,11 @@
 .env.hash
 .env.vps
 .env.vps.bak
-deploy/ansible/inventory.ini
-deploy/terraform/.terraform/
-deploy/terraform/.terraform.lock.hcl
-deploy/terraform/terraform.tfstate
-deploy/terraform/terraform.tfstate.backup
+deploy/provision/ansible/inventory.ini
+deploy/provision/terraform/.terraform/
+deploy/provision/terraform/.terraform.lock.hcl
+deploy/provision/terraform/terraform.tfstate
+deploy/provision/terraform/terraform.tfstate.backup
 vps_deploy/config.env
 vps_deploy/config.yaml
 vps_deploy/hooks.json

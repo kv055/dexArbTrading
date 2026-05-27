@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Wrapper: builds the provisioning image on first run, then runs
-# deploy/provision.sh inside it. The host needs only docker + a chosen
+# deploy/provision/provision.sh inside it. The host needs only docker + a chosen
 # SSH key pair; terraform/ansible/gh live inside the container.
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 IMAGE="dexarb-provision:latest"
 
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/id_ed25519}"
@@ -23,7 +23,7 @@ done
 # Auto-build on first run (or when Dockerfile changes).
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "==> Building $IMAGE (first run)"
-  docker build -t "$IMAGE" -f "$SCRIPT_DIR/Dockerfile.provision" "$SCRIPT_DIR"
+  docker build -t "$IMAGE" -f "$SCRIPT_DIR/Dockerfile" "$SCRIPT_DIR"
 fi
 
 # Resolve key paths to absolute (docker -v needs absolute paths).
@@ -45,7 +45,7 @@ HOST_GID="$(id -g)"
 cleanup() {
   docker run --rm --user 0:0 \
     -v "$REPO_ROOT":/repo \
-    "$IMAGE" -c "chown -R $HOST_UID:$HOST_GID /repo/deploy" >/dev/null 2>&1 || true
+    "$IMAGE" -c "chown -R $HOST_UID:$HOST_GID /repo/deploy/provision" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -57,4 +57,4 @@ docker run --rm "${TTY_FLAGS[@]}" \
   -e IN_PROVISION_CONTAINER=1 \
   -w /repo \
   "$IMAGE" \
-  /repo/deploy/provision.sh "${PASSTHRU[@]}"
+  /repo/deploy/provision/provision.sh "${PASSTHRU[@]}"
