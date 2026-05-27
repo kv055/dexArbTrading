@@ -3,8 +3,38 @@ name: CI/CD
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.vscode/**'
+      - '.codex'
+      - '.agents/**'
+      - '.lefthook/**'
+      - 'lefthook.yml'
+      - 'deploy/provision/**'
+      - 'dexMmController/docs/**'
+      - 'dexMonitor/docs/**'
+      - 'dexUnifiedApi/docs/**'
+      - 'dexMmTradingLogicHummingBot/**'
+      - '.gitignore'
+      - '.gitmodules'
+      - 'LICENSE'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.vscode/**'
+      - '.codex'
+      - '.agents/**'
+      - '.lefthook/**'
+      - 'lefthook.yml'
+      - 'deploy/provision/**'
+      - 'dexMmController/docs/**'
+      - 'dexMonitor/docs/**'
+      - 'dexUnifiedApi/docs/**'
+      - 'dexMmTradingLogicHummingBot/**'
+      - '.gitignore'
+      - '.gitmodules'
+      - 'LICENSE'
 
 permissions:
   contents: read
