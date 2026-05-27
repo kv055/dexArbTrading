@@ -66,8 +66,20 @@ jobs:
       - name: Build (tsc + vite)
         run: npm run build
 
-      - name: Install Playwright browsers
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('dexMonitor/react-frontend/package-lock.json') }}
+
+      - name: Install Playwright browsers + deps
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium
+
+      - name: Install Playwright system deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
 
       - name: Run Playwright e2e tests
         run: npm run test:e2e
