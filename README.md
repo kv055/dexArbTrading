@@ -1,4 +1,7 @@
-# dexArbTrading
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/wordmark-dark.svg">
+  <img src="assets/brand/wordmark-light.svg" alt="dexArbPendulum — BTC DEX ↔ CEX Arbitrage Stack" height="110">
+</picture>
 
 `dexArbTrading` is a Docker Compose workspace for monitoring Bitcoin DEX/CEX spreads and coordinating the supporting services for arbitrage experiments.
 
