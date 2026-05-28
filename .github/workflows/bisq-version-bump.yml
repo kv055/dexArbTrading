@@ -13,6 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.GH_PAT }}
+          submodules: recursive
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Read current BISQ_VERSION
         id: current
@@ -42,15 +50,6 @@ jobs:
             fi
           fi
 
-      - name: Apply bump
-        if: steps.decide.outputs.bump == 'true'
-        env:
-          OLD: ${{ steps.current.outputs.version }}
-          NEW: ${{ steps.upstream.outputs.version }}
-        run: |
-          sed -i "s/ARG BISQ_VERSION=$OLD/ARG BISQ_VERSION=$NEW/g" dexUnifiedApi/Dockerfile.bisq
-          sed -i "s/BISQ_VERSION=$OLD/BISQ_VERSION=$NEW/g" docker-compose.yml
-
       - name: Verify upstream artifacts exist
         if: steps.decide.outputs.bump == 'true'
         env:
@@ -59,14 +58,29 @@ jobs:
           curl -fsSLI "https://github.com/bisq-network/bisq/releases/download/v${NEW}/bisq-daemon-${NEW}.zip" > /dev/null
           curl -fsSLI "https://github.com/bisq-network/bisq/releases/download/v${NEW}/bisq-cli-${NEW}.zip" > /dev/null
 
-      - name: Commit and push
+      - name: Bump submodule (dexUnifiedApi) and push
         if: steps.decide.outputs.bump == 'true'
         env:
           OLD: ${{ steps.current.outputs.version }}
           NEW: ${{ steps.upstream.outputs.version }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add dexUnifiedApi/Dockerfile.bisq docker-compose.yml
+          cd dexUnifiedApi
+          # submodule is checked out as detached HEAD; move to main so we can push
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          sed -i "s/ARG BISQ_VERSION=$OLD/ARG BISQ_VERSION=$NEW/g" Dockerfile.bisq
+          git add Dockerfile.bisq
+          git commit -m "chore(bisq): bump BISQ_VERSION ${OLD} -> ${NEW}"
+          git push origin main
+
+      - name: Bump outer repo (submodule pointer + docker-compose.yml) and push
+        if: steps.decide.outputs.bump == 'true'
+        env:
+          OLD: ${{ steps.current.outputs.version }}
+          NEW: ${{ steps.upstream.outputs.version }}
+        run: |
+          sed -i "s/BISQ_VERSION=$OLD/BISQ_VERSION=$NEW/g" docker-compose.yml
+          git add dexUnifiedApi docker-compose.yml
           git commit -m "chore(bisq): bump BISQ_VERSION ${OLD} -> ${NEW}"
           git push origin main
