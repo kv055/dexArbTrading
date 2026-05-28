@@ -139,6 +139,9 @@ jobs:
           - service: bisq
             context: ./dexUnifiedApi
             dockerfile: dexUnifiedApi/Dockerfile.bisq
+          - service: bisq2
+            context: ./dexUnifiedApi
+            dockerfile: dexUnifiedApi/Dockerfile.bisq2
           - service: unified-api
             context: .
             dockerfile: dexUnifiedApi/Dockerfile
@@ -236,7 +239,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      SERVICES: tor bisq unified-api unified-snapshot postgres-backup app mm-controller totp-api fiat-controller docs
+      SERVICES: tor bisq bisq2 unified-api unified-snapshot postgres-backup app mm-controller totp-api fiat-controller docs
     steps:
       - name: Compute lowercase image owner
         id: owner
