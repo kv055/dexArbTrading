@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  issues: write
 
 jobs:
   check-and-bump:
@@ -65,48 +64,15 @@ jobs:
 
           auth_header=""
           [ -n "$GITHUB_TOKEN" ] && auth_header="-H \"Authorization: Bearer $GITHUB_TOKEN\""
-          assets=$(curl -fsSL $auth_header \
+          if ! curl -fsSL -o /dev/null $auth_header \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/bisq-network/bisq/releases/tags/v${upstream}" \
-            | jq -r '[.assets[].name]')
-          echo "Release assets for v${upstream}: $assets"
-          if ! echo "$assets" | grep -q "bisq-daemon-${upstream}.zip" || \
-             ! echo "$assets" | grep -q "bisq-cli-${upstream}.zip"; then
+            "https://api.github.com/repos/bisq-network/bisq/git/ref/tags/v${upstream}"; then
             echo "bump=false" >> "$GITHUB_OUTPUT"
-            echo "needs_attention=true" >> "$GITHUB_OUTPUT"
-            echo "assets_list=$(echo "$assets" | tr -d '\n ')" >> "$GITHUB_OUTPUT"
-            echo "WARNING: bisq ${upstream} does not ship daemon/cli ZIPs — manual intervention required to upgrade" >&2
+            echo "WARNING: bisq ${upstream} has no git tag yet; skipping" >&2
             exit 0
           fi
 
           echo "bump=true" >> "$GITHUB_OUTPUT"
-
-      - name: Open issue for missing daemon ZIPs
-        if: steps.decide.outputs.needs_attention == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-          CURRENT: ${{ steps.current.outputs.version }}
-          UPSTREAM: ${{ steps.upstream.outputs.version }}
-        run: |
-          existing=$(curl -fsSL \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues?state=open&labels=bisq-upgrade" \
-            | jq -r --arg title "bisq $UPSTREAM released without daemon ZIPs" \
-              '[.[] | select(.title | contains($title))] | .[0].number // empty')
-          if [ -n "$existing" ]; then
-            echo "Issue #${existing} already open for ${UPSTREAM}; skipping"
-            exit 0
-          fi
-          curl -fsSL -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/issues" \
-            -d "{
-              \"title\": \"bisq ${UPSTREAM} released without daemon ZIPs — manual upgrade required\",
-              \"body\": \"The scheduled bisq version-bump workflow detected upstream release **${UPSTREAM}** but cannot auto-upgrade: \`bisq-daemon-${UPSTREAM}.zip\` and \`bisq-cli-${UPSTREAM}.zip\` are absent from the release assets.\n\n**Current pinned version:** ${CURRENT}\n\nOnce bisq ships a release with daemon ZIPs, the workflow will auto-upgrade. Until then, trading continues on ${CURRENT}.\",
-              \"labels\": [\"bisq-upgrade\"]
-            }"
 
       - name: Bump submodule (dexUnifiedApi) and push
         if: steps.decide.outputs.bump == 'true'
