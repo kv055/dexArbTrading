@@ -53,10 +53,19 @@ jobs:
       - name: Verify upstream artifacts exist
         if: steps.decide.outputs.bump == 'true'
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEW: ${{ steps.upstream.outputs.version }}
         run: |
-          curl -fsSLI "https://github.com/bisq-network/bisq/releases/download/v${NEW}/bisq-daemon-${NEW}.zip" > /dev/null
-          curl -fsSLI "https://github.com/bisq-network/bisq/releases/download/v${NEW}/bisq-cli-${NEW}.zip" > /dev/null
+          assets=$(gh api repos/bisq-network/bisq/releases/tags/v${NEW} --jq '[.assets[].name]')
+          echo "Release assets for v${NEW}: $assets"
+          if ! echo "$assets" | grep -q "bisq-daemon-${NEW}.zip"; then
+            echo "ERROR: bisq-daemon-${NEW}.zip not found in release assets" >&2
+            exit 1
+          fi
+          if ! echo "$assets" | grep -q "bisq-cli-${NEW}.zip"; then
+            echo "ERROR: bisq-cli-${NEW}.zip not found in release assets" >&2
+            exit 1
+          fi
 
       - name: Bump submodule (dexUnifiedApi) and push
         if: steps.decide.outputs.bump == 'true'
