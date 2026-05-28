@@ -1,0 +1,72 @@
+name: Bisq version bump
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  check-and-bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Read current BISQ_VERSION
+        id: current
+        run: |
+          current=$(grep -oP 'BISQ_VERSION=\K[0-9]+\.[0-9]+\.[0-9]+' docker-compose.yml | head -1)
+          echo "version=$current" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch latest upstream release
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          latest=$(gh api repos/bisq-network/bisq/releases/latest --jq '.tag_name' | sed 's/^v//')
+          echo "version=$latest" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether to bump
+        id: decide
+        run: |
+          if [ "${{ steps.current.outputs.version }}" = "${{ steps.upstream.outputs.version }}" ]; then
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+          else
+            higher=$(printf '%s\n%s\n' "${{ steps.current.outputs.version }}" "${{ steps.upstream.outputs.version }}" | sort -V | tail -1)
+            if [ "$higher" = "${{ steps.upstream.outputs.version }}" ]; then
+              echo "bump=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "bump=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Apply bump
+        if: steps.decide.outputs.bump == 'true'
+        env:
+          OLD: ${{ steps.current.outputs.version }}
+          NEW: ${{ steps.upstream.outputs.version }}
+        run: |
+          sed -i "s/ARG BISQ_VERSION=$OLD/ARG BISQ_VERSION=$NEW/g" dexUnifiedApi/Dockerfile.bisq
+          sed -i "s/BISQ_VERSION=$OLD/BISQ_VERSION=$NEW/g" docker-compose.yml
+
+      - name: Verify upstream artifacts exist
+        if: steps.decide.outputs.bump == 'true'
+        env:
+          NEW: ${{ steps.upstream.outputs.version }}
+        run: |
+          curl -fsSLI "https://github.com/bisq-network/bisq/releases/download/v${NEW}/bisq-daemon-${NEW}.zip" > /dev/null
+          curl -fsSLI "https://github.com/bisq-network/bisq/releases/download/v${NEW}/bisq-cli-${NEW}.zip" > /dev/null
+
+      - name: Commit and push
+        if: steps.decide.outputs.bump == 'true'
+        env:
+          OLD: ${{ steps.current.outputs.version }}
+          NEW: ${{ steps.upstream.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dexUnifiedApi/Dockerfile.bisq docker-compose.yml
+          git commit -m "chore(bisq): bump BISQ_VERSION ${OLD} -> ${NEW}"
+          git push origin main
