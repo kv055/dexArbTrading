@@ -82,6 +82,39 @@ services:
           cpus: '1.5'
     restart: unless-stopped
 
+  bisq2:
+    logging: *default-logging
+    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-bisq2:${IMAGE_TAG:-latest}
+    build:
+      context: ./dexUnifiedApi
+      dockerfile: Dockerfile.bisq2
+      args:
+        - BISQ2_VERSION=2.1.11
+    depends_on:
+      tor:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      unified-api:
+        condition: service_healthy
+    environment:
+      - BISQ2_VERSION=2.1.11
+      - BISQ2_ACCOUNT_FILE_PATH=${BISQ2_ACCOUNT_FILE_PATH:-}
+      - BISQ2_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - BISQ2_SEED_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - BISQ2_WALLET_PASSWORD=${BISQ2_WALLET_PASSWORD:-}
+    volumes:
+      - bisq2-data:/home/appuser/.local/share/Bisq2
+      # Optional bring-your-own Bisq 2 account file (format TBD):
+      # - ./dexUnifiedApi/bisqseed/secrets/bisq2_account:/run/secrets/bisq2_account:ro
+      # Set BISQ2_ACCOUNT_FILE_PATH=/run/secrets/bisq2_account when using that mount.
+    deploy:
+      resources:
+        limits:
+          memory: 3072M
+          cpus: '1.5'
+    restart: unless-stopped
+
   unified-api:
     logging: *default-logging
     image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-unified-api:${IMAGE_TAG:-latest}
@@ -104,6 +137,8 @@ services:
       - TOR_PROXY_ADDR=tor:9050
       - BISQ_GRPC_HOST=bisq:9998
       - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
+      - BISQ2_REST_HOST=bisq2:8090
+      - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
       - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
     volumes:
       - ./dexUnifiedApi/.env:/app/.env:ro
@@ -139,6 +174,8 @@ services:
       - DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - POSTGRES_HOST=postgres
       - BISQ_GRPC_HOST=bisq:9998
+      - BISQ2_REST_HOST=bisq2:8090
+      - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
       - PRICE_PROVIDER=bisq_tor
       - SNAPSHOT_INTERVAL_MIN=1
       - SNAPSHOT_HEALTH_MAX_AGE_SEC=180
@@ -501,6 +538,7 @@ volumes:
   postgres-data:
   postgres-backups:
   bisq-data:
+  bisq2-data:
   # mm-controller-data:
   lnd-data:
   prometheus-data:
