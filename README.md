@@ -142,13 +142,14 @@ See `deploy/README.md` for required GitHub Secrets, the one-time VPS setup, and 
 Rules of the road:
 
 - **Never commit or merge to `main` locally.** Lefthook installs `pre-push` and
-  `pre-merge-commit` guards that reject it, and GitHub branch protection on `main` is the
-  authoritative backstop (PR + green checks required). Run `lefthook install` once per clone
-  to activate the local guards (see `deploy/README.md`).
+  `pre-merge-commit` guards that reject it. Run `lefthook install` once per clone to activate
+  them (see `deploy/README.md`). These are the protection on this Free private repo and are
+  bypassable with `--no-verify`; server-side GitHub branch protection (PR + green checks,
+  non-bypassable) would require GitHub Pro or a public repo.
 - Day-to-day: branch off `develop` → open a PR into `develop` → CI validates → squash-merge.
 - Ship to prod: open a PR `develop` → `main`; the merge rebuilds images and deploys.
-- The automated Bisq version bump follows the same path — it opens an auto-merge PR into
-  `develop`, not `main`.
+- The automated Bisq version bump follows the same path — it opens a PR into `develop` (not
+  `main`); review and merge it once CI is green.
 
 ### Local staging
 

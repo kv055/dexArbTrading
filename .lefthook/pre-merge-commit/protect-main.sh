@@ -10,10 +10,11 @@ case "$branch" in
   main | master)
     cat >&2 <<EOF
 ✖ Local merges into '$branch' are blocked.
-  '$branch' is the protected production branch — it only changes via a reviewed
-  PR on GitHub (develop -> main). Do your work on a feature branch and open a PR
-  into 'develop'.
-  (Emergency override: git merge --no-verify … — also requires the GitHub backstop.)
+  '$branch' is the production branch — it should only change via a reviewed PR on
+  GitHub (develop -> main). Do your work on a feature branch and open a PR into
+  'develop'.
+  (Override: git merge --no-verify … — there is no server-side backstop on this
+  Free private repo, so use with care.)
 EOF
     exit 1
     ;;

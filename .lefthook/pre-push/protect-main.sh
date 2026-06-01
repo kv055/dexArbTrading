@@ -17,9 +17,10 @@ done
 if [ "$blocked" -eq 1 ]; then
   cat >&2 <<'EOF'
 ✖ Direct pushes to 'main' are blocked.
-  'main' is the protected production branch. Push your branch and open a PR into
-  'develop'; prod is updated by promoting develop -> main via a PR on GitHub.
-  (Emergency override: git push --no-verify … — GitHub branch protection still applies.)
+  'main' is the production branch. Push your branch and open a PR into 'develop';
+  prod is updated by promoting develop -> main via a PR on GitHub.
+  (Override: git push --no-verify … — there is no server-side backstop on this
+  Free private repo, so use with care.)
 EOF
   exit 1
 fi

@@ -171,7 +171,7 @@ The same [`lefthook.yml`](../lefthook.yml) wires two guards that keep production
 - `pre-push` → `.lefthook/pre-push/protect-main.sh` rejects any push whose target ref is `refs/heads/main`.
 - `pre-merge-commit` → `.lefthook/pre-merge-commit/protect-main.sh` rejects a local merge made while on `main`.
 
-These are convenience guards (bypassable with `--no-verify`); the authoritative enforcement is GitHub branch protection on `main` (PR + green checks required). All work flows `feature/* → develop → main`; `develop` is the default branch and only a reviewed `develop → main` PR updates production. See the README's *Branching & environments* section.
+These are convenience guards (bypassable with `--no-verify`). On this Free private repo they are the protection for `main`; non-bypassable server-side GitHub branch protection (PR + green checks) would require GitHub Pro or making the repo public. All work flows `feature/* → develop → main`; `develop` is the default branch and only a reviewed `develop → main` PR updates production. See the README's *Branching & environments* section.
 
 ### Automated secrets upload
 

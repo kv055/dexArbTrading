@@ -113,7 +113,9 @@ jobs:
           gh pr create \
             --base develop --head "$BRANCH" \
             --title "chore(bisq): bump BISQ_VERSION ${OLD} -> ${NEW}" \
-            --body "Automated Bisq bump ${OLD} -> ${NEW}. The full CI pipeline (including the bisq image build) runs on this PR; it merges into develop automatically once all checks are green, then reaches prod via the usual develop -> main promotion."
-          # Auto-merge once required checks pass. Requires 'Allow auto-merge' enabled on the
-          # repo and a required status check on develop (e.g. the build-and-push job).
-          gh pr merge "$BRANCH" --auto --squash --delete-branch
+            --body "Automated Bisq bump ${OLD} -> ${NEW}. The full CI pipeline (including the bisq image build) runs on this PR. Review and merge it into develop once green; it then reaches prod via the usual develop -> main promotion."
+          # Try auto-merge (needs GitHub Pro / 'Allow auto-merge' — unavailable on a Free
+          # private repo). If it isn't available, leave the PR open for a manual merge so
+          # the bump never silently fails and a human gates the version change.
+          gh pr merge "$BRANCH" --auto --squash --delete-branch \
+            || echo "::notice::Auto-merge unavailable; review and merge PR for bisq ${NEW} manually once CI is green."
