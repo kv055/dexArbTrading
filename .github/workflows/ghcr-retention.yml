@@ -1,0 +1,42 @@
+name: GHCR retention
+
+# Prunes old GHCR image versions so the registry doesn't grow unbounded, while
+# deliberately preserving recent per-commit (:<sha>) tags — those are the rollback
+# targets the deploy job (ci-cd.yml) falls back to. Pruning too aggressively would
+# delete the image a rollback needs, so the safety nets below are intentionally generous.
+
+on:
+  schedule:
+    - cron: "30 4 * * 0" # Sundays 04:30 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "List what would be deleted without deleting"
+        type: boolean
+        default: true
+
+permissions:
+  packages: write
+
+concurrency:
+  group: ghcr-retention
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prune old GHCR image versions (keep recent rollback targets)
+        uses: snok/container-retention-policy@d3bdcf5ce9b05f685154e4a16c39233b245e3d53 # v3.1.0
+        with:
+          account: user
+          # GH_PAT carries delete:packages; required for wildcard/negation filters
+          # (the default GITHUB_TOKEN is a temporal token and can't use them).
+          token: ${{ secrets.GH_PAT }}
+          image-names: "dexarbtrading-*"
+          image-tags: "!latest" # never delete the version currently tagged :latest
+          tag-selection: both # also reap older untagged build layers
+          cut-off: 8w # only consider versions older than 8 weeks …
+          keep-n-most-recent: 20 # … and always keep the 20 newest tagged per image (rollback window)
+          # Scheduled runs delete for real; manual runs default to a safe dry-run preview.
+          dry-run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
