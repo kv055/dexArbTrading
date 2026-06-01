@@ -2,7 +2,7 @@ name: CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
     paths-ignore:
       - '**.md'
       - '.vscode/**'
@@ -19,7 +19,7 @@ on:
       - '.gitmodules'
       - 'LICENSE'
   pull_request:
-    branches: [main]
+    branches: [main, develop]
     paths-ignore:
       - '**.md'
       - '.vscode/**'
@@ -40,8 +40,10 @@ permissions:
   contents: read
   packages: write
 
+# Per-branch serialization: keeps the single-VPS deploy (main) from overlapping
+# itself, while a long develop/staging validation never queues ahead of a prod deploy.
 concurrency:
-  group: deploy-vps
+  group: ci-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -73,6 +75,7 @@ jobs:
   test-frontend:
     name: Frontend tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: dexMonitor/react-frontend
@@ -105,7 +108,15 @@ jobs:
 
       - name: Install Playwright browsers + deps
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: npx playwright install --with-deps chromium
+        # The browser download intermittently stalls with no internal timeout, which
+        # hung this job for hours before. Bound each attempt and retry; re-running the
+        # apt portion is cheap since the system deps are already installed.
+        run: |
+          for i in 1 2 3; do
+            timeout 300 npx playwright install --with-deps chromium && exit 0
+            echo "::warning::playwright install attempt $i stalled/failed; retrying"
+          done
+          exit 1
 
       - name: Install Playwright system deps (cache hit)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
