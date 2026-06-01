@@ -164,6 +164,15 @@ The `post-commit` hook defined in each repo's [`lefthook.yml`](../lefthook.yml) 
 
 The original `.env` is never modified. The private key is written to `.env.keys` (gitignored). Only `.env.enc` is committed.
 
+**Branch-protection guards (also installed by `lefthook install`):**
+
+The same [`lefthook.yml`](../lefthook.yml) wires two guards that keep production safe on dev machines:
+
+- `pre-push` → `.lefthook/pre-push/protect-main.sh` rejects any push whose target ref is `refs/heads/main`.
+- `pre-merge-commit` → `.lefthook/pre-merge-commit/protect-main.sh` rejects a local merge made while on `main`.
+
+These are convenience guards (bypassable with `--no-verify`); the authoritative enforcement is GitHub branch protection on `main` (PR + green checks required). All work flows `feature/* → develop → main`; `develop` is the default branch and only a reviewed `develop → main` PR updates production. See the README's *Branching & environments* section.
+
 ### Automated secrets upload
 
 Instead of copying keys manually, run the appropriate bootstrap script from the repo root:

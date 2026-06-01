@@ -118,7 +118,9 @@ Dropbox can be used by switching `PG_BACKUP_RCLONE_REMOTE` and providing the Dro
 
 ## Deployment
 
-Deployments to the VPS are fully automated via GitHub Actions on every push to `main`:
+`main` is the protected production branch — it is never pushed to directly. Changes reach
+prod by promoting `develop` → `main` via a reviewed PR (see [Branching & environments](#branching--environments)).
+Each merge to `main` triggers the fully automated VPS deploy via GitHub Actions:
 
 1. **Tests** — Go tests run for all modules; frontend lints, builds, and runs Playwright e2e tests.
 2. **Build & push** — Docker images for all services are built and pushed to GHCR tagged with `:latest` and `:<sha>`.
@@ -128,6 +130,41 @@ Deployments to the VPS are fully automated via GitHub Actions on every push to `
 6. **Smoke tests** — the runner hits `/health` endpoints to confirm the stack came up.
 
 See `deploy/README.md` for required GitHub Secrets, the one-time VPS setup, and the dotenvx secrets management workflow.
+
+## Branching & environments
+
+| Branch | Environment | How it updates |
+|--------|-------------|----------------|
+| `feature/*` | local | your working tree; open a PR into `develop` |
+| `develop` | **staging (local)** — default branch, where all dev work lands | merge feature PRs; CI runs tests + build-only validation |
+| `main` | **production** (VPS) | promoted from `develop` via PR only; merge auto-deploys |
+
+Rules of the road:
+
+- **Never commit or merge to `main` locally.** Lefthook installs `pre-push` and
+  `pre-merge-commit` guards that reject it, and GitHub branch protection on `main` is the
+  authoritative backstop (PR + green checks required). Run `lefthook install` once per clone
+  to activate the local guards (see `deploy/README.md`).
+- Day-to-day: branch off `develop` → open a PR into `develop` → CI validates → squash-merge.
+- Ship to prod: open a PR `develop` → `main`; the merge rebuilds images and deploys.
+- The automated Bisq version bump follows the same path — it opens an auto-merge PR into
+  `develop`, not `main`.
+
+### Local staging
+
+`develop` is validated locally before any PR. A `Makefile` builds the **full stack from your
+local source** (never pulling prod images):
+
+```bash
+make staging-env-check   # confirm decrypted .env files are present
+make staging-wait        # build + start everything, block until healthy
+make staging-ps          # status
+make staging-logs        # tail logs
+make staging-down        # tear down (named volumes are kept)
+```
+
+The dashboard is then at `http://localhost:5000/` and the unified API at
+`http://localhost:5010/health`.
 
 ## Development
 

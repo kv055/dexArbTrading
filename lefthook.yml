@@ -1,3 +1,22 @@
+# Run `lefthook install` once per clone to wire these into .git/hooks.
+# These local guards are the first line of defense; GitHub branch protection on
+# `main` is the authoritative, non-bypassable backstop (local hooks can be skipped
+# with --no-verify).
+
+pre-push:
+  # use_stdin forwards git's pre-push ref list (<local ref> <local sha> <remote ref>
+  # <remote sha>) to the guard; without it lefthook drops stdin and the guard is blind.
+  # Must be a command (not a script) — only commands honour use_stdin.
+  commands:
+    protect-main: # reject pushes whose target ref is refs/heads/main
+      use_stdin: true
+      run: bash .lefthook/pre-push/protect-main.sh
+
+pre-merge-commit:
+  scripts:
+    "protect-main.sh": # reject local merges made while on main
+      runner: bash
+
 post-commit:
   scripts:
     "encrypt-env.sh":

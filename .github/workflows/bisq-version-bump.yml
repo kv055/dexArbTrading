@@ -15,6 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          # Bump from the integration branch; the bot PR also targets it, so version
+          # bumps flow develop -> main through staging like every other change.
+          ref: develop
           token: ${{ secrets.GH_PAT }}
           submodules: recursive
 
@@ -108,9 +111,9 @@ jobs:
           git commit -m "chore(bisq): bump BISQ_VERSION ${OLD} -> ${NEW}"
           git push -u origin "$BRANCH" --force
           gh pr create \
-            --base main --head "$BRANCH" \
+            --base develop --head "$BRANCH" \
             --title "chore(bisq): bump BISQ_VERSION ${OLD} -> ${NEW}" \
-            --body "Automated Bisq bump ${OLD} -> ${NEW}. The full CI pipeline (including the bisq image build) runs on this PR; it merges and deploys automatically once all checks are green."
+            --body "Automated Bisq bump ${OLD} -> ${NEW}. The full CI pipeline (including the bisq image build) runs on this PR; it merges into develop automatically once all checks are green, then reaches prod via the usual develop -> main promotion."
           # Auto-merge once required checks pass. Requires 'Allow auto-merge' enabled on the
-          # repo and a required status check on main (e.g. the build-and-push job).
+          # repo and a required status check on develop (e.g. the build-and-push job).
           gh pr merge "$BRANCH" --auto --squash --delete-branch
