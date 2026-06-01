@@ -147,7 +147,9 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      # Generous start window so a slow start during a full-stack recreate on a
+      # memory-constrained VPS isn't misread as unhealthy and cascaded to dependents.
+      start_period: 40s
     deploy:
       resources:
         limits:
@@ -255,7 +257,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 5s
+      # See unified-api: generous start window to avoid false-unhealthy under load.
+      start_period: 40s
     deploy:
       resources:
         limits:

@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   check-and-bump:
@@ -90,13 +91,26 @@ jobs:
           git commit -m "chore(bisq): bump BISQ_VERSION ${OLD} -> ${NEW}"
           git push origin main
 
-      - name: Bump outer repo (submodule pointer + docker-compose.yml) and push
+      - name: Open auto-merge PR for outer repo bump (submodule pointer + docker-compose.yml)
         if: steps.decide.outputs.bump == 'true'
         env:
           OLD: ${{ steps.current.outputs.version }}
           NEW: ${{ steps.upstream.outputs.version }}
+          # A real PAT (not the default GITHUB_TOKEN) is required so the branch push and PR
+          # actually trigger CI — GITHUB_TOKEN-created PRs do not start workflow runs.
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
+          set -Eeuo pipefail
+          BRANCH="bisq-bump/${NEW}"
           sed -i "s/BISQ_VERSION=$OLD/BISQ_VERSION=$NEW/g" docker-compose.yml
+          git checkout -b "$BRANCH"
           git add dexUnifiedApi docker-compose.yml
           git commit -m "chore(bisq): bump BISQ_VERSION ${OLD} -> ${NEW}"
-          git push origin main
+          git push -u origin "$BRANCH" --force
+          gh pr create \
+            --base main --head "$BRANCH" \
+            --title "chore(bisq): bump BISQ_VERSION ${OLD} -> ${NEW}" \
+            --body "Automated Bisq bump ${OLD} -> ${NEW}. The full CI pipeline (including the bisq image build) runs on this PR; it merges and deploys automatically once all checks are green."
+          # Auto-merge once required checks pass. Requires 'Allow auto-merge' enabled on the
+          # repo and a required status check on main (e.g. the build-and-push job).
+          gh pr merge "$BRANCH" --auto --squash --delete-branch

@@ -125,7 +125,8 @@ jobs:
   build-and-push:
     name: Build & push ${{ matrix.service }}
     needs: [test-go, test-frontend]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Runs on both push (build + push) and pull_request (build-only validation, see the
+    # 'push:' flag below) so a bad image — e.g. an auto bisq bump — is caught before merge.
     runs-on: ubuntu-latest
     env:
       DOCKER_BUILD_SUMMARY: false
@@ -189,7 +190,8 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          push: true
+          # Push only on merges to main; PRs build for validation but never publish/deploy.
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: |
             ${{ env.REGISTRY }}/${{ steps.owner.outputs.value }}/dexarbtrading-${{ matrix.service }}:latest
             ${{ env.REGISTRY }}/${{ steps.owner.outputs.value }}/dexarbtrading-${{ matrix.service }}:${{ github.sha }}
@@ -404,7 +406,7 @@ jobs:
             '$REPO_DIR/dexMmController/.env' \
             '$REPO_DIR/dexFiatController/.env'"
 
-      - name: Push compose file & restart stack
+      - name: Push compose file, restart stack & verify (auto-rollback on failure)
         timeout-minutes: 10
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
@@ -412,6 +414,7 @@ jobs:
           REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
           GHCR_TOKEN: ${{ secrets.GH_PAT }}
           GHCR_USER: ${{ github.actor }}
+          NEW_SHA: ${{ github.sha }}
         run: |
           set -Eeuo pipefail
           scp -i ~/.ssh/id_ed25519 docker-compose.yml "$SSH_USER@$SSH_HOST:$REPO_DIR/docker-compose.yml"
@@ -424,27 +427,53 @@ jobs:
                       '$REPO_DIR/deploy/monitoring/grafana/dashboards'"
           scp -r -O -i ~/.ssh/id_ed25519 deploy/monitoring/ "$SSH_USER@$SSH_HOST:$REPO_DIR/deploy/monitoring/"
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' bash -s" <<'REMOTE'
+            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-          docker compose -f "$REPO_DIR/docker-compose.yml" pull
-          docker compose -f "$REPO_DIR/docker-compose.yml" up -d --remove-orphans
-          REMOTE
+          cd "$REPO_DIR"
 
-      - name: Post-deploy smoke tests
-        env:
-          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
-        run: |
-          set -Eeuo pipefail
-          for url in "http://$SSH_HOST:5010/health" "http://$SSH_HOST:5000/"; do
-            for attempt in 1 2 3; do
-              if curl -fsSL --max-time 10 "$url" >/dev/null; then
-                echo "ok $url"
-                continue 2
-              fi
-              echo "attempt $attempt failed for $url"
-              if [ "$attempt" -lt 3 ]; then sleep 5; fi
+          # Last good deploy, recorded only after a verified-healthy rollout below.
+          PREV_SHA=$(cat .deployed_sha 2>/dev/null || true)
+          # Snapshot a known-good compose file the first time so rollback has one to use.
+          [ -f docker-compose.deployed.yml ] || cp docker-compose.yml docker-compose.deployed.yml
+
+          # Deploy images by immutable per-commit tag (compose reads ${IMAGE_TAG:-latest}).
+          # --wait blocks until every service is healthy and returns non-zero otherwise,
+          # which is what arms the rollback below.
+          deploy() {  # $1=image tag  $2=compose file
+            IMAGE_TAG="$1" docker compose -f "$2" pull
+            IMAGE_TAG="$1" docker compose -f "$2" up -d --remove-orphans --wait --wait-timeout 300
+          }
+
+          smoke() {
+            local url ok attempt
+            for url in "http://127.0.0.1:5010/health" "http://127.0.0.1:5000/"; do
+              ok=""
+              for attempt in 1 2 3; do
+                if curl -fsSL --max-time 10 "$url" >/dev/null; then ok=1; break; fi
+                echo "smoke attempt $attempt failed for $url"
+                [ "$attempt" -lt 3 ] && sleep 5 || true
+              done
+              [ -n "$ok" ] || { echo "smoke test failed: $url"; return 1; }
+              echo "ok $url"
             done
-            echo "smoke test failed: $url did not return success after 3 attempts"
+          }
+
+          if deploy "$NEW_SHA" docker-compose.yml && smoke; then
+            cp docker-compose.yml docker-compose.deployed.yml
+            echo "$NEW_SHA" > .deployed_sha
+            echo "deploy of $NEW_SHA healthy"
+          else
+            echo "::error::deploy of $NEW_SHA failed — rolling back to ${PREV_SHA:-<none>}"
+            if [ -n "${PREV_SHA:-}" ]; then
+              if deploy "$PREV_SHA" docker-compose.deployed.yml && smoke; then
+                echo "::warning::rolled back to last-good $PREV_SHA"
+              else
+                echo "::error::ROLLBACK to $PREV_SHA FAILED — manual intervention required"
+              fi
+            else
+              echo "::error::no previous SHA recorded — cannot auto-roll back"
+            fi
             exit 1
-          done
+          fi
+          REMOTE
