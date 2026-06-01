@@ -13,7 +13,7 @@ COMPOSE ?= docker compose
 ENV_FILES := .env dexUnifiedApi/.env dexMonitor/.env
 
 .DEFAULT_GOAL := help
-.PHONY: help staging-up staging-wait staging-down staging-logs staging-rebuild staging-ps staging-env-check
+.PHONY: help staging-up staging-wait staging-down staging-logs staging-rebuild staging-ps staging-env-check prune
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -46,3 +46,13 @@ staging-ps: ## Show local stack status
 
 staging-logs: ## Tail logs from the local stack
 	$(COMPOSE) logs -f --tail=100
+
+prune: ## Drop stale remote refs and delete local branches already merged into develop
+	@git fetch origin --prune
+	@merged=$$(git branch --merged origin/develop | grep -vE '^\*|^\+|^\s*(main|develop)$$' | xargs); \
+	if [ -n "$$merged" ]; then \
+		echo "$$merged" | xargs -n1 git branch -d; \
+	else \
+		echo "no locally-merged branches to prune"; \
+	fi
+	@echo "(squash-merged branches aren't detected by --merged; remove those with: git branch -D <name>)"

@@ -150,6 +150,9 @@ Rules of the road:
 - Ship to prod: open a PR `develop` → `main`; the merge rebuilds images and deploys.
 - The automated Bisq version bump follows the same path — it opens a PR into `develop` (not
   `main`); review and merge it once CI is green.
+- Branches are cleaned up automatically: GitHub deletes a PR's head branch on merge, a weekly
+  *Branch cleanup* workflow sweeps any remaining branches already merged into `develop`/`main`,
+  and `make prune` removes locally-merged branches on your machine.
 
 ### Local staging
 

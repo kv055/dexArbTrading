@@ -173,6 +173,8 @@ The same [`lefthook.yml`](../lefthook.yml) wires two guards that keep production
 
 These are convenience guards (bypassable with `--no-verify`). On this Free private repo they are the protection for `main`; non-bypassable server-side GitHub branch protection (PR + green checks) would require GitHub Pro or making the repo public. All work flows `feature/* → develop → main`; `develop` is the default branch and only a reviewed `develop → main` PR updates production. See the README's *Branching & environments* section.
 
+Merged branches are cleaned up automatically: `delete_branch_on_merge` removes a PR's head branch on merge, the weekly [`branch-cleanup.yml`](../.github/workflows/branch-cleanup.yml) workflow sweeps any branch already merged into `develop`/`main` (keeping `main`/`develop` and open-PR branches; run it via *Actions → Branch cleanup* with `dry_run` to preview), and `make prune` clears locally-merged branches.
+
 ### Automated secrets upload
 
 Instead of copying keys manually, run the appropriate bootstrap script from the repo root:
