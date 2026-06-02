@@ -1,6 +1,56 @@
 #!/usr/bin/env bash
 # Generates a DBeaver project archive (dexarb-vps.dbp) for the current VPS Postgres,
 # into deploy/provision/dbeaver-out/. Import via DBeaver: File -> Import -> DBeaver -> Project.
+#
+# ============================================================================
+# DBeaver "Import Project" gotchas — learned the hard way (DBeaver CE 26.1)
+# ============================================================================
+# These are the non-obvious behaviours that make a *correct* .dbp still appear
+# "broken" after import. If you change how this archive is built, keep them in
+# mind — most of this script's odd choices exist to satisfy them.
+#
+# 1. IMPORT IS KEYED ON THE INTERNAL PROJECT NAME, NOT THE .dbp FILENAME.
+#    DBeaver reads the project name from meta.xml's <project name="..."> (and the
+#    per-project .project file) inside the archive. The .dbp file on disk can be
+#    called anything — renaming it changes nothing.
+#
+# 2. IMPORTING A PROJECT WHOSE NAME ALREADY EXISTS SILENTLY NO-OPS.
+#    DBeaver does NOT overwrite, merge, or suffix ("... (2)") an existing project
+#    of the same name — it just keeps the old one and the import appears to do
+#    nothing. Symptom we hit: regenerating the archive and re-importing kept a
+#    stale, pre-tunnel connection (host = the now-firewalled public IP) and threw
+#    "Connection refused", because the good connection never actually landed.
+#    FIX (below): the project name is timestamped so every archive imports as a
+#    brand-new project. Old ones must be deleted from the navigator by hand.
+#
+# 3. DBeaver DOES NOT RE-SCAN A PROJECT IT ALREADY KNOWS.
+#    Editing a known project's .dbeaver/data-sources.json on disk (out from under
+#    a running DBeaver, or even between launches once the project is registered)
+#    does NOT make the connection re-appear/refresh — the navigator is driven by
+#    DBeaver's own workspace registry, not a re-read of the file. So you cannot
+#    "fix" an imported connection by patching its JSON; you must re-import as a
+#    new project (point 2) or edit it through the GUI. (This is why hand-writing
+#    into ~/snap/dbeaver-ce/.../workspace6/<proj>/.dbeaver/ is unreliable.)
+#
+# 4. THE ARCHIVE LAYOUT IS RIGID (see the zip-building section for specifics):
+#    meta.xml must declare every file/folder as nested <resource> elements, and
+#    directories need explicit trailing-slash zip entries, or the importer never
+#    extracts the children. Get this wrong and the project imports empty.
+#
+# 5. SSH-TUNNEL HANDLER FORMAT (see data_sources below) is validated against the
+#    SSH plugin's schema: handler id "ssh_tunnel", handler-level keys "type",
+#    "enabled", "user", "save-password" (HYPHENATED — camelCase "savePassword" is
+#    silently ignored), and a "properties" object whose keys (host, port,
+#    authType=PUBLIC_KEY, keyPath, implementation) come from the networkHandler
+#    extension in org.jkiss.dbeaver.net.ssh's plugin.xml. An unrecognised handler
+#    id makes the serializer drop the tunnel ("Can't find network handler '<id>'")
+#    and fall back to a direct connection — which is firewalled shut.
+#
+# Verified against snap dbeaver-ce rev 493 (v26.1): serializer
+# org.jkiss.dbeaver.registry.DataSourceSerializerModern, constants
+# org.jkiss.dbeaver.model.net.ssh.SSHConstants. Schema can drift between
+# versions; if a future DBeaver ignores the tunnel, re-check those two classes.
+# ============================================================================
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -124,7 +174,7 @@ data_sources = {
                         "type": "TUNNEL",
                         "enabled": True,
                         "user": ssh_user,
-                        "savePassword": True,
+                        "save-password": True,
                         "properties": {
                             "host": ssh_host,
                             "port": "22",
@@ -179,7 +229,11 @@ cc_bytes = iv + ciphertext
 # Layout dictated by org.jkiss.dbeaver.tools.project.ExportConstants:
 #   META_FILENAME = "meta.xml"   (zip root)
 #   DIR_PROJECTS  = "projects"   (project files go under projects/<name>/...)
-project_name = "dexArbTrading-vps-import"
+#
+# Timestamped so every regenerated archive imports as a NEW project — see the
+# "DBeaver Import gotchas" header, points 1 & 2: import is keyed on this internal
+# name (not the filename) and silently no-ops if the name already exists.
+project_name = "dexArbTrading-vps-import-" + time.strftime("%Y%m%d-%H%M%S")
 project_xml = (
     '<?xml version="1.0" encoding="UTF-8"?>\n'
     '<projectDescription>\n'
@@ -258,9 +312,13 @@ Keep it here (600 perms, gitignored). The connection references it by absolute
 path, so do not move/delete it or the tunnel will fail. If you use a snap/flatpak
 DBeaver, it must be allowed to read this path (it is under your home dir).
 
-Note: the import always creates a new project. To re-import (e.g. after
-rotating the key), delete the existing "dexArbTrading-vps-import" project first
-(right-click -> Delete in DBeaver, or remove its folder from the workspace).
+Each generated archive imports as its OWN project (the internal project name is
+timestamped), so you can just re-import after regenerating — no need to delete
+anything first. DBeaver's import silently ignores an archive whose project name
+already exists, which is why a fixed name made re-imports appear to "do nothing".
+Old projects pile up in the navigator; delete the stale ones (right-click ->
+Delete) once the new one connects. NB: renaming the .dbp file has no effect —
+DBeaver keys on the internal project name, not the filename.
 
 If DBeaver ever fails to read the tunnel config (its data-sources schema can vary
 by version), open the connection's SSH tab and confirm: host=$VPS_SSH_HOST,
