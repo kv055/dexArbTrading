@@ -71,6 +71,7 @@ var defaultCexProfile = CexWithdrawalProfile{
 var dexAcceptsLightning = map[string]bool{
 	"robosats":     true,
 	"bisq":         false,
+	"bisq2":        false,
 	"hodlhodl":     false,
 	"peachbitcoin": false,
 }

@@ -587,12 +587,20 @@ func (f *takerFeeFetcher) fetchBitstamp() (float64, error) {
 // dexTakerFees are the configured taker fees for each DEX platform (as fraction).
 // They act as fallbacks for live sources and as the canonical values for static-fee DEXes.
 // Bisq:     1.15% paid in BTC (taker side). Source: bisq.wiki/Trading_fees
+// Bisq2:    0% — Bisq Easy has no trade fee for either side; the seller pays only
+//
+//	the bitcoin mining fee, which is modelled separately as the network fee.
+//	Source: bisq.wiki/Bisq_Easy, bisq.wiki/Trading_fees
+//
 // RoboSats: 0.175% — fetched live from /api/info/; this is the fallback.
 // HodlHodl: 0.5% — both sides pay; no API endpoint. Source: hodlhodl.com/pages/faq
+// Peach:    2% buyer trading fee. Source: peachbitcoin.com/faq/trading
 var dexTakerFees = map[string]float64{
-	"bisq":     0.0115,
-	"robosats": 0.00175,
-	"hodlhodl": 0.005,
+	"bisq":         0.0115,
+	"bisq2":        0.0,
+	"robosats":     0.00175,
+	"hodlhodl":     0.005,
+	"peachbitcoin": 0.02,
 }
 
 // robosatsOnions are the coordinator onion addresses, tried in order.
