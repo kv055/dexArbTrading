@@ -18,6 +18,7 @@ type Manager struct {
 	prices   map[string]float64
 	feeds    []string
 	onUpdate func(string)
+	metrics  *Metrics
 }
 
 func NewManager(feeds []string) *Manager {
@@ -33,6 +34,12 @@ func (m *Manager) SetUpdateCallback(fn func(string)) {
 	m.onUpdate = fn
 }
 
+// SetMetrics wires Prometheus instrumentation into the manager. Safe to call
+// with nil (the metric methods are no-ops when unset).
+func (m *Manager) SetMetrics(metrics *Metrics) {
+	m.metrics = metrics
+}
+
 func (m *Manager) Get(cex string) float64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -43,6 +50,7 @@ func (m *Manager) Set(cex string, price float64) {
 	m.mu.Lock()
 	m.prices[cex] = price
 	m.mu.Unlock()
+	m.metrics.observePrice(cex, price)
 	if m.onUpdate != nil {
 		m.onUpdate(cex)
 	}
@@ -56,12 +64,20 @@ func (m *Manager) Start(ctx context.Context) {
 
 func (m *Manager) runFeed(ctx context.Context, cex string) {
 	backoff := time.Second
+	first := true
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
+
+		// Every iteration past the first is a reconnect after the previous
+		// connection dropped or failed to establish.
+		if !first {
+			m.metrics.incReconnect(cex)
+		}
+		first = false
 
 		var err error
 		switch cex {
@@ -77,6 +93,8 @@ func (m *Manager) runFeed(ctx context.Context, cex string) {
 			return
 		}
 
+		// The feed function only returns once the connection is gone.
+		m.metrics.setFeedUp(cex, false)
 		if err != nil {
 			fmt.Printf("[%sFeed] error: %v, retrying in %s\n", cex, err, backoff)
 		}
@@ -100,6 +118,7 @@ func (m *Manager) runKrakenFeed(ctx context.Context, cex string) error {
 	}
 	defer ws.Close()
 	fmt.Printf("[%sFeed] connected\n", cex)
+	m.metrics.setFeedUp(cex, true)
 
 	sub := fmt.Sprintf(`{"method":"subscribe","params":{"channel":"ticker","symbol":["%s"]}}`, defaultPair)
 	if err := ws.WriteMessage(gorillaws.TextMessage, []byte(sub)); err != nil {
@@ -135,6 +154,7 @@ func (m *Manager) runBinanceFeed(ctx context.Context, cex string) error {
 	}
 	defer ws.Close()
 	fmt.Printf("[%sFeed] connected\n", cex)
+	m.metrics.setFeedUp(cex, true)
 
 	for {
 		select {
@@ -165,6 +185,7 @@ func (m *Manager) runBitstampFeed(ctx context.Context, cex string) error {
 	}
 	defer ws.Close()
 	fmt.Printf("[%sFeed] connected\n", cex)
+	m.metrics.setFeedUp(cex, true)
 
 	sub := `{"event":"bts:subscribe","data":{"channel":"live_trades_btceur"}}`
 	if err := ws.WriteMessage(gorillaws.TextMessage, []byte(sub)); err != nil {
@@ -199,6 +220,7 @@ func (m *Manager) runCoinbaseFeed(ctx context.Context, cex string) error {
 	}
 	defer ws.Close()
 	fmt.Printf("[%sFeed] connected\n", cex)
+	m.metrics.setFeedUp(cex, true)
 
 	sub := `{"type":"subscribe","product_ids":["BTC-EUR"],"channel":"ticker"}`
 	if err := ws.WriteMessage(gorillaws.TextMessage, []byte(sub)); err != nil {
