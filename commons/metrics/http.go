@@ -6,6 +6,9 @@
 package metrics
 
 import (
+	"bufio"
+	"errors"
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -103,4 +106,19 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 		r.wroteHeader = true
 	}
 	return r.ResponseWriter.Write(b)
+}
+
+// Hijack forwards to the underlying ResponseWriter's Hijacker so WebSocket and
+// other connection-upgrade handlers keep working behind this middleware.
+//
+// Embedding http.ResponseWriter does not promote Hijack (the interface doesn't
+// declare it), so without this method the wrapper silently fails the
+// w.(http.Hijacker) assertion that gorilla/websocket's Upgrade relies on,
+// turning every upgrade into a 500.
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("metrics: underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return hj.Hijack()
 }
