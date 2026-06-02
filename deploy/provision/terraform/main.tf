@@ -34,13 +34,6 @@ resource "hcloud_firewall" "main" {
     source_ips = ["0.0.0.0/0", "::/0"]
   }
 
-  rule {
-    direction  = "in"
-    protocol   = "tcp"
-    port       = "5010"
-    source_ips = ["0.0.0.0/0", "::/0"]
-  }
-
   # Postgres — only open if trusted_cidrs are provided
   dynamic "rule" {
     for_each = length(var.trusted_cidrs) > 0 ? [1] : []

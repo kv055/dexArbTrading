@@ -9,7 +9,10 @@ services:
     logging: *default-logging
     image: postgres:17-alpine
     ports:
-      - "5432:5432"
+      # Bind to loopback only: reachable from the VPS host (so the DBeaver SSH
+      # tunnel can forward to it) and from the docker network (services use the
+      # postgres:5432 DNS name), but never exposed on the public interface.
+      - "127.0.0.1:5432:5432"
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_ADMIN_USER}
@@ -129,11 +132,18 @@ services:
     env_file:
       - ./dexUnifiedApi/.env
     ports:
-      - "5010:5010"
+      # Bind to loopback only: previously published on 0.0.0.0, which exposed
+      # /internal/*, /metrics and the raw API to the public internet (bypassing
+      # nginx). Loopback keeps it off the public interface while still letting the
+      # local Vite dev server (vite.config.ts proxies to localhost:5010) reach it.
+      # In prod nothing uses this mapping (services use the unified-api:5010 DNS
+      # name); it is harmless there because loopback is not externally reachable.
+      - "127.0.0.1:5010:5010"
     environment:
       - DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - POSTGRES_HOST=postgres
       - LISTEN_ADDR=:5010
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - TOR_PROXY_ADDR=tor:9050
       - BISQ_GRPC_HOST=bisq:9998
       - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
@@ -182,6 +192,7 @@ services:
       - SNAPSHOT_INTERVAL_MIN=1
       - SNAPSHOT_HEALTH_MAX_AGE_SEC=180
       - SERVER_INTERNAL_URL=http://unified-api:5010
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - TOR_PROXY_URL=socks5h://tor:9050
     volumes:
       - ./dexUnifiedApi/.env:/app/.env:ro

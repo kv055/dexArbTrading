@@ -39,6 +39,8 @@ ENV_ROOT="$REPO_ROOT/.env"
 set -a; source "$ENV_VPS"; source "$ENV_ROOT"; set +a
 
 : "${VPS_SSH_HOST:?VPS_SSH_HOST not set in $ENV_VPS}"
+: "${VPS_SSH_USER:?VPS_SSH_USER not set in $ENV_VPS}"
+: "${VPS_SSH_PRIVATE_KEY:?VPS_SSH_PRIVATE_KEY not set in $ENV_VPS}"
 : "${POSTGRES_DB:?POSTGRES_DB not set in $ENV_ROOT}"
 : "${POSTGRES_ADMIN_USER:?POSTGRES_ADMIN_USER not set in $ENV_ROOT}"
 : "${POSTGRES_ADMIN_PASSWORD:?POSTGRES_ADMIN_PASSWORD not set in $ENV_ROOT}"
@@ -48,18 +50,31 @@ command -v python3 >/dev/null 2>&1 || die "python3 not found on PATH"
 mkdir -p "$OUT_DIR"
 chmod 700 "$OUT_DIR"
 
-log "Generating DBeaver project archive"
-echo "  host    : $VPS_SSH_HOST"
-echo "  db      : $POSTGRES_DB"
-echo "  user    : $POSTGRES_ADMIN_USER"
-echo "  out dir : $OUT_DIR"
+# Write the SSH private key alongside the archive so the bundle is self-contained.
+# DBeaver's connection references it by PATH (not embedded in the archive): the
+# .dbp credentials blob is encrypted with DBeaver's *public static* AES key, so
+# embedding a private key there would be effectively plaintext. A path keeps the
+# key in this 600-perm file under dbeaver-out/ (gitignored) instead.
+KEY_PATH="$(cd "$OUT_DIR" && pwd)/vps_ssh_key"
+( umask 077; printf '%s\n' "$VPS_SSH_PRIVATE_KEY" > "$KEY_PATH" )
+chmod 600 "$KEY_PATH"
 
-DBEAVER_HOST="$VPS_SSH_HOST" \
+log "Generating DBeaver project archive (SSH-tunnelled)"
+echo "  ssh host : $VPS_SSH_HOST"
+echo "  ssh user : $VPS_SSH_USER"
+echo "  ssh key  : $KEY_PATH"
+echo "  db       : $POSTGRES_DB (via tunnel → localhost:5432)"
+echo "  db user  : $POSTGRES_ADMIN_USER"
+echo "  out dir  : $OUT_DIR"
+
 DBEAVER_DB="$POSTGRES_DB" \
 DBEAVER_USER="$POSTGRES_ADMIN_USER" \
 DBEAVER_PASSWORD="$POSTGRES_ADMIN_PASSWORD" \
 DBEAVER_CONN_NAME="$CONN_NAME" \
 DBEAVER_OUT_DIR="$OUT_DIR" \
+DBEAVER_SSH_HOST="$VPS_SSH_HOST" \
+DBEAVER_SSH_USER="$VPS_SSH_USER" \
+DBEAVER_SSH_KEYPATH="$KEY_PATH" \
 python3 <<'PY'
 import json, os, secrets, time, zipfile
 from pathlib import Path
@@ -69,15 +84,21 @@ try:
 except ImportError as e:
     raise SystemExit("ERROR: python3 'cryptography' package is required (pip install cryptography)") from e
 
-host      = os.environ["DBEAVER_HOST"]
 database  = os.environ["DBEAVER_DB"]
 user      = os.environ["DBEAVER_USER"]
 password  = os.environ["DBEAVER_PASSWORD"]
 conn_name = os.environ["DBEAVER_CONN_NAME"]
 out_dir   = Path(os.environ["DBEAVER_OUT_DIR"])
+ssh_host  = os.environ["DBEAVER_SSH_HOST"]
+ssh_user  = os.environ["DBEAVER_SSH_USER"]
+ssh_key   = os.environ["DBEAVER_SSH_KEYPATH"]
 
 conn_id = f"postgres-jdbc-{int(time.time()*1000):x}-{secrets.token_hex(8)}"
 
+# Postgres is bound to 127.0.0.1 on the VPS and closed at the firewall, so the
+# JDBC target is localhost *as seen from the SSH server*; DBeaver's ssh_tunnel
+# handler forwards a local port through SSH to it. Auth is by SSH key (survives
+# ISP IP rotation) and the tunnel encrypts the otherwise-cleartext DB traffic.
 data_sources = {
     "folders": {},
     "connections": {
@@ -87,10 +108,10 @@ data_sources = {
             "name": conn_name,
             "save-password": True,
             "configuration": {
-                "host": host,
+                "host": "localhost",
                 "port": "5432",
                 "database": database,
-                "url": f"jdbc:postgresql://{host}:5432/{database}",
+                "url": f"jdbc:postgresql://localhost:5432/{database}",
                 "configurationType": "MANUAL",
                 "type": "dev",
                 "closeIdleConnection": True,
@@ -98,6 +119,21 @@ data_sources = {
                     "@dbeaver-show-non-default-db@": "true",
                 },
                 "auth-model": "native",
+                "handlers": {
+                    "ssh_tunnel": {
+                        "type": "TUNNEL",
+                        "enabled": True,
+                        "user": ssh_user,
+                        "savePassword": True,
+                        "properties": {
+                            "host": ssh_host,
+                            "port": "22",
+                            "authType": "PUBLIC_KEY",
+                            "keyPath": ssh_key,
+                            "implementation": "sshj",
+                        },
+                    },
+                },
             },
         },
     },
@@ -203,24 +239,40 @@ PY
 chmod 600 "$OUT_DIR/dexarb-vps.dbp"
 
 cat > "$OUT_DIR/README.txt" <<EOF
-DBeaver project archive for the current VPS Postgres.
+DBeaver project archive for the current VPS Postgres (via SSH tunnel).
 
 Import via:
   DBeaver: File -> Import -> DBeaver -> Project, then select:
     $OUT_DIR/dexarb-vps.dbp
 
-Imports as a separate project ("dexArbTrading-vps-import"); the encrypted
-password is bundled, so no prompt on first connect.
+The connection tunnels through SSH: Postgres is bound to 127.0.0.1 on the VPS
+and closed at the firewall, so DBeaver connects over an SSH tunnel
+(${VPS_SSH_USER}@${VPS_SSH_HOST}:22) authenticated with the bundled key. SSH-key
+auth means it keeps working when your ISP rotates your IP, and the tunnel
+encrypts the DB traffic. The DB password is bundled (encrypted), so no prompt on
+first connect.
 
-Note: the import always creates a new project. To re-import after the VPS IP
-changes, delete the existing "dexArbTrading-vps-import" project first
+IMPORTANT — the SSH private key lives next to this file:
+    $KEY_PATH
+Keep it here (600 perms, gitignored). The connection references it by absolute
+path, so do not move/delete it or the tunnel will fail. If you use a snap/flatpak
+DBeaver, it must be allowed to read this path (it is under your home dir).
+
+Note: the import always creates a new project. To re-import (e.g. after
+rotating the key), delete the existing "dexArbTrading-vps-import" project first
 (right-click -> Delete in DBeaver, or remove its folder from the workspace).
 
+If DBeaver ever fails to read the tunnel config (its data-sources schema can vary
+by version), open the connection's SSH tab and confirm: host=$VPS_SSH_HOST,
+port=22, user=$VPS_SSH_USER, auth=Public Key, key=$KEY_PATH.
+
 Connection name: $CONN_NAME
-Host           : $VPS_SSH_HOST
+SSH host       : $VPS_SSH_HOST
+SSH user       : $VPS_SSH_USER
 Generated      : $(date -Iseconds)
 EOF
 chmod 600 "$OUT_DIR/README.txt"
 
 log "Done"
 echo "  Import file: $OUT_DIR/dexarb-vps.dbp"
+echo "  SSH key    : $KEY_PATH (keep in place; referenced by absolute path)"
