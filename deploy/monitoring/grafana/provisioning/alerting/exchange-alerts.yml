@@ -1,0 +1,122 @@
+# Grafana-managed alert rules (provisioned). In-Grafana only: no contact point is
+# configured here, so these fire and turn red in the Alerting UI / Alert-list panel
+# but nothing is pushed externally. robosats/peach/hodlhodl are intentionally NOT
+# alerted — they stay visual warnings on the Exchange health dashboard.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: exchanges
+    folder: DEX Alerts
+    interval: 1m
+    rules:
+      # CRITICAL: either bisq daemon (bisq v1 or bisq2) is unreachable. dex_exchange_up
+      # is set to 0 by the snapshot worker when it cannot fetch that exchange's offers.
+      - uid: dexarb-bisq-exchange-down
+        title: bisq / bisq2 exchange down
+        condition: C
+        for: 3m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: false
+        labels:
+          severity: critical
+        annotations:
+          summary: "Exchange {{ $labels.exchange }} is DOWN (dex_exchange_up = 0)"
+          description: "The {{ $labels.exchange }} daemon has been unreachable for 3m. Check the container (Docker services health dashboard) and bisq logs."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              datasource:
+                type: prometheus
+                uid: PBFA97CFB590B2093
+              editorMode: code
+              expr: dex_exchange_up{exchange=~"bisq|bisq2"}
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              conditions:
+                - type: query
+                  evaluator:
+                    type: lt
+                    params: [1]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+              refId: C
+
+      # CRITICAL: a bisq container is restart-looping (start time changed >= 3x in 15m).
+      - uid: dexarb-bisq-restart-loop
+        title: bisq container restart loop
+        condition: C
+        for: 5m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: false
+        labels:
+          severity: critical
+        annotations:
+          summary: "A bisq container is restart-looping ({{ $labels.name }})"
+          description: "container_start_time_seconds changed >= 3 times in 15m for {{ $labels.name }} — likely a crash loop."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              datasource:
+                type: prometheus
+                uid: PBFA97CFB590B2093
+              editorMode: code
+              expr: changes(container_start_time_seconds{name=~".*bisq.*"}[15m])
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params: [3]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+              refId: C

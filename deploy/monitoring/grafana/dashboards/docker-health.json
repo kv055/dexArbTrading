@@ -1,0 +1,152 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 0,
+  "schemaVersion": 39,
+  "uid": "dexarb-docker-health",
+  "title": "Docker services health",
+  "tags": ["dexarbtrading", "infrastructure"],
+  "timezone": "",
+  "time": {"from": "now-6h", "to": "now"},
+  "refresh": "30s",
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Containers reporting",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "count(count by (name) (container_last_seen{name!=\"\"}))", "refId": "A"}]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Containers restarting (15m)",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "options": {"colorMode": "background"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "count(changes(container_start_time_seconds{name!=\"\"}[15m]) >= bool 3) or vector(0)", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Scraped services up",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum(up{job=~\"unified-api|dexmonitor|postgres|node|cadvisor|prometheus\"})", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Total restarts (1h)",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}}, "overrides": []},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum(changes(container_start_time_seconds{name!=\"\"}[1h]))", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "state-timeline",
+      "title": "Container running (up / down)",
+      "description": "1 = the container is reporting to cAdvisor (running). A gap means cAdvisor stopped seeing it (stopped / down).",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 4},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "options": {"mergeValues": false, "showValue": "never", "rowHeight": 0.9, "alignValue": "left"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "(time() - container_last_seen{name!=\"\"}) < bool 60", "legendFormat": "{{name}}", "refId": "A"}]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "Restarts per container",
+      "description": "Counts how often each container's start time changed (i.e. it restarted). A high 15m value = a restart loop.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 13},
+      "fieldConfig": {"defaults": {"custom": {"align": "auto", "filterable": true}, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 3}]}}, "overrides": [{"matcher": {"id": "byName", "options": "Container"}, "properties": [{"id": "custom.cellOptions", "value": {"type": "color-text"}}]}, {"matcher": {"id": "byName", "options": "Restarts (15m)"}, "properties": [{"id": "custom.cellOptions", "value": {"type": "color-background"}}]}]},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "Restarts (15m)", "desc": true}]},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "changes(container_start_time_seconds{name!=\"\"}[15m])", "instant": true, "format": "table", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "changes(container_start_time_seconds{name!=\"\"}[1h])", "instant": true, "format": "table", "refId": "B"}
+      ],
+      "transformations": [
+        {"id": "merge", "options": {}},
+        {"id": "organize", "options": {"excludeByName": {"Time": true, "__name__": true, "id": true, "image": true, "instance": true, "job": true}, "indexByName": {}, "renameByName": {"name": "Container", "Value #A": "Restarts (15m)", "Value #B": "Restarts (1h)"}}}
+      ]
+    },
+    {
+      "id": 7,
+      "type": "state-timeline",
+      "title": "Scraped services up / down (Prometheus targets)",
+      "description": "Authoritative up/down for the services Prometheus scrapes a /metrics endpoint from.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 13},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "options": {"mergeValues": false, "showValue": "never", "rowHeight": 0.9, "alignValue": "left"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "up{job=~\"unified-api|dexmonitor|postgres|node|cadvisor|prometheus\"}", "legendFormat": "{{job}}", "refId": "A"}]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "bisq",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 5, "w": 4, "x": 0, "y": 23},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "mappings": [{"type": "value", "options": {"1": {"text": "DOWN", "color": "red"}}}], "noValue": "UP"}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "absent(container_last_seen{name=~\".*bisq.*\", name!~\".*bisq2.*\"})", "refId": "A"}]
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "bisq2",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 5, "w": 4, "x": 4, "y": 23},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "mappings": [{"type": "value", "options": {"1": {"text": "DOWN", "color": "red"}}}], "noValue": "UP"}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "absent(container_last_seen{name=~\".*bisq2.*\"})", "refId": "A"}]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "postgres",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 5, "w": 4, "x": 8, "y": 23},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "mappings": [{"type": "value", "options": {"1": {"text": "DOWN", "color": "red"}}}], "noValue": "UP"}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "absent(container_last_seen{name=~\".*postgres.*\", name!~\".*exporter.*\"})", "refId": "A"}]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "unified-api",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 5, "w": 4, "x": 12, "y": 23},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "mappings": [{"type": "value", "options": {"1": {"text": "DOWN", "color": "red"}}}], "noValue": "UP"}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "absent(container_last_seen{name=~\".*unified-api.*\"})", "refId": "A"}]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "unified-snapshot",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 5, "w": 4, "x": 16, "y": 23},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "mappings": [{"type": "value", "options": {"1": {"text": "DOWN", "color": "red"}}}], "noValue": "UP"}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "absent(container_last_seen{name=~\".*unified-snapshot.*\"})", "refId": "A"}]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "dexMonitor (app)",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 5, "w": 4, "x": 20, "y": 23},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "mappings": [{"type": "value", "options": {"1": {"text": "DOWN", "color": "red"}}}], "noValue": "UP"}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "absent(container_last_seen{name=~\".*app.*\"})", "refId": "A"}]
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 0,
+  "schemaVersion": 39,
+  "uid": "dexarb-exchange-health",
+  "title": "Exchange health & alerts",
+  "tags": ["dexarbtrading", "exchanges"],
+  "timezone": "",
+  "time": {"from": "now-6h", "to": "now"},
+  "refresh": "30s",
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Exchanges up",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "short", "max": 5, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 3}, {"color": "green", "value": 5}]}}, "overrides": []},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum(dex_exchange_up)", "refId": "A"}]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "bisq (CRITICAL)",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}, "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}], "noValue": "NO DATA"}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "dex_exchange_up{exchange=\"bisq\"}", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "bisq2 (CRITICAL)",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}, "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}], "noValue": "NO DATA"}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "dex_exchange_up{exchange=\"bisq2\"}", "refId": "A"}]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "bisq container restarts (15m)",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 3}]}}, "overrides": []},
+      "options": {"colorMode": "background"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum(changes(container_start_time_seconds{name=~\".*bisq.*\"}[15m]))", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "state-timeline",
+      "title": "Exchange up / down (all)",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 24, "x": 0, "y": 4},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "options": {"mergeValues": true, "showValue": "never", "rowHeight": 0.9, "alignValue": "left"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "dex_exchange_up", "legendFormat": "{{exchange}}", "refId": "A"}]
+    },
+    {
+      "id": 6,
+      "type": "state-timeline",
+      "title": "CRITICAL — bisq / bisq2 (alerts)",
+      "description": "These two are our own daemons. Down here = the bisq/bisq2 exchange is unreachable; a Grafana alert fires after 3m (in-Grafana only).",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 12, "x": 0, "y": 11},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "options": {"mergeValues": true, "showValue": "never", "rowHeight": 0.9, "alignValue": "left"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "dex_exchange_up{exchange=~\"bisq|bisq2\"}", "legendFormat": "{{exchange}}", "refId": "A"}]
+    },
+    {
+      "id": 7,
+      "type": "state-timeline",
+      "title": "WARNING — robosats / peach / hodlhodl (no alert)",
+      "description": "External exchanges. Down here is a warning only (yellow) — no alert is raised.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 7, "w": 12, "x": 12, "y": 11},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "yellow", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "options": {"mergeValues": true, "showValue": "never", "rowHeight": 0.9, "alignValue": "left"},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "dex_exchange_up{exchange=~\"robosats|peachbitcoin|hodlhodl\"}", "legendFormat": "{{exchange}}", "refId": "A"}]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "bisq / bisq2 container restarts (15m window)",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "fillOpacity": 10}}, "overrides": []},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "changes(container_start_time_seconds{name=~\".*bisq.*\"}[15m])", "legendFormat": "{{name}}", "refId": "A"}]
+    },
+    {
+      "id": 9,
+      "type": "alertlist",
+      "title": "Active exchange alerts",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
+      "options": {"alertName": "", "dashboardAlerts": false, "alertInstanceLabelFilter": "", "maxItems": 20, "sortOrder": 1, "stateFilter": {"firing": true, "pending": true, "noData": false, "normal": false, "error": true}, "viewMode": "list", "groupMode": "default"}
+    }
+  ]
+}
