@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -96,7 +97,7 @@ func (m *Manager) runFeed(ctx context.Context, cex string) {
 		// The feed function only returns once the connection is gone.
 		m.metrics.setFeedUp(cex, false)
 		if err != nil {
-			fmt.Printf("[%sFeed] error: %v, retrying in %s\n", cex, err, backoff)
+			slog.WarnContext(ctx, "price feed error, retrying", "cex", cex, "err", err, "backoff", backoff.String())
 		}
 		select {
 		case <-time.After(backoff):
@@ -117,7 +118,7 @@ func (m *Manager) runKrakenFeed(ctx context.Context, cex string) error {
 		return err
 	}
 	defer ws.Close()
-	fmt.Printf("[%sFeed] connected\n", cex)
+	slog.InfoContext(ctx, "price feed connected", "cex", cex)
 	m.metrics.setFeedUp(cex, true)
 
 	sub := fmt.Sprintf(`{"method":"subscribe","params":{"channel":"ticker","symbol":["%s"]}}`, defaultPair)
@@ -153,7 +154,7 @@ func (m *Manager) runBinanceFeed(ctx context.Context, cex string) error {
 		return err
 	}
 	defer ws.Close()
-	fmt.Printf("[%sFeed] connected\n", cex)
+	slog.InfoContext(ctx, "price feed connected", "cex", cex)
 	m.metrics.setFeedUp(cex, true)
 
 	for {
@@ -184,7 +185,7 @@ func (m *Manager) runBitstampFeed(ctx context.Context, cex string) error {
 		return err
 	}
 	defer ws.Close()
-	fmt.Printf("[%sFeed] connected\n", cex)
+	slog.InfoContext(ctx, "price feed connected", "cex", cex)
 	m.metrics.setFeedUp(cex, true)
 
 	sub := `{"event":"bts:subscribe","data":{"channel":"live_trades_btceur"}}`
@@ -219,7 +220,7 @@ func (m *Manager) runCoinbaseFeed(ctx context.Context, cex string) error {
 		return err
 	}
 	defer ws.Close()
-	fmt.Printf("[%sFeed] connected\n", cex)
+	slog.InfoContext(ctx, "price feed connected", "cex", cex)
 	m.metrics.setFeedUp(cex, true)
 
 	sub := `{"type":"subscribe","product_ids":["BTC-EUR"],"channel":"ticker"}`

@@ -1,0 +1,20 @@
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      # Turn the trace_id carried in structured metadata into a clickable link
+      # that opens the matching trace in Tempo. ($$ escapes Grafana's own env
+      # interpolation so the literal ${__value.raw} reaches the datasource.)
+      derivedFields:
+        - name: TraceID
+          matcherType: label
+          matcherRegex: trace_id
+          datasourceUid: tempo
+          url: "$${__value.raw}"
+          urlDisplayLabel: "View trace"

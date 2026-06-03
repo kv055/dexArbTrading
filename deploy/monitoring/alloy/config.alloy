@@ -1,0 +1,117 @@
+// Grafana Alloy config for dexArbTrading.
+//
+// One agent does both observability collection jobs:
+//   1. LOGS  — discover docker containers, read their stdout/stderr, parse the
+//              slog JSON, and ship to Loki.
+//   2. TRACES — receive OTLP from the Go services and forward to Tempo.
+//
+// SECURITY NOTE: this mounts the docker socket (read-only) for container
+// discovery. A read-only mount stops writes to the socket *file* but not Docker
+// API calls, so Alloy effectively has Docker API access. This is consistent with
+// the existing privileged monitoring agents (cadvisor is `privileged: true`,
+// node-exporter mounts the host root). Alloy itself is never published.
+
+// ---------------------------------------------------------------------------
+// LOGS
+// ---------------------------------------------------------------------------
+
+discovery.docker "containers" {
+	host = "unix:///var/run/docker.sock"
+}
+
+// Lift compose metadata onto every log stream so Grafana can filter by service.
+discovery.relabel "containers" {
+	targets = discovery.docker.containers.targets
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		target_label  = "container"
+	}
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service"
+	}
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+		target_label  = "project"
+	}
+}
+
+loki.source.docker "containers" {
+	host             = "unix:///var/run/docker.sock"
+	targets          = discovery.relabel.containers.output
+	forward_to       = [loki.process.parse.receiver]
+	refresh_interval = "15s"
+}
+
+// Parse slog JSON. Non-JSON lines (bisq/nginx/postgres) pass through unchanged —
+// they still carry the container/service labels, just no level/trace_id.
+loki.process "parse" {
+	forward_to = [loki.write.default.receiver]
+
+	stage.json {
+		expressions = {
+			level    = "level",
+			trace_id = "trace_id",
+			service  = "service",
+		}
+	}
+
+	// level is low cardinality -> a real label. Promote the slog `service` field
+	// to the `service` label too, so it matches the Prometheus/OTEL service name
+	// (e.g. dexmonitor, not the compose container name `app`) for cross-signal
+	// pivoting. Non-JSON logs keep the compose-name label set during relabeling.
+	stage.labels {
+		values = {
+			level   = "",
+			service = "",
+		}
+	}
+
+	// trace_id is high cardinality -> structured metadata, not a label. This is
+	// what lets Grafana jump from a log line to its trace.
+	stage.structured_metadata {
+		values = {
+			trace_id = "",
+		}
+	}
+}
+
+loki.write "default" {
+	endpoint {
+		url = "http://loki:3100/loki/api/v1/push"
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TRACES
+// ---------------------------------------------------------------------------
+
+otelcol.receiver.otlp "default" {
+	grpc {
+		endpoint = "0.0.0.0:4317"
+	}
+	http {
+		endpoint = "0.0.0.0:4318"
+	}
+
+	output {
+		traces = [otelcol.processor.batch.default.input]
+	}
+}
+
+otelcol.processor.batch "default" {
+	output {
+		traces = [otelcol.exporter.otlp.tempo.input]
+	}
+}
+
+otelcol.exporter.otlp "tempo" {
+	client {
+		endpoint = "tempo:4317"
+		tls {
+			insecure = true
+		}
+	}
+}

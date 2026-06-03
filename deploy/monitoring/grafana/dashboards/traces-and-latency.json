@@ -1,0 +1,64 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 0,
+  "schemaVersion": 39,
+  "uid": "dexarb-traces",
+  "title": "Traces & latency",
+  "tags": ["dexarbtrading", "traces"],
+  "timezone": "",
+  "time": {"from": "now-3h", "to": "now"},
+  "refresh": "30s",
+  "templating": {"list": []},
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "",
+      "gridPos": {"h": 3, "w": 24, "x": 0, "y": 0},
+      "options": {"mode": "markdown", "content": "**Distributed traces (Tempo) + request latency (Prometheus).** A snapshot run is one trace spanning `snapshot.run` → stage spans → the `/internal/live_offers` push into unified-api. Click any trace below to open it; from a span use **Logs for this span** to jump to the matching log lines."}
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "HTTP p95 latency by service & route (s)",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 3},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 0}}, "overrides": []},
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "histogram_quantile(0.95, sum by (service, route, le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{service}} {{route}}", "refId": "A"}]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Snapshot push ingest latency — unified-api (s)",
+      "description": "Time unified-api spends handling the snapshot worker's POST /internal/live_offers.",
+      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 3},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10}}, "overrides": []},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{route=~\".*/internal/live_offers\"}[5m])))", "legendFormat": "p50", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route=~\".*/internal/live_offers\"}[5m])))", "legendFormat": "p95", "refId": "B"}
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Recent snapshot runs (duration)",
+      "description": "Each row is one snapshot pipeline run. Sort by Duration to spot slow cycles; click to open the trace and see which stage (fetch / DB write / push) dominated.",
+      "datasource": {"type": "tempo", "uid": "tempo"},
+      "gridPos": {"h": 11, "w": 12, "x": 0, "y": 11},
+      "fieldConfig": {"defaults": {"custom": {"align": "auto"}}, "overrides": []},
+      "targets": [{"datasource": {"type": "tempo", "uid": "tempo"}, "queryType": "traceql", "query": "{ name = \"snapshot.run\" }", "tableType": "traces", "limit": 20, "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "table",
+      "title": "Errored spans (all services)",
+      "description": "Spans marked error across HTTP, gRPC (Bisq) and the snapshot stages. The fastest path to 'what is currently failing and where'.",
+      "datasource": {"type": "tempo", "uid": "tempo"},
+      "gridPos": {"h": 11, "w": 12, "x": 12, "y": 11},
+      "fieldConfig": {"defaults": {"custom": {"align": "auto"}}, "overrides": []},
+      "targets": [{"datasource": {"type": "tempo", "uid": "tempo"}, "queryType": "traceql", "query": "{ status = error }", "tableType": "traces", "limit": 20, "refId": "A"}]
+    }
+  ]
+}
