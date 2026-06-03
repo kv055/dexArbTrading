@@ -449,11 +449,16 @@ jobs:
           # Deliver the tree via tar-over-ssh, not scp: `scp -r deploy/monitoring/`
           # into an already-existing "$REPO_DIR/deploy/monitoring" nests the payload
           # one level deep (.../deploy/monitoring/monitoring/...), so nothing lands
-          # where compose expects it. rm -rf first also clears any stale dir Docker
-          # auto-created at a config FILE path during a previous failed deploy. The
-          # whole tree is repo-sourced config (runtime state lives in named volumes),
-          # so replacing it wholesale is safe.
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "rm -rf '$REPO_DIR/deploy/monitoring' && mkdir -p '$REPO_DIR/deploy'"
+          # where compose expects it. We replace the whole tree (repo-sourced config;
+          # runtime state lives in named volumes, so this is safe).
+          #
+          # A previous failed deploy can leave bind-mount paths that Docker
+          # auto-created as root-owned, which the (non-root) deploy user cannot rm.
+          # The deploy user is in the docker group, so wipe the tree from a throwaway
+          # root container instead of needing host sudo. mkdir the parent first so the
+          # bind source exists and Docker does not auto-create *it* as root.
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
+            "mkdir -p '$REPO_DIR/deploy' && docker run --rm -v '$REPO_DIR/deploy:/d' busybox:1.37 rm -rf /d/monitoring"
           tar -C deploy -cf - monitoring \
             | ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "tar -C '$REPO_DIR/deploy' -xf -"
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
