@@ -441,13 +441,21 @@ jobs:
           set -Eeuo pipefail
           scp -i ~/.ssh/id_ed25519 docker-compose.yml "$SSH_USER@$SSH_HOST:$REPO_DIR/docker-compose.yml"
           # Monitoring configs must exist on disk BEFORE 'docker compose up' below,
-          # otherwise the daemon auto-creates the bind-mount paths as empty
-          # root-owned dirs and locks the deploy user out. Do not reorder.
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "mkdir -p '$REPO_DIR/deploy/monitoring/grafana/provisioning/dashboards' \
-                      '$REPO_DIR/deploy/monitoring/grafana/provisioning/datasources' \
-                      '$REPO_DIR/deploy/monitoring/grafana/dashboards'"
-          scp -r -O -i ~/.ssh/id_ed25519 deploy/monitoring/ "$SSH_USER@$SSH_HOST:$REPO_DIR/deploy/monitoring/"
+          # otherwise the daemon auto-creates each bind-mount path as an empty
+          # root-owned dir. For FILE mounts (alloy/loki/tempo configs) the mount then
+          # fails outright ("not a directory"); for DIR mounts (grafana) it silently
+          # serves empty config. Do not reorder.
+          #
+          # Deliver the tree via tar-over-ssh, not scp: `scp -r deploy/monitoring/`
+          # into an already-existing "$REPO_DIR/deploy/monitoring" nests the payload
+          # one level deep (.../deploy/monitoring/monitoring/...), so nothing lands
+          # where compose expects it. rm -rf first also clears any stale dir Docker
+          # auto-created at a config FILE path during a previous failed deploy. The
+          # whole tree is repo-sourced config (runtime state lives in named volumes),
+          # so replacing it wholesale is safe.
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "rm -rf '$REPO_DIR/deploy/monitoring' && mkdir -p '$REPO_DIR/deploy'"
+          tar -C deploy -cf - monitoring \
+            | ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "tar -C '$REPO_DIR/deploy' -xf -"
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
             "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' bash -s" <<'REMOTE'
           set -Eeuo pipefail
