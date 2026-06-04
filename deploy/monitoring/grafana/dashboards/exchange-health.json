@@ -43,12 +43,12 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "bisq container restarts (15m)",
+      "title": "Exchanges down",
       "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
       "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
-      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 3}]}}, "overrides": []},
+      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}]}}, "overrides": []},
       "options": {"colorMode": "background"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum(changes(container_start_time_seconds{name=~\".*bisq.*\"}[15m]))", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum(dex_exchange_up == bool 0)", "refId": "A"}]
     },
     {
       "id": 5,
@@ -63,8 +63,8 @@
     {
       "id": 6,
       "type": "state-timeline",
-      "title": "CRITICAL — bisq / bisq2 (alerts)",
-      "description": "These two are our own daemons. Down here = the bisq/bisq2 exchange is unreachable; a Grafana alert fires after 3m (in-Grafana only).",
+      "title": "CRITICAL — bisq / bisq2 (alerts after 3m down)",
+      "description": "These two are our own daemons. Down = the bisq/bisq2 exchange is unreachable; a Grafana alert fires after 3m (in-Grafana only).",
       "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
       "gridPos": {"h": 7, "w": 12, "x": 0, "y": 11},
       "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
@@ -84,18 +84,9 @@
     },
     {
       "id": 8,
-      "type": "timeseries",
-      "title": "bisq / bisq2 container restarts (15m window)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
-      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "fillOpacity": 10}}, "overrides": []},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "changes(container_start_time_seconds{name=~\".*bisq.*\"}[15m])", "legendFormat": "{{name}}", "refId": "A"}]
-    },
-    {
-      "id": 9,
       "type": "alertlist",
-      "title": "Active exchange alerts",
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
+      "title": "Active exchange alerts (bisq / bisq2)",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 18},
       "options": {"alertName": "", "dashboardAlerts": false, "alertInstanceLabelFilter": "", "maxItems": 20, "sortOrder": 1, "stateFilter": {"firing": true, "pending": true, "noData": false, "normal": false, "error": true}, "viewMode": "list", "groupMode": "default"}
     }
   ]
