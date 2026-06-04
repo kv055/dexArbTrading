@@ -475,9 +475,21 @@ jobs:
           # Deploy images by immutable per-commit tag (compose reads ${IMAGE_TAG:-latest}).
           # --wait blocks until every service is healthy and returns non-zero otherwise,
           # which is what arms the rollback below.
+          # Monitoring sidecars (grafana/prometheus/loki/tempo/alloy) run *fixed* images,
+          # so the 'up -d' below never recreates them. They keep the bind mount they
+          # resolved at their own create time — which points at the deploy/monitoring dir
+          # we just replaced via tar (a NEW inode). The running container never sees the
+          # new files, so freshly-delivered dashboards / prometheus & alert config silently
+          # never take effect on the VPS (locally the files are edited in place, same inode,
+          # so Grafana's 30s poll picks them up — hence "works locally, not on prod").
+          # Force-recreate the config consumers so they re-resolve the mount and re-read it.
+          MON_SERVICES="grafana prometheus loki tempo alloy"
           deploy() {  # $1=image tag  $2=compose file
             IMAGE_TAG="$1" docker compose -f "$2" pull
             IMAGE_TAG="$1" docker compose -f "$2" up -d --remove-orphans --wait --wait-timeout 300
+            # shellcheck disable=SC2086
+            IMAGE_TAG="$1" docker compose -f "$2" up -d --force-recreate --no-deps \
+              --wait --wait-timeout 120 $MON_SERVICES
           }
 
           smoke() {
