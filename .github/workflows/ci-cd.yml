@@ -163,7 +163,7 @@ jobs:
           - service: postgres-backup
             context: .
             dockerfile: dexUnifiedApi/Dockerfile.backup
-          - service: app
+          - service: dexmonitor
             context: .
             dockerfile: dexMonitor/Dockerfile
           - service: mm-controller
@@ -207,8 +207,8 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          # Frontend "deployed commit" header values; only the app image consumes
-          # them, the rest emit a harmless "unused build args" buildx warning.
+          # Frontend "deployed commit" header values; only the dexmonitor image
+          # consumes them, the rest emit a harmless "unused build args" buildx warning.
           build-args: |
             COMMIT_HASH=${{ steps.meta.outputs.commit_hash }}
             COMMIT_DATE=${{ steps.meta.outputs.commit_date }}
@@ -263,7 +263,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      SERVICES: tor bisq bisq2 unified-api unified-snapshot postgres-backup app mm-controller totp-api fiat-controller docs
+      SERVICES: tor bisq bisq2 unified-api unified-snapshot postgres-backup dexmonitor mm-controller totp-api fiat-controller docs
     steps:
       - name: Compute lowercase image owner
         id: owner

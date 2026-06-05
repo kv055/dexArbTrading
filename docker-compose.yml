@@ -250,9 +250,9 @@ services:
   #         cpus: '0.25'
   #   restart: unless-stopped
 
-  app:
+  dexmonitor:
     logging: *default-logging
-    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-app:${IMAGE_TAG:-latest}
+    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-dexmonitor:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: dexMonitor/Dockerfile
@@ -305,7 +305,7 @@ services:
     ports:
       - "5000:80"
     depends_on:
-      app:
+      dexmonitor:
         condition: service_healthy
       unified-api:
         condition: service_healthy
