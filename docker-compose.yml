@@ -169,7 +169,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128M
+          memory: 256M
           cpus: '0.5'
     restart: unless-stopped
 
@@ -580,7 +580,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 384M
           cpus: '0.5'
     restart: unless-stopped
 
