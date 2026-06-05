@@ -29,11 +29,11 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: PBFA97CFB590B2093
+            datasourceUid: prometheus
             model:
               datasource:
                 type: prometheus
-                uid: PBFA97CFB590B2093
+                uid: prometheus
               editorMode: code
               expr: dex_exchange_up{exchange=~"bisq|bisq2"}
               instant: true
