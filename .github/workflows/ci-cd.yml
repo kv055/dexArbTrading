@@ -428,7 +428,7 @@ jobs:
             '$REPO_DIR/dexMmController/.env' \
             '$REPO_DIR/dexFiatController/.env'"
 
-      - name: Push compose file, restart stack & verify (auto-rollback on failure)
+      - name: Sync VPS repo to commit, restart stack & verify (auto-rollback on failure)
         timeout-minutes: 10
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
@@ -437,30 +437,17 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GH_PAT }}
           GHCR_USER: ${{ github.actor }}
           NEW_SHA: ${{ github.sha }}
+        # The VPS is a git clone (origin + a token URL-rewrite for auth are configured by
+        # deploy/provision/ansible/playbook.yml), so we deliver the WHOLE repo tree at the
+        # exact built commit via `git checkout` instead of scp-ing a hand-maintained subset.
+        # That is what makes every config file (compose, nginx, deploy/monitoring, …) reach
+        # prod automatically — no more "the new file wasn't in the copy list" deploys — and
+        # makes rollback atomic across all of them (a single `git checkout <prev>`). The
+        # decrypted .env files were uploaded by the previous step; the root one is gitignored
+        # and the per-module ones live inside submodules, and we never recurse submodules, so
+        # the checkout never touches them.
         run: |
           set -Eeuo pipefail
-          scp -i ~/.ssh/id_ed25519 docker-compose.yml "$SSH_USER@$SSH_HOST:$REPO_DIR/docker-compose.yml"
-          # Monitoring configs must exist on disk BEFORE 'docker compose up' below,
-          # otherwise the daemon auto-creates each bind-mount path as an empty
-          # root-owned dir. For FILE mounts (alloy/loki/tempo configs) the mount then
-          # fails outright ("not a directory"); for DIR mounts (grafana) it silently
-          # serves empty config. Do not reorder.
-          #
-          # Deliver the tree via tar-over-ssh, not scp: `scp -r deploy/monitoring/`
-          # into an already-existing "$REPO_DIR/deploy/monitoring" nests the payload
-          # one level deep (.../deploy/monitoring/monitoring/...), so nothing lands
-          # where compose expects it. We replace the whole tree (repo-sourced config;
-          # runtime state lives in named volumes, so this is safe).
-          #
-          # A previous failed deploy can leave bind-mount paths that Docker
-          # auto-created as root-owned, which the (non-root) deploy user cannot rm.
-          # The deploy user is in the docker group, so wipe the tree from a throwaway
-          # root container instead of needing host sudo. mkdir the parent first so the
-          # bind source exists and Docker does not auto-create *it* as root.
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "mkdir -p '$REPO_DIR/deploy' && docker run --rm -v '$REPO_DIR/deploy:/d' busybox:1.37 rm -rf /d/monitoring"
-          tar -C deploy -cf - monitoring \
-            | ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "tar -C '$REPO_DIR/deploy' -xf -"
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
             "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' bash -s" <<'REMOTE'
           set -Eeuo pipefail
@@ -469,27 +456,39 @@ jobs:
 
           # Last good deploy, recorded only after a verified-healthy rollout below.
           PREV_SHA=$(cat .deployed_sha 2>/dev/null || true)
-          # Snapshot a known-good compose file the first time so rollback has one to use.
-          [ -f docker-compose.deployed.yml ] || cp docker-compose.yml docker-compose.deployed.yml
 
-          # Deploy images by immutable per-commit tag (compose reads ${IMAGE_TAG:-latest}).
+          # Fixed-image services with bind-mounted config aren't recreated by `up -d`, so they
+          # keep serving the config they read at create time. Force-recreate them after the
+          # rollout so the freshly-checked-out config (dashboards, prometheus/alert rules,
+          # nginx upstreams) actually takes effect.
+          RECREATE_SERVICES="grafana prometheus loki tempo alloy nginx"
+
+          # Transition/robustness guard: a previous (scp-era) failed deploy could leave files
+          # under the bind-mount config paths that Docker auto-created as root, which the
+          # non-root deploy user can't overwrite — `git checkout` would then fail. Normalize
+          # ownership once from a throwaway root container (deploy user is in the docker group).
+          # Harmless once everything is already deploy-user-owned; .env files live elsewhere.
+          docker run --rm -v "$REPO_DIR:/d" busybox:1.37 \
+            chown -R "$(id -u):$(id -g)" /d/deploy /d/nginx 2>/dev/null || true
+
+          # Pin the working tree to an exact commit. --force discards the dirty state the old
+          # scp/tar deploys left behind; --detach avoids moving the local branch ref. We do
+          # NOT recurse submodules: prod runs prebuilt GHCR images and only needs superproject
+          # config, and skipping recursion leaves the submodule .env files untouched.
+          sync_tree() {  # $1 = commit sha
+            git fetch --no-tags origin "$1" || git fetch --no-tags origin main
+            git checkout --force --detach "$1"
+          }
+
           # --wait blocks until every service is healthy and returns non-zero otherwise,
           # which is what arms the rollback below.
-          # Monitoring sidecars (grafana/prometheus/loki/tempo/alloy) run *fixed* images,
-          # so the 'up -d' below never recreates them. They keep the bind mount they
-          # resolved at their own create time — which points at the deploy/monitoring dir
-          # we just replaced via tar (a NEW inode). The running container never sees the
-          # new files, so freshly-delivered dashboards / prometheus & alert config silently
-          # never take effect on the VPS (locally the files are edited in place, same inode,
-          # so Grafana's 30s poll picks them up — hence "works locally, not on prod").
-          # Force-recreate the config consumers so they re-resolve the mount and re-read it.
-          MON_SERVICES="grafana prometheus loki tempo alloy"
-          deploy() {  # $1=image tag  $2=compose file
-            IMAGE_TAG="$1" docker compose -f "$2" pull
-            IMAGE_TAG="$1" docker compose -f "$2" up -d --remove-orphans --wait --wait-timeout 300
+          deploy() {  # $1 = commit sha (also the image tag; compose reads ${IMAGE_TAG:-latest})
+            sync_tree "$1"
+            IMAGE_TAG="$1" docker compose pull
+            IMAGE_TAG="$1" docker compose up -d --remove-orphans --wait --wait-timeout 300
             # shellcheck disable=SC2086
-            IMAGE_TAG="$1" docker compose -f "$2" up -d --force-recreate --no-deps \
-              --wait --wait-timeout 120 $MON_SERVICES
+            IMAGE_TAG="$1" docker compose up -d --force-recreate --no-deps \
+              --wait --wait-timeout 120 $RECREATE_SERVICES
           }
 
           smoke() {
@@ -506,14 +505,13 @@ jobs:
             done
           }
 
-          if deploy "$NEW_SHA" docker-compose.yml && smoke; then
-            cp docker-compose.yml docker-compose.deployed.yml
+          if deploy "$NEW_SHA" && smoke; then
             echo "$NEW_SHA" > .deployed_sha
             echo "deploy of $NEW_SHA healthy"
           else
             echo "::error::deploy of $NEW_SHA failed — rolling back to ${PREV_SHA:-<none>}"
             if [ -n "${PREV_SHA:-}" ]; then
-              if deploy "$PREV_SHA" docker-compose.deployed.yml && smoke; then
+              if deploy "$PREV_SHA" && smoke; then
                 echo "::warning::rolled back to last-good $PREV_SHA"
               else
                 echo "::error::ROLLBACK to $PREV_SHA FAILED — manual intervention required"
