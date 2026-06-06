@@ -34,6 +34,15 @@ resource "hcloud_firewall" "main" {
     source_ips = ["0.0.0.0/0", "::/0"]
   }
 
+  # TLS edge (nginx :443, published as 5443). Open to all like 5000: access is
+  # gated by TLS + a read-only Grafana token, and scraping agents have dynamic IPs.
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "5443"
+    source_ips = ["0.0.0.0/0", "::/0"]
+  }
+
   # Postgres — only open if trusted_cidrs are provided
   dynamic "rule" {
     for_each = length(var.trusted_cidrs) > 0 ? [1] : []
