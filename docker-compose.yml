@@ -299,7 +299,7 @@ services:
 
   nginx:
     logging: *default-logging
-    image: nginx:alpine
+    image: nginx:1.27-alpine
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       # TLS material (gitignored, never committed). The CI deploy guard auto-creates/
@@ -586,6 +586,8 @@ services:
     deploy:
       resources:
         limits:
+          # 384M not the agent's proposed 192M: tempo OOM-killed at 259M RSS, so
+          # 192M would crash it again. The other monitoring reductions are kept.
           memory: 384M
           cpus: '0.5'
     restart: unless-stopped
@@ -610,7 +612,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 200M
+          memory: 128M
           cpus: '0.25'
     restart: unless-stopped
 
