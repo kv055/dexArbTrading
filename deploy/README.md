@@ -24,7 +24,7 @@ $EDITOR deploy/provision/terraform/terraform.tfvars
 deploy/provision/run.sh [--key ~/.ssh/your_key]
 ```
 
-This creates a **cx33** server (4 vCPU, 8 GB RAM, 80 GB disk, Debian 12) in `hel1` (Helsinki), configures it with Docker CE and the `deploy` user, clones the repo to `/opt/dexArbTrading`, and writes all 11 GitHub repository secrets. The next push to `main` deploys the full compose stack automatically.
+This creates a **cx33** server (4 vCPU, 8 GB RAM, 80 GB disk, Debian 12) in `hel1` (Helsinki), configures it with Docker CE and the `deploy` user, clones the repo to `/opt/dexArbTrading`, and writes all 11 GitHub repository secrets. The next push to `main` deploys the full compose stack automatically — including auto-generating nginx's self-signed TLS cert on the VPS (no manual cert step; see [monitoring/README.md](monitoring/README.md#access)).
 
 The script is idempotent — safe to re-run if it fails partway through.
 
@@ -60,7 +60,7 @@ terraform init
 terraform apply
 ```
 
-This creates a **cx33** server (4 vCPU, 8 GB RAM, Debian 12) in `hel1` (Helsinki, cheapest region), a firewall, and uploads your SSH key. Takes ~30 seconds.
+This creates a **cx33** server (4 vCPU, 8 GB RAM, Debian 12) in `hel1` (Helsinki, cheapest region), a firewall (opens 22, 5000 and the TLS port 5443 to all; Postgres/Grafana/Prometheus only to `trusted_cidrs`), and uploads your SSH key. Takes ~30 seconds.
 
 ```bash
 # Capture the IP for the next step

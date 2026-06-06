@@ -76,15 +76,78 @@ deploy/monitoring/
 
 ## Access
 
-Grafana is served through nginx at the `/grafana/` sub-path:
+Grafana is served through nginx at the `/grafana/` sub-path. The edge terminates
+TLS on `5443`; plain `:5000` (HTTP) 301-redirects there.
 
 ```
-http://<host>:5000/grafana/
+https://<host>:5443/grafana/
 ```
 
 Login with `admin` / `$GRAFANA_ADMIN_PASSWORD` (set in your `.env`).
 
-Prometheus is not exposed externally — it is only reachable inside the Docker network.
+Prometheus, Loki and Tempo are not exposed externally — they are only reachable
+inside the Docker network and through Grafana's datasource proxy (below).
+
+> **TLS cert.** nginx needs a cert/key at `deploy/nginx/certs/server.{crt,key}`
+> (gitignored). In prod the **CI deploy guard auto-creates and renews** a self-signed
+> pair on the VPS every rollout (`gen-self-signed-cert.sh` in `ENSURE` mode, CN = the
+> VPS host), so there is no manual step and nginx can't crash-loop on a missing cert.
+> Locally, run `deploy/nginx/gen-self-signed-cert.sh <CN>`. For a browser-trusted edge,
+> drop a Let's Encrypt pair in at the same path.
+
+## Agent datasource access
+
+Scraping agents query the datasources through **Grafana's datasource-proxy API**
+using a read-only **Viewer service-account token** — no datasource backend is
+exposed directly, and the token reuses Grafana's RBAC (revocable, can't mutate).
+
+**1. Mint the token once** (Grafana OSS can't provision SA tokens via YAML). The
+script hits Grafana's Admin API through the nginx edge (`/grafana` prefix), so
+`-k` is needed for the self-signed cert:
+
+```bash
+CURL_OPTS='-k' GRAFANA_ADMIN_PASSWORD=... \
+  deploy/monitoring/grafana/bootstrap-agent-token.sh https://localhost:5443/grafana
+# prints: GRAFANA_AGENT_TOKEN=glsa_...   -> store in .env.enc
+```
+
+**2. Query endpoints** (all gated by `Authorization: Bearer $GRAFANA_AGENT_TOKEN`,
+rate-limited at the nginx edge). Pin the self-signed cert with `--cacert`. A remote
+agent with no repo checkout fetches it once from the edge — the cert's CN/SAN is the
+VPS host, so verification passes when you connect by that host:
+
+```bash
+openssl s_client -connect <host>:5443 </dev/null 2>/dev/null \
+  | openssl x509 > edge.crt        # pin this; refetch after a cert rotation
+```
+
+```bash
+H="Authorization: Bearer $GRAFANA_AGENT_TOKEN"
+CA="--cacert edge.crt"            # locally: --cacert deploy/nginx/certs/server.crt
+B="https://<host>:5443/grafana/api"
+
+# Unified query — one endpoint for any datasource (recommended)
+curl $CA -H "$H" -H 'Content-Type: application/json' "$B/ds/query" -d '{
+  "queries":[{"datasource":{"uid":"prometheus"},"expr":"dex_exchange_up","refId":"A"}],
+  "from":"now-1h","to":"now"}'
+
+# Native Prometheus (PromQL)
+curl $CA -H "$H" "$B/datasources/proxy/uid/prometheus/api/v1/query" \
+  --data-urlencode 'query=dex_exchange_up'
+
+# Native Loki (LogQL)
+curl $CA -H "$H" "$B/datasources/proxy/uid/loki/loki/api/v1/query_range" \
+  --data-urlencode 'query={service="unified-api"} | json | level="ERROR"'
+
+# Native Tempo (search / trace by id)
+curl $CA -H "$H" "$B/datasources/proxy/uid/tempo/api/search?tags=service.name%3Dunified-api"
+
+# Discover datasource uids
+curl $CA -H "$H" "$B/datasources"
+```
+
+Datasource uids are stable: `prometheus`, `loki`, `tempo`. Rotate or revoke the
+token in Grafana → Administration → Service accounts → `agent-readonly`.
 
 ## Adding a Scrape Target
 

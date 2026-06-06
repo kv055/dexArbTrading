@@ -449,7 +449,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' bash -s" <<'REMOTE'
+            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' CERT_CN='$SSH_HOST' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
           cd "$REPO_DIR"
@@ -484,6 +484,12 @@ jobs:
           # which is what arms the rollback below.
           deploy() {  # $1 = commit sha (also the image tag; compose reads ${IMAGE_TAG:-latest})
             sync_tree "$1"
+            # nginx won't boot without its TLS cert, which would hang `up --wait` and trip the
+            # rollback below. The cert is self-signed and gitignored, so it never arrives via
+            # the checkout — create/renew it here on the VPS, after the tree is in place and
+            # before `up`. CERT_CN is the public host so agents can pin it with --cacert; ENSURE
+            # renews only when <30d to expiry, else it's a no-op. Runs for rollback SHAs too.
+            ENSURE=1 CERT_CN="${CERT_CN:-localhost}" bash deploy/nginx/gen-self-signed-cert.sh "${CERT_CN:-localhost}"
             IMAGE_TAG="$1" docker compose pull
             IMAGE_TAG="$1" docker compose up -d --remove-orphans --wait --wait-timeout 300
             # shellcheck disable=SC2086
