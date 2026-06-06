@@ -88,10 +88,12 @@ Login with `admin` / `$GRAFANA_ADMIN_PASSWORD` (set in your `.env`).
 Prometheus, Loki and Tempo are not exposed externally — they are only reachable
 inside the Docker network and through Grafana's datasource proxy (below).
 
-> **TLS prerequisite.** nginx refuses to start without a cert/key at
-> `deploy/nginx/certs/server.{crt,key}` (gitignored). Generate a self-signed pair
-> once per host with `deploy/nginx/gen-self-signed-cert.sh <CN>`, or drop in a
-> Let's Encrypt cert for a browser-trusted edge.
+> **TLS cert.** nginx needs a cert/key at `deploy/nginx/certs/server.{crt,key}`
+> (gitignored). In prod the **CI deploy guard auto-creates and renews** a self-signed
+> pair on the VPS every rollout (`gen-self-signed-cert.sh` in `ENSURE` mode, CN = the
+> VPS host), so there is no manual step and nginx can't crash-loop on a missing cert.
+> Locally, run `deploy/nginx/gen-self-signed-cert.sh <CN>`. For a browser-trusted edge,
+> drop a Let's Encrypt pair in at the same path.
 
 ## Agent datasource access
 
@@ -110,11 +112,18 @@ CURL_OPTS='-k' GRAFANA_ADMIN_PASSWORD=... \
 ```
 
 **2. Query endpoints** (all gated by `Authorization: Bearer $GRAFANA_AGENT_TOKEN`,
-rate-limited at the nginx edge). `--cacert` trusts the self-signed cert:
+rate-limited at the nginx edge). Pin the self-signed cert with `--cacert`. A remote
+agent with no repo checkout fetches it once from the edge — the cert's CN/SAN is the
+VPS host, so verification passes when you connect by that host:
+
+```bash
+openssl s_client -connect <host>:5443 </dev/null 2>/dev/null \
+  | openssl x509 > edge.crt        # pin this; refetch after a cert rotation
+```
 
 ```bash
 H="Authorization: Bearer $GRAFANA_AGENT_TOKEN"
-CA="--cacert deploy/nginx/certs/server.crt"
+CA="--cacert edge.crt"            # locally: --cacert deploy/nginx/certs/server.crt
 B="https://<host>:5443/grafana/api"
 
 # Unified query — one endpoint for any datasource (recommended)
