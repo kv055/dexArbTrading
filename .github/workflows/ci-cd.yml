@@ -510,7 +510,9 @@ jobs:
             local name probe ok attempt
             for entry in \
               "unified-api /health::curl -fsSL --max-time 10 http://127.0.0.1:5010/health" \
-              "web edge::curl -fsSLk --max-time 10 https://127.0.0.1:5443/ || curl -fsSL --max-time 10 http://127.0.0.1:5000/"; do
+              "web edge::curl -fsSLk --max-time 10 https://127.0.0.1:5443/ || curl -fsSL --max-time 10 http://127.0.0.1:5000/" \
+              "general_stats overview::curl -fsSLk --max-time 30 'https://127.0.0.1:5443/api/general_stats/overview?hours=24&cex=kraken' || curl -fsSL --max-time 30 'http://127.0.0.1:5000/api/general_stats/overview?hours=24&cex=kraken'" \
+              "ohlc::curl -fsSLk --max-time 30 'https://127.0.0.1:5443/api/ohlc?hours=24&cex=kraken' || curl -fsSL --max-time 30 'http://127.0.0.1:5000/api/ohlc?hours=24&cex=kraken'"; do
               name="${entry%%::*}"; probe="${entry#*::}"
               ok=""
               for attempt in 1 2 3; do

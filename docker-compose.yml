@@ -291,9 +291,9 @@ services:
     deploy:
       resources:
         limits:
-          # 128M OOM-killed dexmonitor under the dashboard's parallel API burst
-          # (dmesg: anon-rss ~129MB, exit 137); 256M matches unified-api headroom.
-          memory: 256M
+          # 256M still OOM-killed under dashboard burst + lifecycle aggregates;
+          # 512M gives headroom while backend deduplication lands.
+          memory: 512M
           cpus: '0.5'
     extra_hosts:
       - "host.docker.internal:host-gateway"
