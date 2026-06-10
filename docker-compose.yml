@@ -280,7 +280,7 @@ services:
       # - LND_HOST=https://localhost:8080
       # - LND_MACAROON_PATH=/lnd/admin.macaroon
       # - LND_TLS_CERT_PATH=/lnd/tls.cert
-      # - LND_WALLET_PASSWORD=${LND_WALLET_PASSWORD}
+      # LND wallet password: set accounts.password via dexMonitor (not env).
     # - lnd-data:/lnd:ro  # read-only access to macaroon + tls cert
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
