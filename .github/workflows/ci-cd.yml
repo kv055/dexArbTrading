@@ -196,12 +196,22 @@ jobs:
           echo "commit_hash=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "commit_date=$(git log -1 --format=%cI)"   >> "$GITHUB_OUTPUT"
 
-      # docker-container pulls moby/buildkit from Docker Hub during bootstrap; that
-      # step has intermittently timed out on GitHub-hosted runners. The docker driver
-      # uses the host daemon directly and is sufficient for single-platform amd64 builds.
+      # docker-container bootstrap pulls moby/buildkit from Docker Hub, which has
+      # intermittently timed out on GitHub-hosted runners. Pre-pull with retries so
+      # setup-buildx can boot the builder from a local image.
+      - name: Pre-pull BuildKit image
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if docker pull moby/buildkit:buildx-stable-1; then
+              exit 0
+            fi
+            echo "BuildKit pull attempt ${attempt} failed; retrying in 20s..."
+            sleep 20
+          done
+          exit 1
+
       - uses: docker/setup-buildx-action@v4
-        with:
-          driver: docker
 
       - uses: docker/login-action@v4
         with:
