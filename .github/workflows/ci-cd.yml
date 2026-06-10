@@ -176,9 +176,6 @@ jobs:
           - service: fiat-controller
             context: ./dexFiatController
             dockerfile: dexFiatController/Dockerfile
-          - service: docs
-            context: .
-            dockerfile: docs/Dockerfile.docs
     steps:
       - uses: actions/checkout@v5
         with:
@@ -195,21 +192,6 @@ jobs:
         run: |
           echo "commit_hash=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "commit_date=$(git log -1 --format=%cI)"   >> "$GITHUB_OUTPUT"
-
-      # docker-container bootstrap pulls moby/buildkit from Docker Hub, which has
-      # intermittently timed out on GitHub-hosted runners. Pre-pull with retries so
-      # setup-buildx can boot the builder from a local image.
-      - name: Pre-pull BuildKit image
-        run: |
-          set -euo pipefail
-          for attempt in 1 2 3 4 5; do
-            if docker pull moby/buildkit:buildx-stable-1; then
-              exit 0
-            fi
-            echo "BuildKit pull attempt ${attempt} failed; retrying in 20s..."
-            sleep 20
-          done
-          exit 1
 
       - uses: docker/setup-buildx-action@v4
 
@@ -279,7 +261,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      SERVICES: tor bisq bisq2 unified-api unified-snapshot postgres-backup dexmonitor mm-controller totp-api fiat-controller docs
+      SERVICES: tor bisq bisq2 unified-api unified-snapshot postgres-backup dexmonitor mm-controller totp-api fiat-controller
     steps:
       - name: Compute lowercase image owner
         id: owner
