@@ -327,90 +327,90 @@ services:
           cpus: '0.1'
     restart: unless-stopped
 
-  # mm-controller:
-  #   logging: *default-logging
-  #   image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-mm-controller:${IMAGE_TAG:-latest}
-  #   build:
-  #     context: ./dexMmController
-  #     dockerfile: Dockerfile
-  #   network_mode: host
-  #   env_file:
-  #     - ./dexMmController/.env
-  #   depends_on:
-  #     lnd:
-  #       condition: service_healthy
-  #     unified-api:
-  #       condition: service_healthy
-  #   environment:
-  #     - DB_PATH=/app/mm-controller.db
-  #     - API_ADDR=:5001
-  #     - OPENCLAW_URL=
-  #     - HUMMINGBOT_URL=http://localhost:8000
-  #     - HUMMINGBOT_USERNAME=admin
-  #     - HUMMINGBOT_PASSWORD=password
-  #     - OFFER_PREMIUM_WSS_URL=ws://localhost:5000/ws/live_offers?cex=kraken
-  #     - LND_HOST=https://localhost:8080
-  #     - LND_MACAROON_PATH=/lnd/data/chain/bitcoin/mainnet/admin.macaroon
-  #     - LND_TLS_CERT_PATH=/lnd/tls.cert
-  #     - LND_EXTENDED_MASTER_KEY_FILE=/run/secrets/lnd_extended_master_key
-  #     - LND_EXTENDED_MASTER_KEY_BIRTHDAY_TIMESTAMP_FILE=/run/secrets/lnd_extended_master_key_birthday_timestamp
-  #     - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
-  #     # Alternative to xprv/tprv:
-  #     # - LND_SEED_MNEMONIC_FILE=/run/secrets/lnd_seed_mnemonic
-  #     # - LND_AEZEED_PASSPHRASE_FILE=/run/secrets/lnd_aezeed_passphrase
-  #     # - LND_RECOVERY_WINDOW=250
-  #   volumes:
-  #     - lnd-data:/lnd:ro
-  #     - ./dexMmController/secrets/lnd_extended_master_key:/run/secrets/lnd_extended_master_key:ro
-  #     - ./dexMmController/secrets/lnd_extended_master_key_birthday_timestamp:/run/secrets/lnd_extended_master_key_birthday_timestamp:ro
-  #     # Alternative to aezeed:
-  #     # - ./dexMmController/secrets/lnd_seed_mnemonic:/run/secrets/lnd_seed_mnemonic:ro
-  #     # - ./dexMmController/secrets/lnd_aezeed_passphrase:/run/secrets/lnd_aezeed_passphrase:ro
-  #   healthcheck:
-  #     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5001/health"]
-  #     interval: 15s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 20s
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         memory: 128M
-  #         cpus: '0.5'
-  #   restart: unless-stopped
+  mm-controller:
+    logging: *default-logging
+    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-mm-controller:${IMAGE_TAG:-latest}
+    build:
+      context: ./dexMmController
+      dockerfile: Dockerfile
+    network_mode: host
+    env_file:
+      - ./dexMmController/.env
+    depends_on:
+      lnd:
+        condition: service_healthy
+      unified-api:
+        condition: service_healthy
+    environment:
+      - DB_PATH=/app/mm-controller.db
+      - API_ADDR=:5001
+      - OPENCLAW_URL=
+      - HUMMINGBOT_URL=http://localhost:8000
+      - HUMMINGBOT_USERNAME=admin
+      - HUMMINGBOT_PASSWORD=password
+      - OFFER_PREMIUM_WSS_URL=ws://localhost:5000/ws/live_offers?cex=kraken
+      - LND_HOST=https://localhost:8080
+      - LND_MACAROON_PATH=/lnd/data/chain/bitcoin/mainnet/admin.macaroon
+      - LND_TLS_CERT_PATH=/lnd/tls.cert
+      - LND_EXTENDED_MASTER_KEY_FILE=/run/secrets/lnd_extended_master_key
+      - LND_EXTENDED_MASTER_KEY_BIRTHDAY_TIMESTAMP_FILE=/run/secrets/lnd_extended_master_key_birthday_timestamp
+      - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
+      # Alternative to xprv/tprv:
+      # - LND_SEED_MNEMONIC_FILE=/run/secrets/lnd_seed_mnemonic
+      # - LND_AEZEED_PASSPHRASE_FILE=/run/secrets/lnd_aezeed_passphrase
+      # - LND_RECOVERY_WINDOW=250
+    volumes:
+      - lnd-data:/lnd:ro
+      - ./dexMmController/secrets/lnd_extended_master_key:/run/secrets/lnd_extended_master_key:ro
+      - ./dexMmController/secrets/lnd_extended_master_key_birthday_timestamp:/run/secrets/lnd_extended_master_key_birthday_timestamp:ro
+      # Alternative to aezeed:
+      # - ./dexMmController/secrets/lnd_seed_mnemonic:/run/secrets/lnd_seed_mnemonic:ro
+      # - ./dexMmController/secrets/lnd_aezeed_passphrase:/run/secrets/lnd_aezeed_passphrase:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+    restart: unless-stopped
 
-  # lnd:
-  #   logging: *default-logging
-  #   image: lightninglabs/lnd:v0.18.4-beta
-  #   network_mode: host
-  #   volumes:
-  #     - lnd-data:/root/.lnd
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-sf", "--cacert", "/root/.lnd/tls.cert",
-  #            "https://localhost:8080/v1/state"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 20
-  #     start_period: 60s
-  #   command:
-  #     - --bitcoin.active
-  #     - --bitcoin.mainnet
-  #     - --bitcoin.node=neutrino
-  #     - --neutrino.addpeer=btcd-mainnet.lightning.computer
-  #     - --neutrino.addpeer=neutrino.noderunner.wtf
-  #     - --neutrino.addpeer=node.eldamar.icu
-  #     - --neutrino.addpeer=btcd.lnolymp.us
-  #     - --fee.url=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json
-  #     - --restlisten=0.0.0.0:8080
-  #     - --rpclisten=0.0.0.0:10009
-  #     - --tlsextraip=127.0.0.1
-  #     - --tlsextradomain=localhost
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         memory: 512M
-  #         cpus: '0.5'
-  #   restart: unless-stopped
+  lnd:
+    logging: *default-logging
+    image: lightninglabs/lnd:v0.18.4-beta
+    network_mode: host
+    volumes:
+      - lnd-data:/root/.lnd
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "--cacert", "/root/.lnd/tls.cert",
+             "https://localhost:8080/v1/state"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    command:
+      - --bitcoin.active
+      - --bitcoin.mainnet
+      - --bitcoin.node=neutrino
+      - --neutrino.addpeer=btcd-mainnet.lightning.computer
+      - --neutrino.addpeer=neutrino.noderunner.wtf
+      - --neutrino.addpeer=node.eldamar.icu
+      - --neutrino.addpeer=btcd.lnolymp.us
+      - --fee.url=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json
+      - --restlisten=0.0.0.0:8080
+      - --rpclisten=0.0.0.0:10009
+      - --tlsextraip=127.0.0.1
+      - --tlsextradomain=localhost
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    restart: unless-stopped
 
   # totp-api:
   #   logging: *default-logging
