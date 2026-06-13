@@ -38,6 +38,12 @@ services:
     build:
       context: ./dexUnifiedApi
       dockerfile: Dockerfile.tor
+    ports:
+      # Loopback only: host-networked services (mm-controller) reach the
+      # SOCKS proxy via 127.0.0.1:9050; compose-network services use tor:9050.
+      # Override TOR_SOCKS_HOST_PORT when the host already runs its own tor
+      # daemon on 9050 (mm-controller can then use that one directly).
+      - "127.0.0.1:${TOR_SOCKS_HOST_PORT:-9050}:9050"
     cap_add:
       - NET_ADMIN
     healthcheck:
@@ -303,6 +309,22 @@ services:
   nginx:
     logging: *default-logging
     image: nginx:1.27-alpine
+    # Edge basic-auth credentials come from .env as a ready-made htpasswd line
+    # ("user:hash"). The `$` in the hash MUST be doubled to `$$` in .env or
+    # compose interpolation eats it and locks everyone out — see
+    # deploy/nginx/README.md for the generator command. nginx can only read
+    # creds from a file, so write it before handing off to the stock entrypoint.
+    # Fail fast when unset — an empty htpasswd would lock everyone out with no
+    # hint why, and the crashed container fails `up --wait` so a misconfigured
+    # deploy rolls back. 644 not 600: workers run as user nginx and must read it
+    # (it holds a hash, not a plaintext password). $$EDGE_AUTH_HTPASSWD keeps
+    # compose from interpolating the command; the container shell expands it.
+    environment:
+      - EDGE_AUTH_HTPASSWD=${EDGE_AUTH_HTPASSWD:-}
+    command: >
+      sh -c '[ -n "$$EDGE_AUTH_HTPASSWD" ] || { echo "EDGE_AUTH_HTPASSWD not set in .env — generate with: htpasswd -nb <user> <password>" >&2; exit 1; };
+      printf "%s\n" "$$EDGE_AUTH_HTPASSWD" > /etc/nginx/htpasswd && chmod 644 /etc/nginx/htpasswd
+      && exec /docker-entrypoint.sh nginx -g "daemon off;"'
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       # TLS material (gitignored, never committed). The CI deploy guard auto-creates/
@@ -355,6 +377,9 @@ services:
       - LND_EXTENDED_MASTER_KEY_FILE=/run/secrets/lnd_extended_master_key
       - LND_EXTENDED_MASTER_KEY_BIRTHDAY_TIMESTAMP_FILE=/run/secrets/lnd_extended_master_key_birthday_timestamp
       - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
+      # RoboSats coordinators are Tor onion services; reach them through the
+      # tor sidecar's SOCKS port published on the host loopback.
+      - TOR_PROXY_URL=socks5h://127.0.0.1:9050
       # Alternative to xprv/tprv:
       # - LND_SEED_MNEMONIC_FILE=/run/secrets/lnd_seed_mnemonic
       # - LND_AEZEED_PASSPHRASE_FILE=/run/secrets/lnd_aezeed_passphrase
