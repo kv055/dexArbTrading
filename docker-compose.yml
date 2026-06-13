@@ -374,8 +374,11 @@ services:
       - LND_HOST=https://localhost:8080
       - LND_MACAROON_PATH=/lnd/data/chain/bitcoin/mainnet/admin.macaroon
       - LND_TLS_CERT_PATH=/lnd/tls.cert
-      - LND_EXTENDED_MASTER_KEY_FILE=/run/secrets/lnd_extended_master_key
-      - LND_EXTENDED_MASTER_KEY_BIRTHDAY_TIMESTAMP_FILE=/run/secrets/lnd_extended_master_key_birthday_timestamp
+      # xprv restore disabled: wallet is generated fresh from a new aezeed seed
+      # (stored in DB on first boot). Re-enable both lines + the secret mounts
+      # below to restore a wallet from the extended master key instead.
+      # - LND_EXTENDED_MASTER_KEY_FILE=/run/secrets/lnd_extended_master_key
+      # - LND_EXTENDED_MASTER_KEY_BIRTHDAY_TIMESTAMP_FILE=/run/secrets/lnd_extended_master_key_birthday_timestamp
       - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
       # RoboSats coordinators are Tor onion services; reach them through the
       # tor sidecar's SOCKS port published on the host loopback.
@@ -386,8 +389,9 @@ services:
       # - LND_RECOVERY_WINDOW=250
     volumes:
       - lnd-data:/lnd:ro
-      - ./dexMmController/secrets/lnd_extended_master_key:/run/secrets/lnd_extended_master_key:ro
-      - ./dexMmController/secrets/lnd_extended_master_key_birthday_timestamp:/run/secrets/lnd_extended_master_key_birthday_timestamp:ro
+      # xprv restore disabled (see env block above):
+      # - ./dexMmController/secrets/lnd_extended_master_key:/run/secrets/lnd_extended_master_key:ro
+      # - ./dexMmController/secrets/lnd_extended_master_key_birthday_timestamp:/run/secrets/lnd_extended_master_key_birthday_timestamp:ro
       # Alternative to aezeed:
       # - ./dexMmController/secrets/lnd_seed_mnemonic:/run/secrets/lnd_seed_mnemonic:ro
       # - ./dexMmController/secrets/lnd_aezeed_passphrase:/run/secrets/lnd_aezeed_passphrase:ro
