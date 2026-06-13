@@ -1,0 +1,49 @@
+# Gitea Actions runner — run this ON THE HOMESERVER (where Docker lives).
+#
+# Reads act-runner.env (written by setup-gitea.sh) for the instance URL +
+# registration token. Uses Docker-in-Docker so EVERY job image, layer, and build
+# cache lives inside the `dind-storage` volume — `docker compose down -v`
+# (see teardown.sh) wipes it all, leaving no artifacts on the host.
+#
+#   docker compose -f act-runner-compose.yml up -d
+#
+# Note: GITEA_INSTANCE_URL must be reachable from inside this container. A
+# Tailscale *.ts.net MagicDNS name usually does NOT resolve in-container — prefer
+# the Tailscale IP (http://100.x.y.z:3000) or LAN IP for GITEA_URL when the runner
+# is co-located with Gitea, or add an `extra_hosts:` entry below.
+
+services:
+  dind:
+    image: docker:dind
+    container_name: gitea-runner-dind
+    privileged: true                  # required for Docker-in-Docker
+    restart: unless-stopped
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+    volumes:
+      - dind-certs:/certs
+      - dind-storage:/var/lib/docker  # all job images/cache live here; removed by `down -v`
+      - ./daemon.json:/etc/docker/daemon.json:ro  # marks the Gitea registry insecure (HTTP)
+
+  act_runner:
+    image: gitea/act_runner:latest    # pin to a specific tag for reproducibility
+    container_name: gitea-act-runner
+    restart: unless-stopped
+    depends_on:
+      - dind
+    env_file:
+      - act-runner.env                # GITEA_INSTANCE_URL / REGISTRATION_TOKEN / NAME / LABELS
+    environment:
+      DOCKER_HOST: tcp://dind:2376
+      DOCKER_CERT_PATH: /certs/client
+      DOCKER_TLS_VERIFY: "1"
+    # extra_hosts:
+    #   - "gitea.your-tailnet.ts.net:100.x.y.z"   # uncomment if using a MagicDNS URL
+    volumes:
+      - dind-certs:/certs:ro
+      - act-runner-data:/data         # runner registration state; removed by `down -v`
+
+volumes:
+  dind-certs:
+  dind-storage:
+  act-runner-data:

@@ -6,6 +6,9 @@
 .env.hash
 .env.vps
 .env.vps.bak
+deploy/provision/gitea/.env.gitea
+deploy/provision/gitea/act-runner.env
+deploy/provision/gitea/daemon.json
 deploy/provision/ansible/inventory.ini
 deploy/provision/terraform/.terraform/
 deploy/provision/terraform/.terraform.lock.hcl
