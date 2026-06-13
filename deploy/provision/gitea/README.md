@@ -56,6 +56,9 @@ cp deploy/provision/gitea/.env.gitea.example deploy/provision/gitea/.env.gitea
 | `GITEA_OWNER` | User/org that will own the repos (e.g. `kv055`). |
 | `GITEA_TOKEN` | The **Gitea** PAT from step 3 above (NOT the GitHub PAT). |
 | `RUNNER_NAME` / `RUNNER_LABELS` | Runner identity + the `ubuntu-latest → catthehacker` image mapping. |
+| `HOMESERVER_SSH_USER` | SSH user on the homeserver (e.g. `kili`). |
+| `HOMESERVER_SSH_HOST` | Tailscale IP of the homeserver (e.g. `100.x.y.z`). Use the IP, not a `*.ts.net` hostname. |
+| `HOMESERVER_RUNNER_DIR` | Directory on the homeserver where runner files are placed (default `~/gitea-runner`). |
 
 Also reused: `GH_PAT` in the repo-root `.env` (the GitHub PAT) — written as a Gitea
 secret so the runner can fetch submodules from github.com.
@@ -67,31 +70,75 @@ secret so the runner can fetch submodules from github.com.
 bash deploy/provision/gitea/setup-gitea.sh
 ```
 
-`setup-gitea.sh` is idempotent and does, in order:
+`setup-gitea.sh` is idempotent (safe to re-run) and does the following in order:
 
-1. Validates the token and detects whether `GITEA_OWNER` is a user or org.
-2. Ensures the 6 repos exist (root `dexArbTrading` + the 5 submodules), creating any
-   missing ones as private/empty.
-3. Pushes local clones to the additive `gitea` remote (root: all branches+tags;
-   submodules: best-effort, since they're not used by the trial).
-4. Enables Actions on each repo (`has_actions: true`).
-5. Runs the secrets transfer ([`../secrets/setup-gitea-secrets.sh`](../secrets/setup-gitea-secrets.sh))
-   — writes the 14 Actions secrets to the root repo (incl. the `GITEA_REGISTRY_*` login).
-6. Fetches a runner registration token (`act-runner.env`, mode 600) and writes
-   `daemon.json` (marks the Gitea registry insecure so the runner can push over HTTP).
+### Step 1 — validate token + detect owner type
 
-## Start the runner (on the homeserver)
+Calls `GET /api/v1/user` to confirm the token works and to get the authenticated username.
+Then checks whether `GITEA_OWNER` is an **org** or a **personal user** (the repo-creation
+API endpoint differs between the two).
 
-The runner must run where Docker lives. Get this `gitea/` directory (incl. the generated
-`act-runner.env` **and** `daemon.json`) onto the homeserver, then:
+### Step 2 — ensure the 6 repos exist
 
-```bash
-docker compose -f act-runner-compose.yml up -d
-```
+Checks `GET /repos/{owner}/{name}` for each repo. If a repo does not exist yet (HTTP 404)
+it creates it as **private + empty** (`auto_init: false`). The 6 repos are:
+
+| Repo | What it is |
+|---|---|
+| `dexArbTrading` | Root repo (the one you're running this from) |
+| `dexUnifiedApi` | Submodule |
+| `dexMmTradingLogicHummingBot` | Submodule |
+| `dexMmController` | Submodule |
+| `dexMonitor` | Submodule |
+| `dexFiatController` | Submodule |
+
+### Step 3 — push local clones
+
+For each repo it adds (or updates) an additive `gitea` remote — **`origin` (GitHub) is never
+touched**. Then pushes all branches + tags. For submodules that are in detached HEAD state
+(normal for git submodules) it seeds a `main` branch. The Gitea PAT is injected into the
+push URL in memory only and is never written to `.git/config`.
+
+After the push it sets the root repo's default branch to `develop` so that the Gitea UI and
+`workflow_dispatch` target the trial branch.
+
+### Step 4 — enable Actions on each repo
+
+Sends `PATCH /repos/{owner}/{name}` with `{"has_actions": true}` for all 6 repos. Without
+this, the Gitea Actions tab does not appear and workflows do not run.
+
+### Step 5 — transfer secrets + write daemon.json
+
+Runs [`deploy/provision/secrets/setup-gitea-secrets.sh`](../secrets/setup-gitea-secrets.sh),
+which writes **14 Actions secrets** to the root repo (`dexArbTrading`). These mirror the
+secrets the CI workflow needs:
+
+| Secret | Source |
+|---|---|
+| `GH_PAT` | Root `.env` — GitHub PAT so the runner can fetch submodules from github.com |
+| `GITEA_REGISTRY_URL` | `.env.gitea` `GITEA_URL` |
+| `GITEA_REGISTRY_USER` | Detected from the authenticated Gitea login |
+| `GITEA_REGISTRY_TOKEN` | `.env.gitea` `GITEA_TOKEN` |
+| `DOTENV_PRIVATE_KEY_*`, `VPS_*`, `KNOWN_HOSTS` | Sourced from `deploy/provision/.env.vps` and `.env.keys` |
+
+Also writes `daemon.json` (marks the Gitea registry as an insecure registry for the DinD
+Docker daemon, needed when `GITEA_URL` is HTTP or uses a self-signed cert).
+
+### Step 6 — write act-runner.env (runner registration token)
+
+Fetches a one-time runner registration token from the Gitea API and writes it — along with
+the instance URL, runner name, and labels — to `act-runner.env` (mode 600, gitignored).
+This file is what the runner container reads on first boot to register itself with Gitea.
+
+### Step 7 — deploy and start the runner on the homeserver
+
+SSHes into `HOMESERVER_SSH_USER@HOMESERVER_SSH_HOST`, creates `HOMESERVER_RUNNER_DIR`, SCPs
+the three runner files (`act-runner-compose.yml`, `act-runner.env`, `daemon.json`), then
+runs `docker compose -f act-runner-compose.yml up -d` remotely.
 
 It runs Docker-in-Docker, so every job image/layer/cache lives in a throwaway volume.
 In Gitea → repo Settings → Actions → Runners the runner shows `online` with the
-`ubuntu-latest` label.
+`ubuntu-latest` label after a few seconds.
 
 ## Trigger the trial
 
@@ -108,10 +155,10 @@ reclaims it all.
 
 ## Tear down — leaves no artifacts
 
-On the homeserver:
+SSH into the homeserver and run teardown from the runner directory:
 
 ```bash
-bash teardown.sh
+ssh user@100.x.y.z "cd ~/gitea-runner && bash teardown.sh"
 ```
 
 This unregisters the runner from Gitea, runs `docker compose down -v` (removing the

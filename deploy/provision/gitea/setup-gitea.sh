@@ -189,20 +189,41 @@ EOF
 echo "  wrote $RUNNER_ENV (registration token, mode 600)"
 
 # ---------------------------------------------------------------------------
+# 7. Deploy runner to homeserver and start it
+# ---------------------------------------------------------------------------
+log "Deploying runner to homeserver"
+
+: "${HOMESERVER_SSH_USER:?HOMESERVER_SSH_USER not set in .env.gitea}"
+: "${HOMESERVER_SSH_HOST:?HOMESERVER_SSH_HOST not set in .env.gitea}"
+: "${HOMESERVER_RUNNER_DIR:=~/gitea-runner}"
+
+SSH_TARGET="$HOMESERVER_SSH_USER@$HOMESERVER_SSH_HOST"
+
+echo "  target: $SSH_TARGET:$HOMESERVER_RUNNER_DIR"
+
+ssh "$SSH_TARGET" "mkdir -p $HOMESERVER_RUNNER_DIR"
+
+scp \
+  "$SCRIPT_DIR/act-runner-compose.yml" \
+  "$SCRIPT_DIR/act-runner.env" \
+  "$SCRIPT_DIR/daemon.json" \
+  "$SSH_TARGET:$HOMESERVER_RUNNER_DIR/"
+
+ssh "$SSH_TARGET" "cd $HOMESERVER_RUNNER_DIR && docker compose -f act-runner-compose.yml up -d"
+
+echo "  runner started on $HOMESERVER_SSH_HOST"
+
+# ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
 log "Gitea bootstrap complete"
 cat <<EOF
-Next — start the runner ON THE HOMESERVER (it must run where Docker lives):
+Trigger the trial:
+  git push gitea develop
+  — or use "Run workflow" (workflow_dispatch) in the Gitea UI.
 
-  scp -r deploy/provision/gitea <homeserver>:~/gitea-runner       # or git pull there
-  ssh <homeserver>
-  cd ~/gitea-runner   # contains act-runner-compose.yml + act-runner.env
-  docker compose -f act-runner-compose.yml up -d
+The runner should appear online in Gitea → dexArbTrading → Settings → Actions → Runners.
 
-Then trigger the trial:
-  - push 'develop' to the gitea remote:   git push gitea develop
-  - or run the 'ci' workflow from the Gitea UI (workflow_dispatch)
-
-Tear everything down later (no artifacts left):  bash $SCRIPT_DIR/teardown.sh
+Tear everything down later (no artifacts left):
+  ssh $SSH_TARGET "cd $HOMESERVER_RUNNER_DIR && bash teardown.sh"
 EOF
