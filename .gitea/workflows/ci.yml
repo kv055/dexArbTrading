@@ -25,15 +25,19 @@ jobs:
         module: [commons, dexUnifiedApi, dexMmController, dexMonitor, dexFiatController]
     steps:
       # Main repo lives on Gitea (default github.token authenticates it). Submodules
-      # live on github.com (private), so they're fetched separately with GH_PAT — a
-      # single checkout token can't auth two different hosts.
+      # are fetched from the Gitea mirror, not github.com: the superproject pins some
+      # submodule commits that exist only on the mirror (local commits never pushed to
+      # github), and the mirror shares the Gitea host+token with the main repo.
       - uses: actions/checkout@v5
-      - name: Fetch private submodules from github.com
+      - name: Fetch submodules from the Gitea mirror
         run: |
-          git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
+          host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
+          git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
           git submodule update --init --recursive
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
 
       - uses: actions/setup-go@v6
         with:
@@ -53,13 +57,16 @@ jobs:
         working-directory: dexMonitor/react-frontend
     steps:
       - uses: actions/checkout@v5
-      - name: Fetch private submodules from github.com
+      - name: Fetch submodules from the Gitea mirror
         working-directory: ${{ github.workspace }}   # default working-dir is inside a submodule that isn't checked out yet
         run: |
-          git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
+          host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
+          git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
           git submodule update --init --recursive
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
 
       - uses: actions/setup-node@v6
         with:
@@ -117,12 +124,15 @@ jobs:
             dockerfile: dexFiatController/Dockerfile
     steps:
       - uses: actions/checkout@v5
-      - name: Fetch private submodules from github.com
+      - name: Fetch submodules from the Gitea mirror
         run: |
-          git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
+          host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
+          git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
           git submodule update --init --recursive
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
 
       - name: Resolve Gitea registry + build metadata
         id: reg
