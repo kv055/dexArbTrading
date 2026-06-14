@@ -105,9 +105,11 @@ set_secret VPS_REPO_DIR                       "$(read_vps_var VPS_REPO_DIR)"
 # Gitea container-registry login for the build-and-push job (pushes images to the
 # Gitea store instead of GHCR). USER defaults to the owner; the orchestrator passes
 # the token's actual login. TOKEN reuses the Gitea PAT (needs write:package scope).
-set_secret GITEA_REGISTRY_URL                 "$GITEA_URL"
-set_secret GITEA_REGISTRY_USER                "${GITEA_REGISTRY_USER:-$GITEA_OWNER}"
-set_secret GITEA_REGISTRY_TOKEN               "$GITEA_TOKEN"
+# NB: secret names must NOT start with GITEA_ — Gitea reserves that prefix (and
+# GITHUB_), rejecting such names with HTTP 400. Hence REGISTRY_* not GITEA_REGISTRY_*.
+set_secret REGISTRY_URL                       "${GITEA_REGISTRY_URL_VALUE:-$GITEA_URL}"
+set_secret REGISTRY_USER                      "${GITEA_REGISTRY_USER:-$GITEA_OWNER}"
+set_secret REGISTRY_TOKEN                     "$GITEA_TOKEN"
 
 echo ""
 echo "Done — 14 secrets written to gitea:$REPO"

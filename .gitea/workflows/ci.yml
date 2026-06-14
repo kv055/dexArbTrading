@@ -24,10 +24,16 @@ jobs:
       matrix:
         module: [commons, dexUnifiedApi, dexMmController, dexMonitor, dexFiatController]
     steps:
+      # Main repo lives on Gitea (default github.token authenticates it). Submodules
+      # live on github.com (private), so they're fetched separately with GH_PAT — a
+      # single checkout token can't auth two different hosts.
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ secrets.GH_PAT }}
+      - name: Fetch private submodules from github.com
+        run: |
+          git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
+          git submodule update --init --recursive
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
 
       - uses: actions/setup-go@v6
         with:
@@ -47,9 +53,13 @@ jobs:
         working-directory: dexMonitor/react-frontend
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ secrets.GH_PAT }}
+      - name: Fetch private submodules from github.com
+        working-directory: ${{ github.workspace }}   # default working-dir is inside a submodule that isn't checked out yet
+        run: |
+          git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
+          git submodule update --init --recursive
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
 
       - uses: actions/setup-node@v6
         with:
@@ -107,14 +117,17 @@ jobs:
             dockerfile: dexFiatController/Dockerfile
     steps:
       - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ secrets.GH_PAT }}
+      - name: Fetch private submodules from github.com
+        run: |
+          git config --global url."https://x-access-token:${GH_PAT}@github.com/".insteadOf "https://github.com/"
+          git submodule update --init --recursive
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
 
       - name: Resolve Gitea registry + build metadata
         id: reg
         env:
-          URL: ${{ secrets.GITEA_REGISTRY_URL }}
+          URL: ${{ secrets.REGISTRY_URL }}
         run: |
           host="${URL#*://}"; scheme="${URL%%://*}"
           echo "host=$host" >> "$GITHUB_OUTPUT"
@@ -138,8 +151,8 @@ jobs:
       - uses: docker/login-action@v4
         with:
           registry: ${{ steps.reg.outputs.host }}
-          username: ${{ secrets.GITEA_REGISTRY_USER }}
-          password: ${{ secrets.GITEA_REGISTRY_TOKEN }}
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
 
       - uses: docker/build-push-action@v7
         with:

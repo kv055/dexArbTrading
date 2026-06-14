@@ -13,7 +13,11 @@
 # is co-located with Gitea, or add an `extra_hosts:` entry below.
 
 services:
-  dind:
+  # Service is named 'docker' (not 'dind') on purpose: docker:dind auto-generates
+  # its TLS server cert with SANs for 'docker', 'localhost', and the container id —
+  # NOT the service name. Naming the service 'docker' makes the network alias match
+  # the cert, so the runner's TLS verify to tcp://docker:2376 succeeds.
+  docker:
     image: docker:dind
     container_name: gitea-runner-dind
     privileged: true                  # required for Docker-in-Docker
@@ -30,11 +34,11 @@ services:
     container_name: gitea-act-runner
     restart: unless-stopped
     depends_on:
-      - dind
+      - docker
     env_file:
       - act-runner.env                # GITEA_INSTANCE_URL / REGISTRATION_TOKEN / NAME / LABELS
     environment:
-      DOCKER_HOST: tcp://dind:2376
+      DOCKER_HOST: tcp://docker:2376
       DOCKER_CERT_PATH: /certs/client
       DOCKER_TLS_VERIFY: "1"
     # extra_hosts:
