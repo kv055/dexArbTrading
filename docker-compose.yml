@@ -302,6 +302,8 @@ services:
           # 512M gives headroom while backend deduplication lands.
           memory: 512M
           cpus: '0.5'
+    ports:
+      - "127.0.0.1:5002:5000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
