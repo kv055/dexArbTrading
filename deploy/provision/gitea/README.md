@@ -133,12 +133,19 @@ This file is what the runner container reads on first boot to register itself wi
 ### Step 7 — deploy and start the runner on the homeserver
 
 SSHes into `HOMESERVER_SSH_USER@HOMESERVER_SSH_HOST`, creates `HOMESERVER_RUNNER_DIR`, SCPs
-the three runner files (`act-runner-compose.yml`, `act-runner.env`, `daemon.json`), then
-runs `docker compose -f act-runner-compose.yml up -d` remotely.
+the runner files (`act-runner-compose.yml`, `runner-config.yaml`, `act-runner.env`,
+`daemon.json`), then runs `docker compose -f act-runner-compose.yml up -d` remotely.
 
 It runs Docker-in-Docker, so every job image/layer/cache lives in a throwaway volume.
 In Gitea → repo Settings → Actions → Runners the runner shows `online` with the
 `ubuntu-latest` label after a few seconds.
+
+**How jobs get Docker (for `docker buildx`):** the DinD daemon runs on plain TCP 2375 on
+the internal compose network (no TLS — never published to the host/LAN). `runner-config.yaml`
+sets `container.options` to bind-mount the DinD daemon's own `/var/run/docker.sock` into every
+job container, so build steps talk to DinD (not the host) — builds stay inside DinD and are
+wiped by teardown. That file also carries the runner log level and is deployed alongside the
+compose.
 
 ## Trigger the trial
 

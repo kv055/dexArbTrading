@@ -222,6 +222,7 @@ ssh "$SSH_TARGET" "mkdir -p $HOMESERVER_RUNNER_DIR"
 
 scp \
   "$SCRIPT_DIR/act-runner-compose.yml" \
+  "$SCRIPT_DIR/runner-config.yaml" \
   "$SCRIPT_DIR/act-runner.env" \
   "$SCRIPT_DIR/daemon.json" \
   "$SSH_TARGET:$HOMESERVER_RUNNER_DIR/"

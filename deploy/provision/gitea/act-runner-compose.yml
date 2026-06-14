@@ -1,9 +1,10 @@
 # Gitea Actions runner — run this ON THE HOMESERVER (where Docker lives).
 #
 # Reads act-runner.env (written by setup-gitea.sh) for the instance URL +
-# registration token. Uses Docker-in-Docker so EVERY job image, layer, and build
-# cache lives inside the `dind-storage` volume — `docker compose down -v`
-# (see teardown.sh) wipes it all, leaving no artifacts on the host.
+# registration token, and runner-config.yaml for runner settings. Uses
+# Docker-in-Docker so EVERY job image, layer, and build cache lives inside the
+# `dind-storage` volume — `docker compose down -v` (see teardown.sh) wipes it
+# all, leaving no artifacts on the host.
 #
 #   docker compose -f act-runner-compose.yml up -d
 #
@@ -13,19 +14,20 @@
 # is co-located with Gitea, or add an `extra_hosts:` entry below.
 
 services:
-  # Service is named 'docker' (not 'dind') on purpose: docker:dind auto-generates
-  # its TLS server cert with SANs for 'docker', 'localhost', and the container id —
-  # NOT the service name. Naming the service 'docker' makes the network alias match
-  # the cert, so the runner's TLS verify to tcp://docker:2376 succeeds.
+  # DinD daemon, reached as `docker` (the compose service name = network alias).
+  # Runs on plain TCP 2375 (DOCKER_TLS_CERTDIR="" disables TLS). 2375 is only on
+  # the internal compose network — never published to the host/LAN — so plaintext
+  # is fine, and it avoids distributing TLS client certs into every job container
+  # (which is what jobs need to run `docker buildx`).
   docker:
     image: docker:dind
     container_name: gitea-runner-dind
     privileged: true                  # required for Docker-in-Docker
     restart: unless-stopped
+    command: ["--host=unix:///var/run/docker.sock", "--host=tcp://0.0.0.0:2375"]
     environment:
-      DOCKER_TLS_CERTDIR: /certs
+      DOCKER_TLS_CERTDIR: ""          # disable TLS; listen on plain tcp://docker:2375
     volumes:
-      - dind-certs:/certs
       - dind-storage:/var/lib/docker  # all job images/cache live here; removed by `down -v`
       - ./daemon.json:/etc/docker/daemon.json:ro  # marks the Gitea registry insecure (HTTP)
 
@@ -38,16 +40,14 @@ services:
     env_file:
       - act-runner.env                # GITEA_INSTANCE_URL / REGISTRATION_TOKEN / NAME / LABELS
     environment:
-      DOCKER_HOST: tcp://docker:2376
-      DOCKER_CERT_PATH: /certs/client
-      DOCKER_TLS_VERIFY: "1"
+      DOCKER_HOST: tcp://docker:2375  # runner talks to DinD to create job containers
+      CONFIG_FILE: /config.yaml       # runner-config.yaml: sets container.docker_host (jobs get DOCKER_HOST) + log level
     # extra_hosts:
     #   - "gitea.your-tailnet.ts.net:100.x.y.z"   # uncomment if using a MagicDNS URL
     volumes:
-      - dind-certs:/certs:ro
       - act-runner-data:/data         # runner registration state; removed by `down -v`
+      - ./runner-config.yaml:/config.yaml:ro
 
 volumes:
-  dind-certs:
   dind-storage:
   act-runner-data:
