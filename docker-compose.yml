@@ -372,7 +372,11 @@ services:
       - HUMMINGBOT_URL=http://localhost:8000
       - HUMMINGBOT_USERNAME=admin
       - HUMMINGBOT_PASSWORD=password
-      - OFFER_PREMIUM_WSS_URL=ws://localhost:5000/ws/live_offers?cex=kraken
+      # Internal traffic must hit unified-api's published port directly. Port 5000
+      # (nginx :80) now 301-redirects to the TLS+basic-auth edge on :5443, which the
+      # WS dialer can't follow (self-signed cert). 5010 is host-published (mm-controller
+      # is network_mode: host), so localhost:5010 reaches unified-api without the edge.
+      - OFFER_PREMIUM_WSS_URL=ws://localhost:5010/ws/live_offers?cex=kraken
       - LND_HOST=https://localhost:8080
       - LND_MACAROON_PATH=/lnd/data/chain/bitcoin/mainnet/admin.macaroon
       - LND_TLS_CERT_PATH=/lnd/tls.cert

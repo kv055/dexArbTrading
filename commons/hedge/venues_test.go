@@ -39,7 +39,19 @@ func TestApplyVenueProfile(t *testing.T) {
 }
 
 func TestDefaultVenueProfileByNameRejectsUnknown(t *testing.T) {
-	if _, err := DefaultVenueProfileByName("binance"); err == nil {
+	if _, err := DefaultVenueProfileByName("unknown_exchange"); err == nil {
 		t.Fatal("expected unsupported venue error")
+	}
+}
+
+func TestDefaultVenueProfileByNameAcceptsBinance(t *testing.T) {
+	for _, name := range []string{"binance", "binance_futures", "Binance Futures"} {
+		profile, err := DefaultVenueProfileByName(name)
+		if err != nil {
+			t.Fatalf("DefaultVenueProfileByName(%q): %v", name, err)
+		}
+		if profile.Instrument != "BTCUSDT" {
+			t.Fatalf("instrument = %q, want BTCUSDT", profile.Instrument)
+		}
 	}
 }

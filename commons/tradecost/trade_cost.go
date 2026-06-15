@@ -1390,7 +1390,7 @@ func (e *TradeCostEstimator) estimateBestHedgeCost(btcAmount float64, refPriceEU
 		return hedgeCostDetails{}
 	}
 
-	allCandidates := []hedge.Venue{hedge.VenueKrakenFutures, hedge.VenueCoinbaseFutures}
+	allCandidates := []hedge.Venue{hedge.VenueKrakenFutures, hedge.VenueCoinbaseFutures, hedge.VenueBinanceFutures}
 	candidates := allCandidates
 	if coupledHedge {
 		if paired, ok := cexToHedgeVenue[e.exchange]; ok {

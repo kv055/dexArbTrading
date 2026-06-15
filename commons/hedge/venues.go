@@ -11,6 +11,7 @@ type Venue string
 const (
 	VenueKrakenFutures   Venue = "kraken_futures"
 	VenueCoinbaseFutures Venue = "coinbase_futures"
+	VenueBinanceFutures  Venue = "binance_futures"
 )
 
 type VenueProfile struct {
@@ -43,6 +44,15 @@ func defaultVenueProfiles() map[Venue]VenueProfile {
 				MaintenanceMarginRate: 0.01,
 				FallbackOpenFeeRate:   0.0006,
 				FallbackCloseFeeRate:  0.0006,
+				FallbackFundingRate:   0.0001,
+			},
+			VenueBinanceFutures: {
+				Venue:                 VenueBinanceFutures,
+				Instrument:            "BTCUSDT",
+				MaxLeverage:           20,
+				MaintenanceMarginRate: 0.004,
+				FallbackOpenFeeRate:   0.0004,
+				FallbackCloseFeeRate:  0.0004,
 				FallbackFundingRate:   0.0001,
 			},
 		}
@@ -78,6 +88,8 @@ func DefaultVenueProfileByName(name string) (VenueProfile, error) {
 		return DefaultVenueProfile(VenueKrakenFutures)
 	case "coinbase", "coinbase_futures", "coinbase futures":
 		return DefaultVenueProfile(VenueCoinbaseFutures)
+	case "binance", "binance_futures", "binance futures":
+		return DefaultVenueProfile(VenueBinanceFutures)
 	default:
 		return VenueProfile{}, fmt.Errorf("unsupported hedge venue %q", name)
 	}
@@ -99,8 +111,11 @@ func venueFundingInterval(venue Venue) time.Duration {
 			return time.Duration(v.FundingIntervalHours * float64(time.Hour))
 		}
 	}
-	if venue == VenueKrakenFutures {
+	switch venue {
+	case VenueKrakenFutures:
 		return 4 * time.Hour
+	case VenueCoinbaseFutures, VenueBinanceFutures:
+		return 8 * time.Hour
 	}
 	return 0
 }
