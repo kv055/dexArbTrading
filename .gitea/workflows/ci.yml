@@ -1,0 +1,180 @@
+# Gitea-only trial workflow.
+#
+# GitHub never reads .gitea/, so this file does NOT affect GitHub CI. Gitea, once a
+# .gitea/workflows/ file exists, uses it and ignores .github/workflows/ — so on Gitea
+# only this runs (not the full deploy pipeline). It runs the test jobs and then builds
+# all service images and pushes them to the *Gitea* container registry (NOT GHCR), so
+# it never touches GHCR or the production VPS. docker-compose.yml / the VPS keep pulling
+# from GHCR, so production is unaffected.
+#
+# Mirrors the test-go / test-frontend / build-and-push jobs in .github/workflows/ci-cd.yml.
+name: ci
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [develop]
+
+jobs:
+  test-go:
+    name: Go tests (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [commons, dexUnifiedApi, dexMmController, dexMonitor, dexFiatController]
+    steps:
+      # Main repo lives on Gitea (default github.token authenticates it). Submodules
+      # are fetched from the Gitea mirror, not github.com: the superproject pins some
+      # submodule commits that exist only on the mirror (local commits never pushed to
+      # github), and the mirror shares the Gitea host+token with the main repo.
+      - uses: actions/checkout@v5
+      - name: Fetch submodules from the Gitea mirror
+        run: |
+          host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
+          git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
+          git submodule update --init --recursive
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: Run tests
+        working-directory: ${{ matrix.module }}
+        run: go test ./...
+
+  test-frontend:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: dexMonitor/react-frontend
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fetch submodules from the Gitea mirror
+        working-directory: ${{ github.workspace }}   # default working-dir is inside a submodule that isn't checked out yet
+        run: |
+          host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
+          git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
+          git submodule update --init --recursive
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: dexMonitor/react-frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build (tsc + vite)
+        run: npm run build
+
+  build-and-push:
+    name: Build & push ${{ matrix.service }}
+    needs: [test-go, test-frontend]
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_BUILD_SUMMARY: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: tor
+            context: ./dexUnifiedApi
+            dockerfile: dexUnifiedApi/Dockerfile.tor
+          - service: bisq
+            context: ./dexUnifiedApi
+            dockerfile: dexUnifiedApi/Dockerfile.bisq
+          - service: bisq2
+            context: ./dexUnifiedApi
+            dockerfile: dexUnifiedApi/Dockerfile.bisq2
+          - service: unified-api
+            context: .
+            dockerfile: dexUnifiedApi/Dockerfile
+          - service: unified-snapshot
+            context: .
+            dockerfile: dexUnifiedApi/Dockerfile.snapshot
+          - service: postgres-backup
+            context: .
+            dockerfile: dexUnifiedApi/Dockerfile.backup
+          - service: dexmonitor
+            context: .
+            dockerfile: dexMonitor/Dockerfile
+          - service: mm-controller
+            context: ./dexMmController
+            dockerfile: dexMmController/Dockerfile
+          - service: totp-api
+            context: ./dexFiatController/services/totp-api
+            dockerfile: dexFiatController/services/totp-api/Dockerfile
+          - service: fiat-controller
+            context: ./dexFiatController
+            dockerfile: dexFiatController/Dockerfile
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fetch submodules from the Gitea mirror
+        run: |
+          host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
+          git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
+          git submodule update --init --recursive
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Resolve Gitea registry + build metadata
+        id: reg
+        env:
+          URL: ${{ secrets.REGISTRY_URL }}
+        run: |
+          host="${URL#*://}"; scheme="${URL%%://*}"
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+          echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          echo "commit_hash=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          echo "commit_date=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
+          # BuildKit needs its own per-registry config (daemon.json doesn't apply to it).
+          # http=true forces plaintext for an HTTP Gitea; insecure=true skips cert verify
+          # (covers self-signed TLS). Harmless for a valid-cert HTTPS host.
+          if [ "$scheme" = "http" ]; then
+            printf '[registry."%s"]\n  http = true\n  insecure = true\n' "$host" > /tmp/buildkitd.toml
+          else
+            printf '[registry."%s"]\n  insecure = true\n' "$host" > /tmp/buildkitd.toml
+          fi
+
+      - name: Create buildx builder (Gitea-registry aware)
+        # No --name: matrix jobs share one DinD daemon, so let buildx auto-generate a
+        # unique builder name to avoid collisions.
+        run: docker buildx create --use --driver docker-container --config /tmp/buildkitd.toml
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ steps.reg.outputs.host }}
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          # Only the dexmonitor image consumes these; the rest emit a harmless
+          # "unused build args" buildx warning.
+          build-args: |
+            COMMIT_HASH=${{ steps.reg.outputs.commit_hash }}
+            COMMIT_DATE=${{ steps.reg.outputs.commit_date }}
+          # Publish on push/dispatch; PRs build for validation only.
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ steps.reg.outputs.host }}/${{ steps.reg.outputs.owner }}/dexarbtrading-${{ matrix.service }}:latest
+            ${{ steps.reg.outputs.host }}/${{ steps.reg.outputs.owner }}/dexarbtrading-${{ matrix.service }}:${{ github.sha }}

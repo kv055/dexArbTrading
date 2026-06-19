@@ -125,6 +125,8 @@ func FetchDefaultVenueInputs(venue Venue) (LivePerpInputs, error) {
 		return FetchKrakenPerpInputs(profile.Instrument)
 	case VenueCoinbaseFutures:
 		return FetchCoinbaseFuturesInputs(profile.Instrument)
+	case VenueBinanceFutures:
+		return FetchBinanceFuturesInputs(profile.Instrument)
 	default:
 		return LivePerpInputs{}, fmt.Errorf("unsupported hedge venue %q", venue)
 	}
@@ -387,6 +389,107 @@ func doJSON(req *http.Request, target any) error {
 		return fmt.Errorf("http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return json.NewDecoder(resp.Body).Decode(target)
+}
+
+// FetchBinanceFuturesInputs fetches live taker fee and funding data from Binance USDⓈ-M
+// Futures for the supplied symbol (e.g. BTCUSDT).
+func FetchBinanceFuturesInputs(symbol string) (LivePerpInputs, error) {
+	if strings.TrimSpace(symbol) == "" {
+		return LivePerpInputs{}, fmt.Errorf("symbol is required")
+	}
+
+	apiKey := firstEnv("BINANCE_FUTURES_API_KEY", "BINANCE_API_KEY")
+	apiSecret := firstEnv("BINANCE_FUTURES_API_SECRET", "BINANCE_API_SECRET")
+	if apiKey == "" || apiSecret == "" {
+		return LivePerpInputs{}, fmt.Errorf("binance futures API credentials not configured")
+	}
+
+	takerRate, err := fetchBinanceFuturesTakerRate(apiKey, apiSecret, symbol)
+	if err != nil {
+		return LivePerpInputs{}, err
+	}
+
+	fundingRate, err := fetchBinancePremiumIndex(symbol)
+	if err != nil {
+		return LivePerpInputs{}, err
+	}
+
+	return LivePerpInputs{
+		Venue:           "binance_futures",
+		Instrument:      symbol,
+		OpenFeeRate:     takerRate,
+		CloseFeeRate:    takerRate,
+		FundingRate:     fundingRate,
+		FundingInterval: venueFundingInterval(VenueBinanceFutures),
+		FetchedAt:       time.Now().UTC(),
+	}, nil
+}
+
+type binanceCommissionRateResponse struct {
+	TakerCommissionRate string `json:"takerCommissionRate"`
+}
+
+func fetchBinanceFuturesTakerRate(apiKey, apiSecret, symbol string) (float64, error) {
+	base := "https://fapi.binance.com"
+	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	query := "symbol=" + url.QueryEscape(symbol) + "&timestamp=" + timestamp
+	mac := hmac.New(sha256.New, []byte(apiSecret))
+	mac.Write([]byte(query))
+	query += "&signature=" + fmt.Sprintf("%x", mac.Sum(nil))
+
+	req, err := http.NewRequest(http.MethodGet, base+"/fapi/v1/commissionRate?"+query, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("X-MBX-APIKEY", apiKey)
+
+	var out binanceCommissionRateResponse
+	if err := doJSON(req, &out); err != nil {
+		return 0, fmt.Errorf("binance futures commission rate: %w", err)
+	}
+	rate, err := strconv.ParseFloat(out.TakerCommissionRate, 64)
+	if err != nil {
+		return 0, fmt.Errorf("binance futures commission rate parse: %w", err)
+	}
+	return rate, nil
+}
+
+type binancePremiumIndexResponse struct {
+	LastFundingRate string `json:"lastFundingRate"`
+}
+
+func fetchBinancePremiumIndex(symbol string) (float64, error) {
+	req, err := http.NewRequest(http.MethodGet,
+		"https://fapi.binance.com/fapi/v1/premiumIndex?symbol="+url.QueryEscape(symbol), nil)
+	if err != nil {
+		return 0, err
+	}
+
+	var out binancePremiumIndexResponse
+	if err := doJSON(req, &out); err != nil {
+		return 0, fmt.Errorf("binance futures premium index: %w", err)
+	}
+	rate, err := strconv.ParseFloat(out.LastFundingRate, 64)
+	if err != nil {
+		return 0, fmt.Errorf("binance futures funding rate parse: %w", err)
+	}
+	return rate, nil
+}
+
+// signBinanceFuturesRequest appends timestamp and HMAC-SHA256 signature to a query string
+// and sets the X-MBX-APIKEY header. Used for signed Binance USDⓈ-M Futures endpoints.
+func signBinanceFuturesRequest(req *http.Request, apiKey, apiSecret, existingQuery string) string {
+	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	query := existingQuery
+	if query != "" {
+		query += "&"
+	}
+	query += "timestamp=" + timestamp
+	mac := hmac.New(sha256.New, []byte(apiSecret))
+	mac.Write([]byte(query))
+	query += "&signature=" + fmt.Sprintf("%x", mac.Sum(nil))
+	req.Header.Set("X-MBX-APIKEY", apiKey)
+	return query
 }
 
 func firstEnv(keys ...string) string {

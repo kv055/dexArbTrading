@@ -121,6 +121,162 @@ func TestTradeCostEstimatorBreakdownIncludesHedgeCostOnBidSide(t *testing.T) {
 	}
 }
 
+func TestComputeCapitalRequirementBidBisq(t *testing.T) {
+	pos := &HedgePositionDetail{RecommendedCollateralEUR: 900}
+	cap := computeCapitalRequirement(0.1, 45000, "bisq", true, pos, nil)
+
+	assertFloat(t, cap.BTCAmount, 0.1)
+	assertFloat(t, cap.BTCPriceEUR, 45000)
+	assertFloat(t, cap.SpotNotionalEUR, 4500)   // 0.1 * 45000
+	assertFloat(t, cap.HedgeCollateralEUR, 900) // reused from the hedge position
+	assertFloat(t, cap.SecurityDepositPct, 0.15)
+	assertFloat(t, cap.SecurityDepositBTC, 0.015) // 0.1 * 0.15, above the 0.001 floor
+	assertFloat(t, cap.SecurityDepositEUR, 675)   // 0.015 * 45000
+	assertFloat(t, cap.TotalEUR, 6075)            // 4500 + 900 + 675
+	if cap.SecurityDepositSide != "seller" {
+		t.Fatalf("deposit side = %q, want seller", cap.SecurityDepositSide)
+	}
+	if !cap.DepositEstimated {
+		t.Fatalf("DepositEstimated = false, want true")
+	}
+}
+
+func TestComputeCapitalRequirementAskSideUsesBuyerDeposit(t *testing.T) {
+	cap := computeCapitalRequirement(0.1, 45000, "bisq", false, nil, nil)
+
+	if cap.SecurityDepositSide != "buyer" {
+		t.Fatalf("deposit side = %q, want buyer", cap.SecurityDepositSide)
+	}
+	assertFloat(t, cap.HedgeCollateralEUR, 0) // nil position
+}
+
+func TestComputeCapitalRequirementAppliesDepositFloor(t *testing.T) {
+	cap := computeCapitalRequirement(0.001, 45000, "bisq", true, nil, nil)
+
+	// 0.001 * 0.15 = 0.00015 is below the 0.001 BTC floor.
+	assertFloat(t, cap.SecurityDepositBTC, 0.001)
+	assertFloat(t, cap.SecurityDepositEUR, 45) // 0.001 * 45000
+}
+
+func TestComputeCapitalRequirementUnknownRefPriceZeroesEUR(t *testing.T) {
+	pos := &HedgePositionDetail{RecommendedCollateralEUR: 900}
+	cap := computeCapitalRequirement(0.1, 0, "bisq", true, pos, nil)
+
+	assertFloat(t, cap.SpotNotionalEUR, 0)
+	assertFloat(t, cap.SecurityDepositEUR, 0)
+	assertFloat(t, cap.SecurityDepositBTC, 0.015) // BTC deposit still known without a price
+	assertFloat(t, cap.HedgeCollateralEUR, 900)
+	assertFloat(t, cap.TotalEUR, 900) // only the hedge collateral, which is already EUR
+}
+
+func TestComputeCapitalRequirementNonDepositDEX(t *testing.T) {
+	cap := computeCapitalRequirement(0.1, 45000, "robosats", true, nil, nil)
+
+	assertFloat(t, cap.SecurityDepositPct, 0)
+	assertFloat(t, cap.SecurityDepositBTC, 0)
+	assertFloat(t, cap.SecurityDepositEUR, 0)
+	if cap.SecurityDepositSide != "" {
+		t.Fatalf("deposit side = %q, want empty", cap.SecurityDepositSide)
+	}
+	if cap.DepositEstimated {
+		t.Fatalf("DepositEstimated = true, want false for non-deposit DEX")
+	}
+}
+
+func TestComputeCapitalRequirementRealDepositBeatsEstimate(t *testing.T) {
+	realPct := 0.18 // measured per-offer deposit, different from the 15% bisq estimate
+	cap := computeCapitalRequirement(0.1, 45000, "bisq", true, nil, &realPct)
+
+	assertFloat(t, cap.SecurityDepositPct, 0.18)
+	assertFloat(t, cap.SecurityDepositBTC, 0.018) // 0.1 * 0.18, no estimate floor applied
+	assertFloat(t, cap.SecurityDepositEUR, 810)   // 0.018 * 45000
+	if cap.SecurityDepositSide != "seller" {
+		t.Fatalf("deposit side = %q, want seller", cap.SecurityDepositSide)
+	}
+	if cap.DepositEstimated {
+		t.Fatalf("DepositEstimated = true, want false for a real measured deposit")
+	}
+}
+
+func TestComputeCapitalRequirementRealDepositAppliesToRoboSats(t *testing.T) {
+	// robosats has no entry in dexSecurityDepositPct (no flat estimate), but a
+	// real measured bond should still produce a deposit.
+	realPct := 0.03
+	cap := computeCapitalRequirement(0.1, 45000, "robosats", false, nil, &realPct)
+
+	assertFloat(t, cap.SecurityDepositPct, 0.03)
+	assertFloat(t, cap.SecurityDepositBTC, 0.003) // 0.1 * 0.03
+	if cap.SecurityDepositSide != "buyer" {
+		t.Fatalf("deposit side = %q, want buyer", cap.SecurityDepositSide)
+	}
+	if cap.DepositEstimated {
+		t.Fatalf("DepositEstimated = true, want false")
+	}
+}
+
+// fixedCostEstimatorWithHedgePosition mirrors fixedCostEstimatorWithHedge but
+// also attaches a position whose recommended collateral scales with the trade
+// notional, so capped vs full breakdowns can be compared.
+func fixedCostEstimatorWithHedgePosition(exchange, dexExchange string, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC, hedgeFeeBTC float64) *TradeCostEstimator {
+	est := fixedCostEstimator(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
+	est.hedgeCostOverride = func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails {
+		return hedgeCostDetails{
+			feeBTC:          hedgeFeeBTC,
+			feePct:          hedgeFeeBTC / btcAmount * 100,
+			side:            side,
+			venue:           "coinbase_futures",
+			instrument:      "BTC-PERP",
+			transferMinutes: transferMinutes,
+			position:        &HedgePositionDetail{RecommendedCollateralEUR: btcAmount * refPriceEUR * 0.1},
+		}
+	}
+	return est
+}
+
+func TestBreakdownCapitalRespectsFullAndCappedVolume(t *testing.T) {
+	est := fixedCostEstimatorWithHedgePosition("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
+
+	full := est.breakdownForMethodWithTier(0.1, 45000, "bisq", MethodOnchain, "buy", 0, "", false, nil)
+	capped := est.breakdownForMethodWithTier(0.04, 45000, "bisq", MethodOnchain, "buy", 0, "", false, nil)
+
+	// Full size.
+	assertFloat(t, full.Capital.SpotNotionalEUR, 4500)     // 0.1 * 45000
+	assertFloat(t, full.Capital.HedgeCollateralEUR, 450)   // 0.1 * 45000 * 0.1
+	assertFloat(t, full.Capital.SecurityDepositBTC, 0.015) // 0.1 * 0.15
+	assertFloat(t, full.Capital.TotalEUR, 5625)            // 4500 + 450 + 675
+
+	// Capped size scales every component down with the smaller btc amount.
+	assertFloat(t, capped.Capital.SpotNotionalEUR, 1800)     // 0.04 * 45000
+	assertFloat(t, capped.Capital.HedgeCollateralEUR, 180)   // 0.04 * 45000 * 0.1
+	assertFloat(t, capped.Capital.SecurityDepositBTC, 0.006) // 0.04 * 0.15
+	assertFloat(t, capped.Capital.TotalEUR, 2250)            // 1800 + 180 + 270
+
+	if capped.Capital.TotalEUR >= full.Capital.TotalEUR {
+		t.Fatalf("capped total %.2f should be below full total %.2f", capped.Capital.TotalEUR, full.Capital.TotalEUR)
+	}
+}
+
+func TestBreakdownRealDepositPctScalesWithCappedVolume(t *testing.T) {
+	est := fixedCostEstimatorWithHedgePosition("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
+	realPct := 0.18
+
+	full := est.breakdownForMethodWithTier(0.1, 45000, "bisq", MethodOnchain, "buy", 0, "", false, &realPct)
+	capped := est.breakdownForMethodWithTier(0.04, 45000, "bisq", MethodOnchain, "buy", 0, "", false, &realPct)
+
+	// The real pct is fixed, but since SecurityDepositBTC = btcAmount * pct, the
+	// absolute deposit still scales down correctly with the smaller capped size.
+	assertFloat(t, full.Capital.SecurityDepositPct, 0.18)
+	assertFloat(t, full.Capital.SecurityDepositBTC, 0.018) // 0.1 * 0.18
+	if full.Capital.DepositEstimated {
+		t.Fatalf("full DepositEstimated = true, want false")
+	}
+	assertFloat(t, capped.Capital.SecurityDepositPct, 0.18)
+	assertFloat(t, capped.Capital.SecurityDepositBTC, 0.0072) // 0.04 * 0.18
+	if capped.Capital.DepositEstimated {
+		t.Fatalf("capped DepositEstimated = true, want false")
+	}
+}
+
 func TestAbortCostFromBreakdownIncludesBidUnwindComponents(t *testing.T) {
 	est := fixedCostEstimatorWithHedge("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 

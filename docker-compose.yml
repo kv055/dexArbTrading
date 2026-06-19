@@ -38,6 +38,12 @@ services:
     build:
       context: ./dexUnifiedApi
       dockerfile: Dockerfile.tor
+    ports:
+      # Loopback only: host-networked services (mm-controller) reach the
+      # SOCKS proxy via 127.0.0.1:9050; compose-network services use tor:9050.
+      # Override TOR_SOCKS_HOST_PORT when the host already runs its own tor
+      # daemon on 9050 (mm-controller can then use that one directly).
+      - "127.0.0.1:${TOR_SOCKS_HOST_PORT:-9050}:9050"
     cap_add:
       - NET_ADMIN
     healthcheck:
@@ -296,6 +302,8 @@ services:
           # 512M gives headroom while backend deduplication lands.
           memory: 512M
           cpus: '0.5'
+    ports:
+      - "127.0.0.1:5002:5000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -303,6 +311,22 @@ services:
   nginx:
     logging: *default-logging
     image: nginx:1.27-alpine
+    # Edge basic-auth credentials come from .env as a ready-made htpasswd line
+    # ("user:hash"). The `$` in the hash MUST be doubled to `$$` in .env or
+    # compose interpolation eats it and locks everyone out — see
+    # deploy/nginx/README.md for the generator command. nginx can only read
+    # creds from a file, so write it before handing off to the stock entrypoint.
+    # Fail fast when unset — an empty htpasswd would lock everyone out with no
+    # hint why, and the crashed container fails `up --wait` so a misconfigured
+    # deploy rolls back. 644 not 600: workers run as user nginx and must read it
+    # (it holds a hash, not a plaintext password). $$EDGE_AUTH_HTPASSWD keeps
+    # compose from interpolating the command; the container shell expands it.
+    environment:
+      - EDGE_AUTH_HTPASSWD=${EDGE_AUTH_HTPASSWD:-}
+    command: >
+      sh -c '[ -n "$$EDGE_AUTH_HTPASSWD" ] || { echo "EDGE_AUTH_HTPASSWD not set in .env — generate with: htpasswd -nb <user> <password>" >&2; exit 1; };
+      printf "%s\n" "$$EDGE_AUTH_HTPASSWD" > /etc/nginx/htpasswd && chmod 644 /etc/nginx/htpasswd
+      && exec /docker-entrypoint.sh nginx -g "daemon off;"'
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       # TLS material (gitignored, never committed). The CI deploy guard auto-creates/
@@ -327,90 +351,101 @@ services:
           cpus: '0.1'
     restart: unless-stopped
 
-  # mm-controller:
-  #   logging: *default-logging
-  #   image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-mm-controller:${IMAGE_TAG:-latest}
-  #   build:
-  #     context: ./dexMmController
-  #     dockerfile: Dockerfile
-  #   network_mode: host
-  #   env_file:
-  #     - ./dexMmController/.env
-  #   depends_on:
-  #     lnd:
-  #       condition: service_healthy
-  #     unified-api:
-  #       condition: service_healthy
-  #   environment:
-  #     - DB_PATH=/app/mm-controller.db
-  #     - API_ADDR=:5001
-  #     - OPENCLAW_URL=
-  #     - HUMMINGBOT_URL=http://localhost:8000
-  #     - HUMMINGBOT_USERNAME=admin
-  #     - HUMMINGBOT_PASSWORD=password
-  #     - OFFER_PREMIUM_WSS_URL=ws://localhost:5000/ws/live_offers?cex=kraken
-  #     - LND_HOST=https://localhost:8080
-  #     - LND_MACAROON_PATH=/lnd/data/chain/bitcoin/mainnet/admin.macaroon
-  #     - LND_TLS_CERT_PATH=/lnd/tls.cert
-  #     - LND_EXTENDED_MASTER_KEY_FILE=/run/secrets/lnd_extended_master_key
-  #     - LND_EXTENDED_MASTER_KEY_BIRTHDAY_TIMESTAMP_FILE=/run/secrets/lnd_extended_master_key_birthday_timestamp
-  #     - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
-  #     # Alternative to xprv/tprv:
-  #     # - LND_SEED_MNEMONIC_FILE=/run/secrets/lnd_seed_mnemonic
-  #     # - LND_AEZEED_PASSPHRASE_FILE=/run/secrets/lnd_aezeed_passphrase
-  #     # - LND_RECOVERY_WINDOW=250
-  #   volumes:
-  #     - lnd-data:/lnd:ro
-  #     - ./dexMmController/secrets/lnd_extended_master_key:/run/secrets/lnd_extended_master_key:ro
-  #     - ./dexMmController/secrets/lnd_extended_master_key_birthday_timestamp:/run/secrets/lnd_extended_master_key_birthday_timestamp:ro
-  #     # Alternative to aezeed:
-  #     # - ./dexMmController/secrets/lnd_seed_mnemonic:/run/secrets/lnd_seed_mnemonic:ro
-  #     # - ./dexMmController/secrets/lnd_aezeed_passphrase:/run/secrets/lnd_aezeed_passphrase:ro
-  #   healthcheck:
-  #     test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5001/health"]
-  #     interval: 15s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 20s
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         memory: 128M
-  #         cpus: '0.5'
-  #   restart: unless-stopped
+  mm-controller:
+    logging: *default-logging
+    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-mm-controller:${IMAGE_TAG:-latest}
+    build:
+      context: ./dexMmController
+      dockerfile: Dockerfile
+    network_mode: host
+    env_file:
+      - ./dexMmController/.env
+    depends_on:
+      lnd:
+        condition: service_healthy
+      unified-api:
+        condition: service_healthy
+    environment:
+      - DB_PATH=/app/mm-controller.db
+      - API_ADDR=:5001
+      - OPENCLAW_URL=
+      - HUMMINGBOT_URL=http://localhost:8000
+      - HUMMINGBOT_USERNAME=admin
+      - HUMMINGBOT_PASSWORD=password
+      # Internal traffic must hit unified-api's published port directly. Port 5000
+      # (nginx :80) now 301-redirects to the TLS+basic-auth edge on :5443, which the
+      # WS dialer can't follow (self-signed cert). 5010 is host-published (mm-controller
+      # is network_mode: host), so localhost:5010 reaches unified-api without the edge.
+      - OFFER_PREMIUM_WSS_URL=ws://localhost:5010/ws/live_offers?cex=kraken
+      - LND_HOST=https://localhost:8080
+      - LND_MACAROON_PATH=/lnd/data/chain/bitcoin/mainnet/admin.macaroon
+      - LND_TLS_CERT_PATH=/lnd/tls.cert
+      # xprv restore disabled: wallet is generated fresh from a new aezeed seed
+      # (stored in DB on first boot). Re-enable both lines + the secret mounts
+      # below to restore a wallet from the extended master key instead.
+      # - LND_EXTENDED_MASTER_KEY_FILE=/run/secrets/lnd_extended_master_key
+      # - LND_EXTENDED_MASTER_KEY_BIRTHDAY_TIMESTAMP_FILE=/run/secrets/lnd_extended_master_key_birthday_timestamp
+      - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
+      # RoboSats coordinators are Tor onion services; reach them through the
+      # tor sidecar's SOCKS port published on the host loopback.
+      - TOR_PROXY_URL=socks5h://127.0.0.1:9050
+      # Alternative to xprv/tprv:
+      # - LND_SEED_MNEMONIC_FILE=/run/secrets/lnd_seed_mnemonic
+      # - LND_AEZEED_PASSPHRASE_FILE=/run/secrets/lnd_aezeed_passphrase
+      # - LND_RECOVERY_WINDOW=250
+    volumes:
+      - lnd-data:/lnd:ro
+      # xprv restore disabled (see env block above):
+      # - ./dexMmController/secrets/lnd_extended_master_key:/run/secrets/lnd_extended_master_key:ro
+      # - ./dexMmController/secrets/lnd_extended_master_key_birthday_timestamp:/run/secrets/lnd_extended_master_key_birthday_timestamp:ro
+      # Alternative to aezeed:
+      # - ./dexMmController/secrets/lnd_seed_mnemonic:/run/secrets/lnd_seed_mnemonic:ro
+      # - ./dexMmController/secrets/lnd_aezeed_passphrase:/run/secrets/lnd_aezeed_passphrase:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.5'
+    restart: unless-stopped
 
-  # lnd:
-  #   logging: *default-logging
-  #   image: lightninglabs/lnd:v0.18.4-beta
-  #   network_mode: host
-  #   volumes:
-  #     - lnd-data:/root/.lnd
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-sf", "--cacert", "/root/.lnd/tls.cert",
-  #            "https://localhost:8080/v1/state"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 20
-  #     start_period: 60s
-  #   command:
-  #     - --bitcoin.active
-  #     - --bitcoin.mainnet
-  #     - --bitcoin.node=neutrino
-  #     - --neutrino.addpeer=btcd-mainnet.lightning.computer
-  #     - --neutrino.addpeer=neutrino.noderunner.wtf
-  #     - --neutrino.addpeer=node.eldamar.icu
-  #     - --neutrino.addpeer=btcd.lnolymp.us
-  #     - --fee.url=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json
-  #     - --restlisten=0.0.0.0:8080
-  #     - --rpclisten=0.0.0.0:10009
-  #     - --tlsextraip=127.0.0.1
-  #     - --tlsextradomain=localhost
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         memory: 512M
-  #         cpus: '0.5'
-  #   restart: unless-stopped
+  lnd:
+    logging: *default-logging
+    image: lightninglabs/lnd:v0.18.4-beta
+    network_mode: host
+    volumes:
+      - lnd-data:/root/.lnd
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "--cacert", "/root/.lnd/tls.cert",
+             "https://localhost:8080/v1/state"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    command:
+      - --bitcoin.active
+      - --bitcoin.mainnet
+      - --bitcoin.node=neutrino
+      - --neutrino.addpeer=btcd-mainnet.lightning.computer
+      - --neutrino.addpeer=neutrino.noderunner.wtf
+      - --neutrino.addpeer=node.eldamar.icu
+      - --neutrino.addpeer=btcd.lnolymp.us
+      - --fee.url=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json
+      - --restlisten=0.0.0.0:8080
+      - --rpclisten=0.0.0.0:10009
+      - --tlsextraip=127.0.0.1
+      - --tlsextradomain=localhost
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+    restart: unless-stopped
 
   # totp-api:
   #   logging: *default-logging

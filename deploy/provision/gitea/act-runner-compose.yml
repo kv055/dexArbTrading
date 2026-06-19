@@ -1,0 +1,53 @@
+# Gitea Actions runner — run this ON THE HOMESERVER (where Docker lives).
+#
+# Reads act-runner.env (written by setup-gitea.sh) for the instance URL +
+# registration token, and runner-config.yaml for runner settings. Uses
+# Docker-in-Docker so EVERY job image, layer, and build cache lives inside the
+# `dind-storage` volume — `docker compose down -v` (see teardown.sh) wipes it
+# all, leaving no artifacts on the host.
+#
+#   docker compose -f act-runner-compose.yml up -d
+#
+# Note: GITEA_INSTANCE_URL must be reachable from inside this container. A
+# Tailscale *.ts.net MagicDNS name usually does NOT resolve in-container — prefer
+# the Tailscale IP (http://100.x.y.z:3000) or LAN IP for GITEA_URL when the runner
+# is co-located with Gitea, or add an `extra_hosts:` entry below.
+
+services:
+  # DinD daemon, reached as `docker` (the compose service name = network alias).
+  # Runs on plain TCP 2375 (DOCKER_TLS_CERTDIR="" disables TLS). 2375 is only on
+  # the internal compose network — never published to the host/LAN — so plaintext
+  # is fine, and it avoids distributing TLS client certs into every job container
+  # (which is what jobs need to run `docker buildx`).
+  docker:
+    image: docker:dind
+    container_name: gitea-runner-dind
+    privileged: true                  # required for Docker-in-Docker
+    restart: unless-stopped
+    command: ["--host=unix:///var/run/docker.sock", "--host=tcp://0.0.0.0:2375"]
+    environment:
+      DOCKER_TLS_CERTDIR: ""          # disable TLS; listen on plain tcp://docker:2375
+    volumes:
+      - dind-storage:/var/lib/docker  # all job images/cache live here; removed by `down -v`
+      - ./daemon.json:/etc/docker/daemon.json:ro  # marks the Gitea registry insecure (HTTP)
+
+  act_runner:
+    image: gitea/act_runner:latest    # pin to a specific tag for reproducibility
+    container_name: gitea-act-runner
+    restart: unless-stopped
+    depends_on:
+      - docker
+    env_file:
+      - act-runner.env                # GITEA_INSTANCE_URL / REGISTRATION_TOKEN / NAME / LABELS
+    environment:
+      DOCKER_HOST: tcp://docker:2375  # runner talks to DinD to create job containers
+      CONFIG_FILE: /config.yaml       # runner-config.yaml: sets container.docker_host (jobs get DOCKER_HOST) + log level
+    # extra_hosts:
+    #   - "gitea.your-tailnet.ts.net:100.x.y.z"   # uncomment if using a MagicDNS URL
+    volumes:
+      - act-runner-data:/data         # runner registration state; removed by `down -v`
+      - ./runner-config.yaml:/config.yaml:ro
+
+volumes:
+  dind-storage:
+  act-runner-data:

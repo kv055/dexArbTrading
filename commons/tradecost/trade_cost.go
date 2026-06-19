@@ -603,6 +603,23 @@ var dexTakerFees = map[string]float64{
 	"peachbitcoin": 0.02,
 }
 
+// bisqSecurityDepositFloorBTC is Bisq's minimum security deposit regardless of
+// the percentage (0.001 BTC). Source: bisq.wiki/Trading_rules.
+const bisqSecurityDepositFloorBTC = 0.001
+
+// dexSecurityDepositPct is the FALLBACK security deposit estimate, as a
+// fraction of the trade BTC amount, used only when no real per-offer value is
+// available (e.g. an offer snapshotted before the real value was persisted).
+// Bisq's default buyer/seller deposit is 15%. The real per-offer value (now
+// persisted as offers.security_deposit_pct, computed at snapshot time from
+// the bisq gRPC OfferInfo / the RoboSats bond_size) is passed into
+// computeCapitalRequirement as realDepositPct and always takes priority over
+// this map. DEXes absent from this map lock no deposit when no real value
+// is available either.
+var dexSecurityDepositPct = map[string]float64{
+	"bisq": 0.15,
+}
+
 // robosatsOnions are the coordinator onion addresses, tried in order.
 // Keep this aligned with the active unified snapshot fetcher.
 var robosatsOnions = []string{
@@ -1151,6 +1168,7 @@ type CostBreakdown struct {
 	DexFeeBTC            float64              `json:"dex_fee_btc"`            // DEX platform fee in BTC
 	TotalCostPct         float64              `json:"total_cost_pct"`         // sum of all components as % of trade
 	TotalCostBTC         float64              `json:"total_cost_btc"`         // sum of all components in BTC
+	Capital              CapitalRequirement   `json:"capital"`                // capital that must be committed to execute the trade (distinct from costs)
 }
 
 type AbortCostComponent struct {
@@ -1202,6 +1220,32 @@ type HedgePositionDetail struct {
 	FreeCollateralAfterStressEUR float64 `json:"free_collateral_after_stress_eur"` // equity left above maintenance after the stress move
 	LiquidationMovePct           float64 `json:"liquidation_move_pct"`             // adverse BTC move that would liquidate the position at the chosen leverage
 	BTCPriceEUR                  float64 `json:"btc_price_eur"`                    // CEX ref price used to size the notional
+	// Historical is true when this position was reconstructed from persisted
+	// per-cycle averages (order_lifecycle) for a closed offer, rather than
+	// freshly simulated for a live one. Only Side, HedgeRatio, LeverageUsed,
+	// HedgeNotionalEUR, RecommendedCollateralEUR, and BTCPriceEUR are
+	// populated in that case — the other fields were never persisted and are
+	// left zero, so consumers should hide them rather than display a fake 0.
+	Historical bool `json:"historical,omitempty"`
+}
+
+// CapitalRequirement is the capital a trader must commit to *execute* the trade,
+// as opposed to the fees consumed by it (CostBreakdown). It is broken out into
+// the spot leg (EUR to buy BTC on the CEX), the perp hedge collateral, and the
+// DEX security deposit, plus the grand total. All figures are for the BTCAmount
+// the enclosing CostBreakdown was built with, so the capped breakdown carries a
+// capped capital block. EUR figures are 0 when the ref price is unknown.
+type CapitalRequirement struct {
+	BTCAmount           float64 `json:"btc_amount"`            // trade size the figures are based on
+	BTCPriceEUR         float64 `json:"btc_price_eur"`         // ref price used for EUR conversion (0 when unknown)
+	SpotNotionalEUR     float64 `json:"spot_notional_eur"`     // EUR to buy the BTC leg on the CEX (btcAmount * refPrice)
+	HedgeCollateralEUR  float64 `json:"hedge_collateral_eur"`  // = Hedge.Position.RecommendedCollateralEUR (0 if no position)
+	SecurityDepositPct  float64 `json:"security_deposit_pct"`  // fraction applied (e.g. 0.15); 0 for non-deposit DEXes
+	SecurityDepositSide string  `json:"security_deposit_side"` // "buyer" or "seller" — the side we play on the DEX
+	SecurityDepositBTC  float64 `json:"security_deposit_btc"`  // max(btcAmount*pct, floor)
+	SecurityDepositEUR  float64 `json:"security_deposit_eur"`  // deposit in EUR (0 when refPrice unknown)
+	TotalEUR            float64 `json:"total_eur"`             // spot + hedge + deposit
+	DepositEstimated    bool    `json:"deposit_estimated"`     // true while using the configured %, false once the real per-offer value is plumbed
 }
 
 func round8(v float64) float64 {
@@ -1244,10 +1288,10 @@ func (e *TradeCostEstimator) BreakdownWithConfirmations(btcAmount float64, dexEx
 }
 
 func (e *TradeCostEstimator) breakdownForMethod(btcAmount float64, refPriceEUR float64, dexExchange string, method WithdrawalMethod, direction string, requiredConfirmations int, coupledHedge bool) CostBreakdown {
-	return e.breakdownForMethodWithTier(btcAmount, refPriceEUR, dexExchange, method, direction, requiredConfirmations, "", coupledHedge)
+	return e.breakdownForMethodWithTier(btcAmount, refPriceEUR, dexExchange, method, direction, requiredConfirmations, "", coupledHedge, nil)
 }
 
-func (e *TradeCostEstimator) breakdownForMethodWithTier(btcAmount float64, refPriceEUR float64, dexExchange string, method WithdrawalMethod, direction string, requiredConfirmations int, feeTier string, coupledHedge bool) CostBreakdown {
+func (e *TradeCostEstimator) breakdownForMethodWithTier(btcAmount float64, refPriceEUR float64, dexExchange string, method WithdrawalMethod, direction string, requiredConfirmations int, feeTier string, coupledHedge bool, realDepositPct *float64) CostBreakdown {
 	if btcAmount <= 0 {
 		return CostBreakdown{}
 	}
@@ -1324,7 +1368,69 @@ func (e *TradeCostEstimator) breakdownForMethodWithTier(btcAmount float64, refPr
 		DexFeeBTC:    round8(dexBTC),
 		TotalCostPct: round4(totalPct),
 		TotalCostBTC: round8(totalBTC),
+		Capital:      computeCapitalRequirement(btcAmount, refPriceEUR, dexExchange, isBid, hedgeCost.position, realDepositPct),
 	}
+}
+
+// computeCapitalRequirement reports the capital a trader must commit to execute a
+// trade of btcAmount on dexExchange: the spot leg notional, the perp hedge
+// collateral (reused from the already-computed hedge position), and the DEX
+// security deposit. isBid is true when we buy BTC on the CEX and sell on the DEX
+// (so we post the seller deposit); false on the ask side (buyer deposit). EUR
+// figures are 0 when refPriceEUR is unknown (<= 0). realDepositPct is the
+// actual per-offer deposit fraction (offers.security_deposit_pct, already
+// picked for the taker's side at snapshot time) when known; it always takes
+// priority over the flat dexSecurityDepositPct estimate, and clears
+// DepositEstimated since it's a measured value, not a guess.
+func computeCapitalRequirement(btcAmount, refPriceEUR float64, dexExchange string, isBid bool, hedgePosition *HedgePositionDetail, realDepositPct *float64) CapitalRequirement {
+	if btcAmount <= 0 {
+		return CapitalRequirement{}
+	}
+
+	cap := CapitalRequirement{
+		BTCAmount:   round8(btcAmount),
+		BTCPriceEUR: round2(refPriceEUR),
+	}
+	if refPriceEUR > 0 {
+		cap.SpotNotionalEUR = round2(btcAmount * refPriceEUR)
+	}
+	if hedgePosition != nil {
+		cap.HedgeCollateralEUR = round2(hedgePosition.RecommendedCollateralEUR)
+	}
+
+	// On the bid side we sell BTC on the DEX (seller deposit); on the ask
+	// side we buy (buyer deposit).
+	side := "buyer"
+	if isBid {
+		side = "seller"
+	}
+
+	switch {
+	case realDepositPct != nil && *realDepositPct > 0:
+		cap.SecurityDepositSide = side
+		cap.SecurityDepositPct = *realDepositPct
+		cap.SecurityDepositBTC = round8(btcAmount * *realDepositPct)
+		if refPriceEUR > 0 {
+			cap.SecurityDepositEUR = round2(cap.SecurityDepositBTC * refPriceEUR)
+		}
+		cap.DepositEstimated = false
+	case dexSecurityDepositPct[dexExchange] > 0:
+		pct := dexSecurityDepositPct[dexExchange]
+		cap.SecurityDepositSide = side
+		cap.SecurityDepositPct = pct
+		depositBTC := btcAmount * pct
+		if depositBTC < bisqSecurityDepositFloorBTC {
+			depositBTC = bisqSecurityDepositFloorBTC
+		}
+		cap.SecurityDepositBTC = round8(depositBTC)
+		if refPriceEUR > 0 {
+			cap.SecurityDepositEUR = round2(depositBTC * refPriceEUR)
+		}
+		cap.DepositEstimated = true
+	}
+
+	cap.TotalEUR = round2(cap.SpotNotionalEUR + cap.HedgeCollateralEUR + cap.SecurityDepositEUR)
+	return cap
 }
 
 func AbortCostFromBreakdown(bd CostBreakdown) AbortCostBreakdown {
@@ -1390,7 +1496,7 @@ func (e *TradeCostEstimator) estimateBestHedgeCost(btcAmount float64, refPriceEU
 		return hedgeCostDetails{}
 	}
 
-	allCandidates := []hedge.Venue{hedge.VenueKrakenFutures, hedge.VenueCoinbaseFutures}
+	allCandidates := []hedge.Venue{hedge.VenueKrakenFutures, hedge.VenueCoinbaseFutures, hedge.VenueBinanceFutures}
 	candidates := allCandidates
 	if coupledHedge {
 		if paired, ok := cexToHedgeVenue[e.exchange]; ok {
@@ -1472,7 +1578,7 @@ func (o *TradeRouteOptimizer) BestBreakdown(btcAmount float64, dexExchange strin
 }
 
 func (o *TradeRouteOptimizer) BestBreakdownWithConfirmations(btcAmount float64, dexExchange string, direction string, requiredConfirmations int) CostBreakdown {
-	return o.BestBreakdownFull(btcAmount, 0, dexExchange, direction, requiredConfirmations, nil, "", false)
+	return o.BestBreakdownFull(btcAmount, 0, dexExchange, direction, requiredConfirmations, nil, "", false, nil)
 }
 
 // BestBreakdownFull finds the lowest-cost route, optionally excluding certain CEXes
@@ -1480,7 +1586,7 @@ func (o *TradeRouteOptimizer) BestBreakdownWithConfirmations(btcAmount float64, 
 // refPriceEUR is the CEX reference price used to size the hedge position
 // simulation; pass 0 to skip the simulation.
 // coupledHedge forces the hedge venue to match the spot CEX where a pairing exists.
-func (o *TradeRouteOptimizer) BestBreakdownFull(btcAmount float64, refPriceEUR float64, dexExchange string, direction string, requiredConfirmations int, excludedCEXes []string, feeTier string, coupledHedge bool) CostBreakdown {
+func (o *TradeRouteOptimizer) BestBreakdownFull(btcAmount float64, refPriceEUR float64, dexExchange string, direction string, requiredConfirmations int, excludedCEXes []string, feeTier string, coupledHedge bool, realDepositPct *float64) CostBreakdown {
 	if o == nil || btcAmount <= 0 {
 		return CostBreakdown{}
 	}
@@ -1505,7 +1611,7 @@ func (o *TradeRouteOptimizer) BestBreakdownFull(btcAmount float64, refPriceEUR f
 			continue
 		}
 		for _, method := range supportedWithdrawalMethods(est.cexProfile, dexExchange) {
-			bd := est.breakdownForMethodWithTier(btcAmount, refPriceEUR, dexExchange, method, direction, requiredConfirmations, feeTier, coupledHedge)
+			bd := est.breakdownForMethodWithTier(btcAmount, refPriceEUR, dexExchange, method, direction, requiredConfirmations, feeTier, coupledHedge, realDepositPct)
 			if !found || bd.TotalCostPct < best.TotalCostPct {
 				best = bd
 				found = true
