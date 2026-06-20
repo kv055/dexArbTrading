@@ -429,10 +429,22 @@ jobs:
             done
           }
 
+          dump_failing_logs() {
+            echo "--- container logs for failing services ---"
+            for svc in $(IMAGE_TAG="$1" docker compose ps --format '{{.Name}} {{.State}}' 2>/dev/null \
+                         | awk '$2 != "running" {print $1}'); do
+              echo "=== $svc ==="
+              docker logs --tail 80 "$svc" 2>&1 || true
+            done
+            echo "--- all container states ---"
+            IMAGE_TAG="$1" docker compose ps 2>/dev/null || true
+          }
+
           if deploy "$NEW_SHA" && smoke; then
             echo "$NEW_SHA" > .deployed_sha
             echo "deploy of $NEW_SHA healthy"
           else
+            dump_failing_logs "$NEW_SHA"
             echo "::error::deploy of $NEW_SHA failed — rolling back to ${PREV_SHA:-<none>}"
             if [ -n "${PREV_SHA:-}" ]; then
               if deploy "$PREV_SHA" && smoke; then
