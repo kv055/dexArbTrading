@@ -1,19 +1,17 @@
-# Gitea-only trial workflow.
+# Gitea CI/CD workflow.
 #
 # GitHub never reads .gitea/, so this file does NOT affect GitHub CI. Gitea, once a
 # .gitea/workflows/ file exists, uses it and ignores .github/workflows/ — so on Gitea
-# only this runs (not the full deploy pipeline). It runs the test jobs and then builds
-# all service images and pushes them to the *Gitea* container registry (NOT GHCR), so
-# it never touches GHCR or the production VPS. docker-compose.yml / the VPS keep pulling
-# from GHCR, so production is unaffected.
+# only this runs.
 #
-# Mirrors the test-go / test-frontend / build-and-push jobs in .github/workflows/ci-cd.yml.
+# develop: test + build (push images to Gitea registry)
+# main:    test + build (push images to GHCR) + pre-deploy + deploy to VPS
 name: ci
 
 on:
   workflow_dispatch:
   push:
-    branches: [develop]
+    branches: [develop, main]
 
 jobs:
   test-go:
@@ -24,10 +22,6 @@ jobs:
       matrix:
         module: [commons, dexUnifiedApi, dexMmController, dexMonitor, dexFiatController]
     steps:
-      # Main repo lives on Gitea (default github.token authenticates it). Submodules
-      # are fetched from the Gitea mirror, not github.com: the superproject pins some
-      # submodule commits that exist only on the mirror (local commits never pushed to
-      # github), and the mirror shares the Gitea host+token with the main repo.
       - uses: actions/checkout@v5
       - name: Fetch submodules from the Gitea mirror
         run: |
@@ -58,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Fetch submodules from the Gitea mirror
-        working-directory: ${{ github.workspace }}   # default working-dir is inside a submodule that isn't checked out yet
+        working-directory: ${{ github.workspace }}
         run: |
           host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
           git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
@@ -134,47 +128,321 @@ jobs:
           REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           OWNER: ${{ github.repository_owner }}
 
-      - name: Resolve Gitea registry + build metadata
+      - name: Resolve registry + build metadata
         id: reg
         env:
           URL: ${{ secrets.REGISTRY_URL }}
+          REF: ${{ github.ref }}
         run: |
-          host="${URL#*://}"; scheme="${URL%%://*}"
-          echo "host=$host" >> "$GITHUB_OUTPUT"
-          echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+          gitea_host="${URL#*://}"; scheme="${URL%%://*}"
           echo "commit_hash=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "commit_date=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
-          # BuildKit needs its own per-registry config (daemon.json doesn't apply to it).
-          # http=true forces plaintext for an HTTP Gitea; insecure=true skips cert verify
-          # (covers self-signed TLS). Harmless for a valid-cert HTTPS host.
-          if [ "$scheme" = "http" ]; then
-            printf '[registry."%s"]\n  http = true\n  insecure = true\n' "$host" > /tmp/buildkitd.toml
+
+          if [ "$REF" = "refs/heads/main" ]; then
+            echo "registry=ghcr.io" >> "$GITHUB_OUTPUT"
+            echo "image_owner=kv055" >> "$GITHUB_OUTPUT"
           else
-            printf '[registry."%s"]\n  insecure = true\n' "$host" > /tmp/buildkitd.toml
+            echo "registry=$gitea_host" >> "$GITHUB_OUTPUT"
+            echo "image_owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+            if [ "$scheme" = "http" ]; then
+              printf '[registry."%s"]\n  http = true\n  insecure = true\n' "$gitea_host" > /tmp/buildkitd.toml
+            else
+              printf '[registry."%s"]\n  insecure = true\n' "$gitea_host" > /tmp/buildkitd.toml
+            fi
           fi
 
       - name: Create buildx builder (Gitea-registry aware)
-        # No --name: matrix jobs share one DinD daemon, so let buildx auto-generate a
-        # unique builder name to avoid collisions.
+        if: github.ref != 'refs/heads/main'
         run: docker buildx create --use --driver docker-container --config /tmp/buildkitd.toml
 
-      - uses: docker/login-action@v4
+      - name: Login to Gitea registry
+        if: github.ref != 'refs/heads/main'
+        uses: docker/login-action@v4
         with:
-          registry: ${{ steps.reg.outputs.host }}
+          registry: ${{ steps.reg.outputs.registry }}
           username: ${{ secrets.REGISTRY_USER }}
           password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - name: Login to GHCR
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: kv055
+          password: ${{ secrets.GH_PAT }}
 
       - uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
-          # Only the dexmonitor image consumes these; the rest emit a harmless
-          # "unused build args" buildx warning.
           build-args: |
             COMMIT_HASH=${{ steps.reg.outputs.commit_hash }}
             COMMIT_DATE=${{ steps.reg.outputs.commit_date }}
-          # Publish on push/dispatch; PRs build for validation only.
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
-            ${{ steps.reg.outputs.host }}/${{ steps.reg.outputs.owner }}/dexarbtrading-${{ matrix.service }}:latest
-            ${{ steps.reg.outputs.host }}/${{ steps.reg.outputs.owner }}/dexarbtrading-${{ matrix.service }}:${{ github.sha }}
+            ${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:latest
+            ${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:${{ github.sha }}
+
+  pre-deploy:
+    name: Pre-deploy checks
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SERVICES: tor bisq bisq2 unified-api unified-snapshot postgres-backup dexmonitor mm-controller totp-api fiat-controller
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: kv055
+          password: ${{ secrets.GH_PAT }}
+
+      - name: Verify all image SHA tags exist in GHCR
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          for svc in $SERVICES; do
+            tag="ghcr.io/kv055/dexarbtrading-${svc}:${SHA}"
+            echo "checking $tag"
+            docker manifest inspect "$tag" >/dev/null
+          done
+
+      - name: Install SSH key & known_hosts
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%b\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%b\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Egress reachability check (VPS)
+        env:
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_USER: ${{ secrets.VPS_SSH_USER }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+
+          check_ws() {
+            local url="$1"
+            local key
+            key=$(openssl rand -base64 16)
+            local out curl_exit=0
+            out=$(curl -sS --http1.1 --include --max-time 10 \
+                -H "Connection: Upgrade" \
+                -H "Upgrade: websocket" \
+                -H "Sec-WebSocket-Key: $key" \
+                -H "Sec-WebSocket-Version: 13" \
+                "$url" 2>&1) || curl_exit=$?
+            if [ "$curl_exit" -ne 0 ] && [ "$curl_exit" -ne 28 ]; then
+              echo "WSS unreachable: $url"
+              printf '%s\n' "$out" | head -5
+              return 1
+            fi
+            if ! printf '%s\n' "$out" | grep -q ' 101 '; then
+              echo "WSS no 101 upgrade: $url"
+              printf '%s\n' "$out" | head -5
+              return 1
+            fi
+            echo "ok wss $url"
+          }
+
+          check_https() {
+            local url="$1"
+            if ! curl -fsS --max-time 10 "$url" >/dev/null; then
+              echo "HTTPS unreachable: $url"
+              return 1
+            fi
+            echo "ok https $url"
+          }
+
+          check_ws    "https://ws.kraken.com/v2"
+          check_ws    "https://ws.bitstamp.net/"
+          check_ws    "https://advanced-trade-ws.coinbase.com/"
+          check_https "https://api.kraken.com/0/public/SystemStatus"
+
+          echo "egress reachability ok"
+          REMOTE
+
+      - name: VPS health checks
+        env:
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_USER: ${{ secrets.VPS_SSH_USER }}
+          REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "REPO_DIR='$REPO_DIR' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          docker info >/dev/null
+          docker compose version >/dev/null
+          test -d "$REPO_DIR" || { echo "missing repo dir $REPO_DIR on VPS"; exit 1; }
+          docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+          free_kb=$(df -P "$docker_root" | awk 'NR==2 {print $4}')
+          [ "$free_kb" -gt 5242880 ] || { echo "low disk on $docker_root: $((free_kb/1024)) MB free, need >= 5120"; exit 1; }
+          echo "health checks ok"
+          REMOTE
+
+  deploy:
+    name: Deploy
+    needs: pre-deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fetch submodules from the Gitea mirror
+        run: |
+          host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
+          git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
+          git submodule update --init --recursive
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Install SSH key & known_hosts
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%b\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%b\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Decrypt env files and upload to VPS
+        timeout-minutes: 3
+        env:
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_USER: ${{ secrets.VPS_SSH_USER }}
+          REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
+          KEY_ROOT:            ${{ secrets.DOTENV_PRIVATE_KEY_ROOT }}
+          KEY_UNIFIED_API:     ${{ secrets.DOTENV_PRIVATE_KEY_UNIFIED_API }}
+          KEY_MONITOR:         ${{ secrets.DOTENV_PRIVATE_KEY_MONITOR }}
+          KEY_MM_CONTROLLER:   ${{ secrets.DOTENV_PRIVATE_KEY_MM_CONTROLLER }}
+          KEY_FIAT_CONTROLLER: ${{ secrets.DOTENV_PRIVATE_KEY_FIAT_CONTROLLER }}
+        run: |
+          set -Eeuo pipefail
+          for f in .env.enc dexUnifiedApi/.env.enc dexMonitor/.env.enc dexMmController/.env.enc dexFiatController/.env.enc; do
+            test -f "$f" || { echo "Missing $f — run: cp .env .env.enc && dotenvx encrypt -f .env.enc in each directory, then commit"; exit 1; }
+          done
+          curl -sfS https://dotenvx.sh | sh
+          DOTENV_PRIVATE_KEY_ENC="$KEY_ROOT"            dotenvx decrypt -f .env.enc
+          DOTENV_PRIVATE_KEY_ENC="$KEY_UNIFIED_API"     dotenvx decrypt -f dexUnifiedApi/.env.enc
+          DOTENV_PRIVATE_KEY_ENC="$KEY_MONITOR"         dotenvx decrypt -f dexMonitor/.env.enc
+          DOTENV_PRIVATE_KEY_ENC="$KEY_MM_CONTROLLER"   dotenvx decrypt -f dexMmController/.env.enc
+          DOTENV_PRIVATE_KEY_ENC="$KEY_FIAT_CONTROLLER" dotenvx decrypt -f dexFiatController/.env.enc
+          scp -i ~/.ssh/id_ed25519 .env.enc                  "$SSH_USER@$SSH_HOST:$REPO_DIR/.env"
+          scp -i ~/.ssh/id_ed25519 dexUnifiedApi/.env.enc    "$SSH_USER@$SSH_HOST:$REPO_DIR/dexUnifiedApi/.env"
+          scp -i ~/.ssh/id_ed25519 dexMonitor/.env.enc       "$SSH_USER@$SSH_HOST:$REPO_DIR/dexMonitor/.env"
+          scp -i ~/.ssh/id_ed25519 dexMmController/.env.enc  "$SSH_USER@$SSH_HOST:$REPO_DIR/dexMmController/.env"
+          scp -i ~/.ssh/id_ed25519 dexFiatController/.env.enc "$SSH_USER@$SSH_HOST:$REPO_DIR/dexFiatController/.env"
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "chmod 600 \
+            '$REPO_DIR/.env' \
+            '$REPO_DIR/dexUnifiedApi/.env' \
+            '$REPO_DIR/dexMonitor/.env' \
+            '$REPO_DIR/dexMmController/.env' \
+            '$REPO_DIR/dexFiatController/.env'"
+
+      - name: Sync VPS repo to commit, restart stack & verify (auto-rollback on failure)
+        timeout-minutes: 10
+        env:
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_USER: ${{ secrets.VPS_SSH_USER }}
+          REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
+          GHCR_TOKEN: ${{ secrets.GH_PAT }}
+          GHCR_USER: kv055
+          NEW_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
+            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' CERT_CN='$SSH_HOST' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          cd "$REPO_DIR"
+
+          PREV_SHA=$(cat .deployed_sha 2>/dev/null || true)
+
+          RECREATE_SERVICES="grafana prometheus loki tempo alloy nginx"
+
+          docker run --rm -v "$REPO_DIR:/d" busybox:1.37 \
+            chown -R "$(id -u):$(id -g)" /d/deploy /d/nginx 2>/dev/null || true
+
+          sync_tree() {
+            git fetch --no-tags origin "$1" || git fetch --no-tags origin main
+            git checkout --force --detach "$1"
+          }
+
+          deploy() {
+            sync_tree "$1"
+            if [ -f deploy/nginx/gen-self-signed-cert.sh ]; then
+              ENSURE=1 CERT_CN="${CERT_CN:-localhost}" bash deploy/nginx/gen-self-signed-cert.sh "${CERT_CN:-localhost}"
+            fi
+            if grep -q EDGE_AUTH_HTPASSWD docker-compose.yml 2>/dev/null; then
+              if ! grep -Eq '^EDGE_AUTH_HTPASSWD=..*' .env 2>/dev/null; then
+                echo "::error::EDGE_AUTH_HTPASSWD not in the deployed .env"
+                return 1
+              fi
+            fi
+            IMAGE_TAG="$1" docker compose pull
+            IMAGE_TAG="$1" docker compose up -d --remove-orphans --wait --wait-timeout 300
+            # shellcheck disable=SC2086
+            IMAGE_TAG="$1" docker compose up -d --force-recreate --no-deps \
+              --wait --wait-timeout 120 $RECREATE_SERVICES
+          }
+
+          edge_up() {
+            local code
+            code=$(curl -kso /dev/null -w '%{http_code}' --max-time 10 https://127.0.0.1:5443/ 2>/dev/null) || code=000
+            [ "$code" = 200 ] || [ "$code" = 401 ] || curl -fsSL --max-time 10 http://127.0.0.1:5000/ >/dev/null
+          }
+          app_get() {
+            docker compose exec -T dexmonitor curl -fsS --max-time 30 "http://localhost:5000$1" >/dev/null \
+              || curl -fsSLk --max-time 30 "https://127.0.0.1:5443$1" >/dev/null \
+              || curl -fsSL --max-time 30 "http://127.0.0.1:5000$1" >/dev/null
+          }
+          smoke() {
+            local name probe ok attempt
+            for entry in \
+              "unified-api /health::curl -fsSL --max-time 10 http://127.0.0.1:5010/health" \
+              "web edge::edge_up" \
+              "general_stats overview::app_get '/api/general_stats/overview?hours=24&cex=kraken'" \
+              "ohlc::app_get '/api/ohlc?hours=24&cex=kraken'"; do
+              name="${entry%%::*}"; probe="${entry#*::}"
+              ok=""
+              for attempt in 1 2 3; do
+                if eval "$probe" >/dev/null 2>&1; then ok=1; break; fi
+                echo "smoke attempt $attempt failed for $name"
+                [ "$attempt" -lt 3 ] && sleep 5 || true
+              done
+              [ -n "$ok" ] || { echo "smoke test failed: $name"; return 1; }
+              echo "ok $name"
+            done
+          }
+
+          if deploy "$NEW_SHA" && smoke; then
+            echo "$NEW_SHA" > .deployed_sha
+            echo "deploy of $NEW_SHA healthy"
+          else
+            echo "::error::deploy of $NEW_SHA failed — rolling back to ${PREV_SHA:-<none>}"
+            if [ -n "${PREV_SHA:-}" ]; then
+              if deploy "$PREV_SHA" && smoke; then
+                echo "::warning::rolled back to last-good $PREV_SHA"
+              else
+                echo "::error::ROLLBACK to $PREV_SHA FAILED — manual intervention required"
+              fi
+            else
+              echo "::error::no previous SHA recorded — cannot auto-roll back"
+            fi
+            exit 1
+          fi
+          REMOTE

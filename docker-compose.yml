@@ -34,7 +34,7 @@ services:
 
   tor:
     logging: *default-logging
-    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-tor:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-tor:${IMAGE_TAG:-latest}
     build:
       context: ./dexUnifiedApi
       dockerfile: Dockerfile.tor
@@ -61,7 +61,7 @@ services:
 
   bisq:
     logging: *default-logging
-    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-bisq:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-bisq:${IMAGE_TAG:-latest}
     build:
       context: ./dexUnifiedApi
       dockerfile: Dockerfile.bisq
@@ -93,7 +93,7 @@ services:
 
   bisq2:
     logging: *default-logging
-    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-bisq2:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-bisq2:${IMAGE_TAG:-latest}
     build:
       context: ./dexUnifiedApi
       dockerfile: Dockerfile.bisq2
@@ -126,7 +126,7 @@ services:
 
   unified-api:
     logging: *default-logging
-    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-unified-api:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-unified-api:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: dexUnifiedApi/Dockerfile
@@ -181,7 +181,7 @@ services:
 
   unified-snapshot:
     logging: *default-logging
-    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-unified-snapshot:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-unified-snapshot:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: dexUnifiedApi/Dockerfile.snapshot
@@ -224,7 +224,7 @@ services:
 
   # postgres-backup:
   #   logging: *default-logging
-  #   image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-postgres-backup:${IMAGE_TAG:-latest}
+  #   image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-postgres-backup:${IMAGE_TAG:-latest}
   #   build:
   #     context: .
   #     dockerfile: dexUnifiedApi/Dockerfile.backup
@@ -259,7 +259,7 @@ services:
 
   dexmonitor:
     logging: *default-logging
-    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-dexmonitor:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-dexmonitor:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: dexMonitor/Dockerfile
@@ -353,7 +353,7 @@ services:
 
   mm-controller:
     logging: *default-logging
-    image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-mm-controller:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-mm-controller:${IMAGE_TAG:-latest}
     build:
       context: ./dexMmController
       dockerfile: Dockerfile
@@ -449,7 +449,7 @@ services:
 
   # totp-api:
   #   logging: *default-logging
-  #   image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-totp-api:${IMAGE_TAG:-latest}
+  #   image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-totp-api:${IMAGE_TAG:-latest}
   #   build:
   #     context: ./dexFiatController/services/totp-api
   #     dockerfile: Dockerfile
@@ -471,7 +471,7 @@ services:
 
   # fiat-controller:
   #   logging: *default-logging
-  #   image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-fiat-controller:${IMAGE_TAG:-latest}
+  #   image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-fiat-controller:${IMAGE_TAG:-latest}
   #   build:
   #     context: ./dexFiatController
   #     dockerfile: Dockerfile
@@ -658,7 +658,7 @@ services:
 
   # docs:
   #   logging: *default-logging
-  #   image: ghcr.io/${IMAGE_OWNER:-kv055}/dexarbtrading-docs:${IMAGE_TAG:-latest}
+  #   image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-docs:${IMAGE_TAG:-latest}
   #   build:
   #     context: .
   #     dockerfile: docs/Dockerfile.docs
