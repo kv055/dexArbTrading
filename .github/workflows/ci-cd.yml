@@ -492,18 +492,6 @@ jobs:
             if [ -f deploy/nginx/gen-self-signed-cert.sh ]; then
               ENSURE=1 CERT_CN="${CERT_CN:-localhost}" bash deploy/nginx/gen-self-signed-cert.sh "${CERT_CN:-localhost}"
             fi
-            # The edge gates everything behind basic auth. The credential rides the
-            # normal encrypted-env path (root .env.enc -> decrypted + scp'd to the VPS
-            # .env by the earlier deploy step), so by now it should be in .env. The
-            # nginx container also refuses to start without it (failing `up --wait` and
-            # arming the rollback), but this catches it before any service is touched.
-            # Keyed on the checked-out compose file so rollbacks to pre-auth SHAs no-op.
-            if grep -q EDGE_AUTH_HTPASSWD docker-compose.yml 2>/dev/null; then
-              if ! grep -Eq '^EDGE_AUTH_HTPASSWD=..*' .env 2>/dev/null; then
-                echo "::error::EDGE_AUTH_HTPASSWD not in the deployed .env — add it to root .env.enc and commit (it ships via the decrypt+upload step). Generate with: htpasswd -nb <user> <password> | sed 's/\$/\$\$/g' (double every \$ or compose eats the hash), then: dotenvx set EDGE_AUTH_HTPASSWD '<user:hash>' -f .env.enc. See deploy/nginx/README.md"
-                return 1
-              fi
-            fi
             IMAGE_TAG="$1" docker compose pull
             IMAGE_TAG="$1" docker compose up -d --remove-orphans --wait --wait-timeout 300
             # shellcheck disable=SC2086
@@ -511,24 +499,29 @@ jobs:
               --wait --wait-timeout 120 $RECREATE_SERVICES
           }
 
-          # Each probe is a shell snippet so the web edge can accept either topology: the
-          # current stack serves the app over TLS on 5443 behind basic auth (an
-          # unauthenticated request gets 401, which still proves nginx is up and the auth
-          # gate is armed), while older rollback targets serve it open over TLS or plain
-          # HTTP on 5000. -k because the edge cert is self-signed — this is a localhost
-          # reachability check, not cert validation. Data-path probes run inside the
-          # dexmonitor container (its healthcheck already guarantees curl exists) so they
-          # bypass edge auth without shipping plaintext credentials to CI; the || fallback
-          # keeps rollbacks to pre-rename SHAs probeable via the open edge.
+          # Each probe is a shell snippet tolerant of topology + auth changes. The
+          # current stack serves the SPA at the edge (200, the login page); pre-auth
+          # rollback targets gated the edge with basic auth (401). Either proves nginx
+          # is up, so accept both. -k because the edge cert is self-signed — this is a
+          # localhost reachability check, not cert validation.
           edge_up() {
             local code
             code=$(curl -kso /dev/null -w '%{http_code}' --max-time 10 https://127.0.0.1:5443/ 2>/dev/null) || code=000
             [ "$code" = 200 ] || [ "$code" = 401 ] || curl -fsSL --max-time 10 http://127.0.0.1:5000/ >/dev/null
           }
-          app_get() {  # $1 = path incl. query, probed past the auth gate
-            docker compose exec -T dexmonitor curl -fsS --max-time 30 "http://localhost:5000$1" >/dev/null \
-              || curl -fsSLk --max-time 30 "https://127.0.0.1:5443$1" >/dev/null \
-              || curl -fsSL --max-time 30 "http://127.0.0.1:5000$1" >/dev/null
+          # $1 = path. Data-path routes are now session-gated, so an unauthenticated
+          # probe returns 401 — which still proves nginx routed it and the app + gate
+          # are up. Pre-gate rollback targets return 200. Accept either; probe inside
+          # the dexmonitor container (curl guaranteed by its healthcheck), falling back
+          # to the edge for rollback targets that predate the dexmonitor rename.
+          app_get() {
+            local code
+            code=$(docker compose exec -T dexmonitor curl -so /dev/null -w '%{http_code}' --max-time 30 "http://localhost:5000$1" 2>/dev/null) || code=000
+            { [ "$code" = 200 ] || [ "$code" = 401 ]; } && return 0
+            code=$(curl -sko /dev/null -w '%{http_code}' --max-time 30 "https://127.0.0.1:5443$1" 2>/dev/null) || code=000
+            { [ "$code" = 200 ] || [ "$code" = 401 ]; } && return 0
+            code=$(curl -so /dev/null -w '%{http_code}' --max-time 30 "http://127.0.0.1:5000$1" 2>/dev/null) || code=000
+            [ "$code" = 200 ] || [ "$code" = 401 ]
           }
           smoke() {
             local name probe ok attempt
