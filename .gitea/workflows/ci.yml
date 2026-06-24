@@ -151,6 +151,15 @@ jobs:
             fi
           fi
 
+      - name: Prune orphaned buildx builders
+        run: |
+          docker ps -a --filter "name=buildx_buildkit_" --format "{{.Names}}" \
+            | grep -v "ci-builder0" \
+            | xargs -r docker rm -f || true
+          docker volume ls -q --filter "name=buildx_buildkit_" \
+            | grep -v "ci-builder0" \
+            | xargs -r docker volume rm || true
+
       - name: Create buildx builder (Gitea-registry aware)
         if: github.ref != 'refs/heads/main'
         run: docker buildx use ci-builder 2>/dev/null || docker buildx create --name ci-builder --use --driver docker-container --config /tmp/buildkitd.toml
