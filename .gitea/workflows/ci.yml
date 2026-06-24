@@ -14,7 +14,81 @@ on:
     branches: [develop, main]
 
 jobs:
-  test-go:
+  detect-changes:
+    # Decide which service images actually need (re)building for this push, so the
+    # build-and-push matrix can skip the rest. See .claude plan + memory
+    # [[project_gitea_ci_trial]]. Runs in parallel with the test jobs.
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.detect.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Need the push's "before" commit available locally to diff the full
+          # pushed range (a push can carry several commits / a merge).
+          fetch-depth: 0
+      - name: Determine changed services
+        id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          ALL="tor,bisq,bisq2,unified-api,unified-snapshot,postgres-backup,dexmonitor,mm-controller,totp-api,fiat-controller"
+
+          emit() { echo "changes=$1" >> "$GITHUB_OUTPUT"; echo "services to build: ${1:-<none>}"; }
+
+          # Manual run: rebuild everything.
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "manual trigger -> build all"; emit "$ALL"; exit 0
+          fi
+
+          # New branch / first push / unfetchable base: can't diff -> rebuild everything.
+          zero="0000000000000000000000000000000000000000"
+          if [ -z "${BEFORE:-}" ] || [ "$BEFORE" = "$zero" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            echo "no usable 'before' commit -> build all"; emit "$ALL"; exit 0
+          fi
+
+          CHANGED=$(git diff --name-only "$BEFORE" "$AFTER")
+          echo "changed paths:"; echo "$CHANGED"
+
+          changed() { echo "$CHANGED" | grep -qE "$1"; }
+
+          # Infra-level changes rebuild everything (compose topology, this workflow,
+          # submodule wiring, or the Go workspace files if/when they exist).
+          if changed '^(docker-compose\.yml|\.gitea/workflows/ci\.yml|\.gitmodules|go\.work|go\.work\.sum)$'; then
+            echo "infra change -> build all"; emit "$ALL"; exit 0
+          fi
+
+          S=""
+          add() { case ",$S," in *",$1,"*) ;; *) S="${S:+$S,}$1";; esac; }
+
+          # commons/ is a regular in-repo dir consumed by these four Go images.
+          if changed '^commons(/|$)'; then
+            add unified-api; add unified-snapshot; add postgres-backup; add dexmonitor
+          fi
+
+          # dexUnifiedApi is a git submodule: a pointer bump shows only as the bare
+          # gitlink path, so we can't tell which file inside changed. The tor/bisq/bisq2
+          # Dockerfiles AND the three Go services all live in it -> conservatively rebuild all six.
+          if changed '^dexUnifiedApi(/|$)'; then
+            add tor; add bisq; add bisq2
+            add unified-api; add unified-snapshot; add postgres-backup
+          fi
+
+          # dexMonitor submodule -> dexmonitor image.
+          if changed '^dexMonitor(/|$)'; then add dexmonitor; fi
+
+          # dexMmController submodule -> mm-controller image.
+          if changed '^dexMmController(/|$)'; then add mm-controller; fi
+
+          # dexFiatController submodule hosts both fiat-controller and totp-api
+          # (services/totp-api/ lives inside it); a bump can't be split -> rebuild both.
+          if changed '^dexFiatController(/|$)'; then add fiat-controller; add totp-api; fi
+
+          emit "$S"
     name: Go tests (${{ matrix.module }})
     runs-on: ubuntu-latest
     strategy:
@@ -78,7 +152,7 @@ jobs:
 
   build-and-push:
     name: Build & push ${{ matrix.service }}
-    needs: [test-go, test-frontend]
+    needs: [test-go, test-frontend, detect-changes]
     runs-on: ubuntu-latest
     env:
       DOCKER_BUILD_SUMMARY: false
@@ -117,8 +191,25 @@ jobs:
             context: ./dexFiatController
             dockerfile: dexFiatController/Dockerfile
     steps:
+      - name: Check if this service needs building
+        id: check
+        env:
+          CHANGES: ${{ needs.detect-changes.outputs.changes }}
+          SERVICE: ${{ matrix.service }}
+        run: |
+          # Comma-delimited match so "bisq" can't match "bisq2".
+          if case ",$CHANGES," in *",$SERVICE,"*) true;; *) false;; esac; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "$SERVICE changed -> building"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "$SERVICE unchanged -> skipping build"
+          fi
+
       - uses: actions/checkout@v5
+        if: steps.check.outputs.build == 'true'
       - name: Fetch submodules from the Gitea mirror
+        if: steps.check.outputs.build == 'true'
         run: |
           host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
           git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
@@ -129,6 +220,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
 
       - name: Resolve registry + build metadata
+        if: steps.check.outputs.build == 'true'
         id: reg
         env:
           URL: ${{ secrets.REGISTRY_URL }}
@@ -152,6 +244,7 @@ jobs:
           fi
 
       - name: Prune orphaned buildx builders
+        if: steps.check.outputs.build == 'true'
         run: |
           docker ps -a --filter "name=buildx_buildkit_" --format "{{.Names}}" \
             | grep -v "ci-builder0" \
@@ -161,11 +254,11 @@ jobs:
             | xargs -r docker volume rm || true
 
       - name: Create buildx builder (Gitea-registry aware)
-        if: github.ref != 'refs/heads/main'
+        if: steps.check.outputs.build == 'true' && github.ref != 'refs/heads/main'
         run: docker buildx use ci-builder 2>/dev/null || docker buildx create --name ci-builder --use --driver docker-container --config /tmp/buildkitd.toml
 
       - name: Login to Gitea registry
-        if: github.ref != 'refs/heads/main'
+        if: steps.check.outputs.build == 'true' && github.ref != 'refs/heads/main'
         uses: docker/login-action@v4
         with:
           registry: ${{ steps.reg.outputs.registry }}
@@ -173,7 +266,7 @@ jobs:
           password: ${{ secrets.REGISTRY_TOKEN }}
 
       - name: Login to GHCR
-        if: github.ref == 'refs/heads/main'
+        if: steps.check.outputs.build == 'true' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -181,6 +274,7 @@ jobs:
           password: ${{ secrets.GH_PAT }}
 
       - uses: docker/build-push-action@v7
+        if: steps.check.outputs.build == 'true'
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -191,6 +285,26 @@ jobs:
           tags: |
             ${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:latest
             ${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:${{ github.sha }}
+
+      # On main, an unchanged service still needs a SHA-tagged image so pre-deploy's
+      # manifest check and deploy's `compose pull` succeed. Copy the existing :latest
+      # manifest to :<sha> in GHCR — pure registry op, no layer transfer, no rebuild.
+      # (develop pushes to the Gitea registry and has no deploy gate, so skip it there.)
+      - name: Re-tag latest as SHA (unchanged service)
+        if: steps.check.outputs.build == 'false' && github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          echo "$GH_PAT" | docker login ghcr.io -u kv055 --password-stdin
+          IMG="ghcr.io/kv055/dexarbtrading-${{ matrix.service }}"
+          if ! docker buildx imagetools inspect "$IMG:latest" >/dev/null 2>&1; then
+            echo "::error::no $IMG:latest to re-tag — run the workflow manually once to build all services"
+            exit 1
+          fi
+          docker buildx imagetools create --tag "$IMG:$SHA" "$IMG:latest"
+          echo "re-tagged $IMG:latest -> :$SHA"
 
   pre-deploy:
     name: Pre-deploy checks
