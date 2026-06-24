@@ -89,6 +89,8 @@ jobs:
           if changed '^dexFiatController(/|$)'; then add fiat-controller; add totp-api; fi
 
           emit "$S"
+
+  test-go:
     name: Go tests (${{ matrix.module }})
     runs-on: ubuntu-latest
     strategy:
