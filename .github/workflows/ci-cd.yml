@@ -50,6 +50,85 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  detect-changes:
+    # Decide which service images actually need (re)building, so the build-and-push
+    # matrix can skip the rest. Runs in parallel with the test jobs.
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.detect.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Full history so both ends of the compared range are present (a push can
+          # carry several commits; a PR's base/head are parents of the merge commit).
+          fetch-depth: 0
+      - name: Determine changed services
+        id: detect
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -Eeuo pipefail
+          ALL="tor,bisq,bisq2,unified-api,unified-snapshot,postgres-backup,dexmonitor,mm-controller,totp-api,fiat-controller"
+
+          emit() { echo "changes=$1" >> "$GITHUB_OUTPUT"; echo "services to build: ${1:-<none>}"; }
+
+          # Pick the diff range: PR -> base..head, push -> before..after.
+          if [ "$EVENT" = "pull_request" ]; then
+            BASE="$PR_BASE"; HEAD="$PR_HEAD"
+          else
+            BASE="$BEFORE"; HEAD="$AFTER"
+          fi
+
+          # New branch / first push / unfetchable base: can't diff -> rebuild everything.
+          zero="0000000000000000000000000000000000000000"
+          if [ -z "${BASE:-}" ] || [ "$BASE" = "$zero" ] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "no usable base ('$BASE') -> build all"; emit "$ALL"; exit 0
+          fi
+
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          echo "changed paths:"; echo "$CHANGED"
+
+          changed() { echo "$CHANGED" | grep -qE "$1"; }
+
+          # Infra-level changes rebuild everything (compose topology, this workflow,
+          # submodule wiring, or the Go workspace files if/when they exist).
+          if changed '^(docker-compose\.yml|\.github/workflows/ci-cd\.yml|\.gitmodules|go\.work|go\.work\.sum)$'; then
+            echo "infra change -> build all"; emit "$ALL"; exit 0
+          fi
+
+          S=""
+          add() { case ",$S," in *",$1,"*) ;; *) S="${S:+$S,}$1";; esac; }
+
+          # commons/ is a regular in-repo dir consumed by these four Go images.
+          if changed '^commons(/|$)'; then
+            add unified-api; add unified-snapshot; add postgres-backup; add dexmonitor
+          fi
+
+          # dexUnifiedApi is a git submodule: a pointer bump shows only as the bare
+          # gitlink path, so we can't tell which file inside changed. The tor/bisq/bisq2
+          # Dockerfiles AND the three Go services all live in it -> conservatively rebuild all six.
+          if changed '^dexUnifiedApi(/|$)'; then
+            add tor; add bisq; add bisq2
+            add unified-api; add unified-snapshot; add postgres-backup
+          fi
+
+          # dexMonitor submodule -> dexmonitor image.
+          if changed '^dexMonitor(/|$)'; then add dexmonitor; fi
+
+          # dexMmController submodule -> mm-controller image.
+          if changed '^dexMmController(/|$)'; then add mm-controller; fi
+
+          # dexFiatController submodule hosts both fiat-controller and totp-api
+          # (services/totp-api/ lives inside it); a bump can't be split -> rebuild both.
+          if changed '^dexFiatController(/|$)'; then add fiat-controller; add totp-api; fi
+
+          emit "$S"
+
   test-go:
     name: Go tests (${{ matrix.module }})
     runs-on: ubuntu-latest
@@ -136,7 +215,7 @@ jobs:
 
   build-and-push:
     name: Build & push ${{ matrix.service }}
-    needs: [test-go, test-frontend]
+    needs: [test-go, test-frontend, detect-changes]
     # Runs on both push (build + push) and pull_request (build-only validation, see the
     # 'push:' flag below) so a bad image — e.g. an auto bisq bump — is caught before merge.
     runs-on: ubuntu-latest
@@ -177,31 +256,51 @@ jobs:
             context: ./dexFiatController
             dockerfile: dexFiatController/Dockerfile
     steps:
-      - uses: actions/checkout@v5
-        with:
-          submodules: recursive
-          token: ${{ secrets.GH_PAT }}
+      - name: Check if this service needs building
+        id: check
+        env:
+          CHANGES: ${{ needs.detect-changes.outputs.changes }}
+          SERVICE: ${{ matrix.service }}
+        run: |
+          # Comma-delimited match so "bisq" can't match "bisq2".
+          if case ",$CHANGES," in *",$SERVICE,"*) true;; *) false;; esac; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "$SERVICE changed -> building"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "$SERVICE unchanged -> skipping build"
+          fi
 
       - name: Compute lowercase image owner
         id: owner
         run: |
           echo "value=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/checkout@v5
+        if: steps.check.outputs.build == 'true'
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_PAT }}
+
       - name: Compute build metadata
+        if: steps.check.outputs.build == 'true'
         id: meta
         run: |
           echo "commit_hash=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "commit_date=$(git log -1 --format=%cI)"   >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
+        if: steps.check.outputs.build == 'true'
 
       - uses: docker/login-action@v4
+        if: steps.check.outputs.build == 'true'
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/build-push-action@v7
+        if: steps.check.outputs.build == 'true'
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -217,6 +316,27 @@ jobs:
             ${{ env.REGISTRY }}/${{ steps.owner.outputs.value }}/dexarbtrading-${{ matrix.service }}:${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      # On a main push, an unchanged service still needs a SHA-tagged image so
+      # pre-deploy's manifest check and deploy's `compose pull` succeed. Copy the
+      # existing :latest manifest to :<sha> in GHCR — pure registry op, no rebuild,
+      # no layer transfer. (Only main pushes publish/deploy, so skip elsewhere.)
+      - name: Re-tag latest as SHA (unchanged service)
+        if: steps.check.outputs.build == 'false' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ steps.owner.outputs.value }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          echo "$TOKEN" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          IMG="${REGISTRY}/${OWNER}/dexarbtrading-${{ matrix.service }}"
+          if ! docker buildx imagetools inspect "$IMG:latest" >/dev/null 2>&1; then
+            echo "::error::no $IMG:latest to re-tag — re-run after a full build (e.g. touch an infra file) to seed it"
+            exit 1
+          fi
+          docker buildx imagetools create --tag "$IMG:$SHA" "$IMG:latest"
+          echo "re-tagged $IMG:latest -> :$SHA"
 
   build-report:
     name: Build report
