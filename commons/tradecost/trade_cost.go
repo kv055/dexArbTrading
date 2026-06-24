@@ -1,100 +1,51 @@
 package tradecost
 
 import (
-	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
-	"crypto/sha512"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
-	"net/url"
 	"os"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"golang.org/x/net/proxy"
 
 	"commons/bitcoin"
-	"commons/hedge"
+	"commons/tradecost/cextrading"
+	routing "commons/tradecost/txrouting"
 )
 
-// withdrawalFallbacks are the static BTC withdrawal fees used when the live exchange
-// API is unavailable (no credentials, network error). Values are method-aware so
-// route optimization can compare onchain and Lightning routes separately.
-var withdrawalFallbacks = map[string]map[WithdrawalMethod]float64{
-	"kraken": {
-		MethodOnchain:   0.00015,
-		MethodLightning: 0.0,
-	},
-	"binance": {
-		MethodOnchain:   0.0000046,
-		MethodLightning: 0.0,
-	},
-	"coinbase": {
-		MethodOnchain:   0.0,
-		MethodLightning: 0.0,
-	},
-	"bitstamp": {
-		MethodOnchain: 0.0003,
-	},
-}
-
-// takerFeeFallbacks are the static taker fees (as fraction) used when the live
-// exchange API is unavailable or unsupported (e.g. Coinbase).
-var takerFeeFallbacks = map[string]float64{
-	"kraken":   0.0040,
-	"binance":  0.0010,
-	"coinbase": 0.0060,
-	"bitstamp": 0.0050,
-}
-
 const (
-	// feeTTL is the single refresh interval for all fee components:
-	// CEX taker fee, CEX withdrawal fee, and BTC network fee.
+	// feeTTL is the refresh interval for the DEX taker fee cache.
 	feeTTL = 30 * time.Minute
 
 	// defaultBTCTradeSize is the fallback BTC amount used when an offer has no size set.
 	defaultBTCTradeSize = 0.01
 )
 
-var supportedCEXes = []string{"kraken", "binance", "bitstamp", "coinbase"}
-
-func SupportedCEXes() []string {
-	out := make([]string, len(supportedCEXes))
-	copy(out, supportedCEXes)
-	return out
-}
-
 func DefaultBTCTradeSize() float64 {
 	return defaultBTCTradeSize
 }
 
+// SupportedCEXes returns the CEXes the cost model knows about (owned by cextrading).
+func SupportedCEXes() []string {
+	return cextrading.SupportedCEXes()
+}
+
+// TakerFeeFallback returns the static taker fee fraction for an exchange.
 func TakerFeeFallback(exchange string) float64 {
-	return takerFeeFallbacks[exchange]
+	return cextrading.TakerFeeFallback(exchange)
 }
 
-func WithdrawalFallback(exchange string, method WithdrawalMethod) float64 {
-	return withdrawalFallbacks[exchange][method]
+// WithdrawalFallback returns the static on-chain withdrawal fee (BTC) for an exchange.
+func WithdrawalFallback(exchange string) float64 {
+	return cextrading.WithdrawalFallback(exchange)
 }
-
-// loadCredentials reads {EXCHANGE}_API_KEY and {EXCHANGE}_API_SECRET from env.
-func loadCredentials(exchange string) (key, secret string) {
-	prefix := strings.ToUpper(exchange)
-	return os.Getenv(prefix + "_API_KEY"), os.Getenv(prefix + "_API_SECRET")
-}
-
-// httpClient is shared across all fetchers.
-var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 // ---------------------------------------------------------------------------
 // cachedFee — generic lazy-refresh cache for a single float64 fee value
+// (used by the DEX taker fee cache; the CEX fee caches live in cextrading)
 // ---------------------------------------------------------------------------
 
 type cachedFee struct {
@@ -167,417 +118,6 @@ func (c *cachedFee) get(fallback float64, refresh func() (float64, error), label
 	c.inflight = nil
 	c.mu.Unlock()
 	return result
-}
-
-// ---------------------------------------------------------------------------
-// Withdrawal fee fetcher
-// ---------------------------------------------------------------------------
-
-type withdrawalFeeFetcher struct {
-	exchange  string
-	apiKey    string
-	apiSecret string
-	caches    map[WithdrawalMethod]*cachedFee
-}
-
-func newWithdrawalFeeFetcher(exchange string) *withdrawalFeeFetcher {
-	key, secret := loadCredentials(exchange)
-	return &withdrawalFeeFetcher{
-		exchange:  exchange,
-		apiKey:    key,
-		apiSecret: secret,
-		caches: map[WithdrawalMethod]*cachedFee{
-			MethodOnchain:   newCachedFee(feeTTL),
-			MethodLightning: newCachedFee(feeTTL),
-		},
-	}
-}
-
-func (f *withdrawalFeeFetcher) get(method WithdrawalMethod) float64 {
-	fallbacks := withdrawalFallbacks[f.exchange]
-	fallback := fallbacks[method]
-	cache := f.caches[method]
-	if cache == nil {
-		return fallback
-	}
-
-	label := fmt.Sprintf("%s %s withdrawal fee BTC", f.exchange, method)
-	return cache.get(fallback, func() (float64, error) {
-		return f.fetchLive(method)
-	}, label)
-}
-
-func (f *withdrawalFeeFetcher) fetchLive(method WithdrawalMethod) (float64, error) {
-	if f.apiKey == "" || f.apiSecret == "" {
-		return 0, fmt.Errorf("no API credentials for %s", f.exchange)
-	}
-	switch f.exchange {
-	case "kraken":
-		return f.fetchKraken(method)
-	case "binance":
-		return f.fetchBinance(method)
-	case "coinbase":
-		if method == MethodOnchain || method == MethodLightning {
-			return 0, nil
-		}
-		return 0, fmt.Errorf("coinbase does not support %s withdrawals", method)
-	case "bitstamp":
-		return f.fetchBitstamp(method)
-	default:
-		return 0, fmt.Errorf("unsupported exchange: %s", f.exchange)
-	}
-}
-
-func (f *withdrawalFeeFetcher) fetchKraken(method WithdrawalMethod) (float64, error) {
-	const urlPath = "/0/private/WithdrawMethods"
-	nonce := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	form := url.Values{"nonce": {nonce}, "asset": {"XBT"}}
-	encoded := form.Encode()
-
-	sha256Sum := sha256.Sum256([]byte(nonce + encoded))
-	hmacMsg := append([]byte(urlPath), sha256Sum[:]...)
-	secret, err := base64.StdEncoding.DecodeString(f.apiSecret)
-	if err != nil {
-		return 0, fmt.Errorf("kraken: invalid api secret: %w", err)
-	}
-	mac := hmac.New(sha512.New, secret)
-	mac.Write(hmacMsg)
-
-	req, _ := http.NewRequest(http.MethodPost, "https://api.kraken.com"+urlPath, bytes.NewBufferString(encoded))
-	req.Header.Set("API-Key", f.apiKey)
-	req.Header.Set("API-Sign", base64.StdEncoding.EncodeToString(mac.Sum(nil)))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("kraken: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Error  []string `json:"error"`
-		Result []struct {
-			Asset   string `json:"asset"`
-			Network string `json:"network"`
-			Fee     string `json:"fee"`
-		} `json:"result"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0, fmt.Errorf("kraken: decode: %w", err)
-	}
-	if len(result.Error) > 0 {
-		return 0, fmt.Errorf("kraken API: %v", result.Error)
-	}
-	for _, m := range result.Result {
-		if m.Asset != "XXBT" {
-			continue
-		}
-		network := strings.ToLower(m.Network)
-		switch method {
-		case MethodLightning:
-			if strings.Contains(network, "lightning") {
-				return strconv.ParseFloat(m.Fee, 64)
-			}
-		case MethodOnchain:
-			if network == "bitcoin" || network == "btc" || strings.Contains(network, "segwit") {
-				return strconv.ParseFloat(m.Fee, 64)
-			}
-		}
-	}
-	return 0, fmt.Errorf("kraken: %s withdrawal method not found", method)
-}
-
-func (f *withdrawalFeeFetcher) fetchBinance(method WithdrawalMethod) (float64, error) {
-	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	qs := "timestamp=" + timestamp
-	mac := hmac.New(sha256.New, []byte(f.apiSecret))
-	mac.Write([]byte(qs))
-
-	req, _ := http.NewRequest(http.MethodGet,
-		"https://api.binance.com/sapi/v1/capital/config/getall?"+qs+"&signature="+hex.EncodeToString(mac.Sum(nil)), nil)
-	req.Header.Set("X-MBX-APIKEY", f.apiKey)
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("binance: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var raw json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return 0, fmt.Errorf("binance: decode: %w", err)
-	}
-	var errObj struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-	}
-	if json.Unmarshal(raw, &errObj) == nil && errObj.Code != 0 {
-		return 0, fmt.Errorf("binance API %d: %s", errObj.Code, errObj.Msg)
-	}
-	var coins []struct {
-		Coin        string `json:"coin"`
-		NetworkList []struct {
-			Network     string `json:"network"`
-			IsDefault   bool   `json:"isDefault"`
-			WithdrawFee string `json:"withdrawFee"`
-		} `json:"networkList"`
-	}
-	if err := json.Unmarshal(raw, &coins); err != nil {
-		return 0, fmt.Errorf("binance: decode coins: %w", err)
-	}
-	for _, coin := range coins {
-		if coin.Coin != "BTC" {
-			continue
-		}
-		for _, net := range coin.NetworkList {
-			network := strings.ToLower(net.Network)
-			switch method {
-			case MethodLightning:
-				if strings.Contains(network, "lightning") || network == "ln" {
-					return strconv.ParseFloat(net.WithdrawFee, 64)
-				}
-			case MethodOnchain:
-				if network == "btc" || network == "bitcoin" || net.IsDefault {
-					return strconv.ParseFloat(net.WithdrawFee, 64)
-				}
-			}
-		}
-	}
-	return 0, fmt.Errorf("binance: %s withdrawal fee not found", method)
-}
-
-func (f *withdrawalFeeFetcher) fetchBitstamp(method WithdrawalMethod) (float64, error) {
-	if method != MethodOnchain {
-		return 0, fmt.Errorf("bitstamp does not support %s withdrawals", method)
-	}
-
-	const (
-		urlHost = "www.bitstamp.net"
-		urlPath = "/api/v2/fees/withdrawal/"
-	)
-	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	nonce := uuid.New().String()
-	xAuth := "BITSTAMP " + f.apiKey
-	message := xAuth + "POST" + urlHost + urlPath + "" + nonce + timestamp + "v2" + ""
-	mac := hmac.New(sha256.New, []byte(f.apiSecret))
-	mac.Write([]byte(message))
-
-	req, _ := http.NewRequest(http.MethodPost, "https://"+urlHost+urlPath, nil)
-	req.Header.Set("X-Auth", xAuth)
-	req.Header.Set("X-Auth-Signature", hex.EncodeToString(mac.Sum(nil)))
-	req.Header.Set("X-Auth-Nonce", nonce)
-	req.Header.Set("X-Auth-Timestamp", timestamp)
-	req.Header.Set("X-Auth-Version", "v2")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("bitstamp: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var entries []struct {
-		Currency string `json:"currency"`
-		Fee      string `json:"fee"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
-		return 0, fmt.Errorf("bitstamp: decode: %w", err)
-	}
-	for _, e := range entries {
-		if strings.EqualFold(e.Currency, "BTC") {
-			return strconv.ParseFloat(e.Fee, 64)
-		}
-	}
-	return 0, fmt.Errorf("bitstamp: BTC withdrawal fee not found")
-}
-
-// ---------------------------------------------------------------------------
-// Taker fee fetcher
-// ---------------------------------------------------------------------------
-//
-// Supported: Kraken (TradeVolume), Binance (tradeFee), Bitstamp (fees/trading).
-// Coinbase: no clean endpoint across API versions — static fallback only.
-
-type takerFeeFetcher struct {
-	exchange  string
-	apiKey    string
-	apiSecret string
-	cache     *cachedFee
-}
-
-func newTakerFeeFetcher(exchange string) *takerFeeFetcher {
-	key, secret := loadCredentials(exchange)
-	return &takerFeeFetcher{
-		exchange:  exchange,
-		apiKey:    key,
-		apiSecret: secret,
-		cache:     newCachedFee(feeTTL),
-	}
-}
-
-func (f *takerFeeFetcher) get() float64 {
-	label := f.exchange + " taker fee fraction"
-	fallback := takerFeeFallbacks[f.exchange]
-	return f.cache.get(fallback, f.fetchLive, label)
-}
-
-func (f *takerFeeFetcher) fetchLive() (float64, error) {
-	if f.apiKey == "" || f.apiSecret == "" {
-		return 0, fmt.Errorf("no API credentials for %s", f.exchange)
-	}
-	switch f.exchange {
-	case "kraken":
-		return f.fetchKraken()
-	case "binance":
-		return f.fetchBinance()
-	case "coinbase":
-		// Coinbase has no stable single endpoint for user taker fee across API versions.
-		return 0, fmt.Errorf("coinbase taker fee not fetchable, using static fallback")
-	case "bitstamp":
-		return f.fetchBitstamp()
-	default:
-		return 0, fmt.Errorf("unsupported exchange: %s", f.exchange)
-	}
-}
-
-// fetchKraken fetches the user's current taker fee via POST /0/private/TradeVolume.
-// The API returns the fee as a percent string (e.g. "0.26" = 0.26%), which is
-// divided by 100 to produce a fraction.
-func (f *takerFeeFetcher) fetchKraken() (float64, error) {
-	const urlPath = "/0/private/TradeVolume"
-	nonce := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	// Request fee schedule for the BTC/EUR pair.
-	form := url.Values{"nonce": {nonce}, "pair": {"XBTEUR"}}
-	encoded := form.Encode()
-
-	sha256Sum := sha256.Sum256([]byte(nonce + encoded))
-	hmacMsg := append([]byte(urlPath), sha256Sum[:]...)
-	secret, err := base64.StdEncoding.DecodeString(f.apiSecret)
-	if err != nil {
-		return 0, fmt.Errorf("kraken: invalid api secret: %w", err)
-	}
-	mac := hmac.New(sha512.New, secret)
-	mac.Write(hmacMsg)
-
-	req, _ := http.NewRequest(http.MethodPost, "https://api.kraken.com"+urlPath, bytes.NewBufferString(encoded))
-	req.Header.Set("API-Key", f.apiKey)
-	req.Header.Set("API-Sign", base64.StdEncoding.EncodeToString(mac.Sum(nil)))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("kraken: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Error  []string `json:"error"`
-		Result struct {
-			Fees map[string]struct {
-				Fee string `json:"fee"` // percent string, e.g. "0.26"
-			} `json:"fees"`
-		} `json:"result"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0, fmt.Errorf("kraken: decode: %w", err)
-	}
-	if len(result.Error) > 0 {
-		return 0, fmt.Errorf("kraken API: %v", result.Error)
-	}
-	// Kraken uses its internal pair name "XXBTZEUR" in the response.
-	for _, key := range []string{"XXBTZEUR", "XBTEUR"} {
-		if entry, ok := result.Result.Fees[key]; ok {
-			pct, err := strconv.ParseFloat(entry.Fee, 64)
-			if err != nil {
-				return 0, fmt.Errorf("kraken: parse fee %q: %w", entry.Fee, err)
-			}
-			return pct / 100, nil // convert percent to fraction
-		}
-	}
-	return 0, fmt.Errorf("kraken: XBTEUR taker fee not found in TradeVolume response")
-}
-
-// fetchBinance fetches the user's taker fee via GET /sapi/v1/asset/tradeFee.
-// The API returns the fee already as a fraction (e.g. "0.001" = 0.1%).
-// Queries BTCUSDT as representative — Binance taker fees are account-wide (VIP tier).
-func (f *takerFeeFetcher) fetchBinance() (float64, error) {
-	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	qs := "symbol=BTCUSDT&timestamp=" + timestamp
-	mac := hmac.New(sha256.New, []byte(f.apiSecret))
-	mac.Write([]byte(qs))
-
-	req, _ := http.NewRequest(http.MethodGet,
-		"https://api.binance.com/sapi/v1/asset/tradeFee?"+qs+"&signature="+hex.EncodeToString(mac.Sum(nil)), nil)
-	req.Header.Set("X-MBX-APIKEY", f.apiKey)
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("binance: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var entries []struct {
-		Symbol          string `json:"symbol"`
-		MakerCommission string `json:"makerCommission"`
-		TakerCommission string `json:"takerCommission"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
-		return 0, fmt.Errorf("binance: decode: %w", err)
-	}
-	for _, e := range entries {
-		if e.Symbol == "BTCUSDT" {
-			return strconv.ParseFloat(e.TakerCommission, 64) // already a fraction
-		}
-	}
-	return 0, fmt.Errorf("binance: BTCUSDT taker fee not found")
-}
-
-// fetchBitstamp fetches the user's taker fee via POST /api/v2/fees/trading/.
-// The API returns the fee as a percent string (e.g. "0.50" = 0.50%), which is
-// divided by 100 to produce a fraction.
-func (f *takerFeeFetcher) fetchBitstamp() (float64, error) {
-	const (
-		urlHost = "www.bitstamp.net"
-		urlPath = "/api/v2/fees/trading/"
-	)
-	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	nonce := uuid.New().String()
-	xAuth := "BITSTAMP " + f.apiKey
-	message := xAuth + "POST" + urlHost + urlPath + "" + nonce + timestamp + "v2" + ""
-	mac := hmac.New(sha256.New, []byte(f.apiSecret))
-	mac.Write([]byte(message))
-
-	req, _ := http.NewRequest(http.MethodPost, "https://"+urlHost+urlPath, nil)
-	req.Header.Set("X-Auth", xAuth)
-	req.Header.Set("X-Auth-Signature", hex.EncodeToString(mac.Sum(nil)))
-	req.Header.Set("X-Auth-Nonce", nonce)
-	req.Header.Set("X-Auth-Timestamp", timestamp)
-	req.Header.Set("X-Auth-Version", "v2")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("bitstamp: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var entries []struct {
-		Market string `json:"market"`
-		Fees   struct {
-			Taker string `json:"taker"` // percent string, e.g. "0.50"
-		} `json:"fees"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
-		return 0, fmt.Errorf("bitstamp: decode: %w", err)
-	}
-	for _, e := range entries {
-		if e.Market == "BTC/EUR" {
-			pct, err := strconv.ParseFloat(e.Fees.Taker, 64)
-			if err != nil {
-				return 0, fmt.Errorf("bitstamp: parse taker fee %q: %w", e.Fees.Taker, err)
-			}
-			return pct / 100, nil // convert percent to fraction
-		}
-	}
-	return 0, fmt.Errorf("bitstamp: BTC/EUR taker fee not found")
 }
 
 // ---------------------------------------------------------------------------
@@ -689,159 +229,188 @@ func fetchRobosatsTakerFee() (float64, error) {
 //
 // All components are expressed as a percentage of the trade value so the result
 // can be directly compared to / subtracted from the DEX offer premium.
+// TradeCostEstimator orchestrates the three cost sources of a CEX→DEX arbitrage
+// cycle: the txrouting engine (BTC network fee + Lightning conversion, fixed per
+// DEX/side), the cextrading engine (cheapest CEX combo of spot taker + on-chain
+// withdrawal + hedge), and the static per-DEX platform fee. It is not per-CEX —
+// the cheapest CEX is chosen inside the cextrading engine.
 type TradeCostEstimator struct {
-	exchange           string
-	taker              *takerFeeFetcher
-	withdrawal         *withdrawalFeeFetcher
-	dexFees            map[string]*cachedFee
-	btcPredictor       *bitcoin.BitcoinFeePredictor
-	cexProfile         CexWithdrawalProfile
-	networkFeeOverride func(WithdrawalMethod, float64) networkFeeDetails
-	hedgeCostOverride  func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails
+	dexFees             map[string]*cachedFee
+	btcPredictor        *bitcoin.BitcoinFeePredictor
+	withdrawalTxShape   routing.TxShape // canonical CEX on-chain withdrawal shape (CEX-independent)
+	txEngine            *routing.Engine
+	cexEngine           *cextrading.Engine
+	routingCostOverride func(kind routing.Kind, in routing.Input) routing.Cost
+	cexCostOverride     func(in cextrading.Input) (cextrading.Selection, bool)
 }
 
-type cachedHedgeInput struct {
-	mu       sync.Mutex
-	values   map[hedge.Venue]hedge.LivePerpInputs
-	fetched  map[hedge.Venue]time.Time
-	inflight map[hedge.Venue]chan struct{}
-	ttl      time.Duration
-}
-
-func newCachedHedgeInput(ttl time.Duration) *cachedHedgeInput {
-	return &cachedHedgeInput{
-		values:   map[hedge.Venue]hedge.LivePerpInputs{},
-		fetched:  map[hedge.Venue]time.Time{},
-		inflight: map[hedge.Venue]chan struct{}{},
-		ttl:      ttl,
-	}
-}
-
-func (c *cachedHedgeInput) get(venue hedge.Venue) (hedge.LivePerpInputs, error) {
-	c.mu.Lock()
-	if fetchedAt, ok := c.fetched[venue]; ok && time.Since(fetchedAt) < c.ttl {
-		value := c.values[venue]
-		c.mu.Unlock()
-		return value, nil
-	}
-	if ch, ok := c.inflight[venue]; ok {
-		c.mu.Unlock()
-		<-ch
-		c.mu.Lock()
-		value, ok := c.values[venue]
-		c.mu.Unlock()
-		if ok {
-			return value, nil
-		}
-		return hedge.LivePerpInputs{}, fmt.Errorf("hedge inputs unavailable for %s", venue)
-	}
-	ch := make(chan struct{})
-	c.inflight[venue] = ch
-	c.mu.Unlock()
-
-	inputs, err := hedge.FetchDefaultVenueInputs(venue)
-	if err != nil {
-		inputs, err = hedge.FallbackVenueInputs(venue)
-	}
-
-	c.mu.Lock()
-	if err == nil {
-		c.values[venue] = inputs
-		c.fetched[venue] = time.Now()
-	}
-	close(ch)
-	delete(c.inflight, venue)
-	c.mu.Unlock()
-	return inputs, err
-}
-
-var hedgeInputCache = newCachedHedgeInput(feeTTL)
-
-func NewTradeCostEstimator(exchange string) *TradeCostEstimator {
+func NewTradeCostEstimator() *TradeCostEstimator {
 	torClient, err := newTorHTTPClient()
 	if err != nil {
 		fmt.Printf("[TradeCost] Tor client unavailable, bitcoin fee fetcher will use direct HTTP: %v\n", err)
 		torClient = nil
 	}
+	predictor := bitcoin.NewBitcoinFeePredictorWithClient(torClient)
+	if err := predictor.FetchLatestData(); err != nil {
+		fmt.Printf("[TradeCost] initial mempool fetch failed (%v), network fees will be 0 until next retry\n", err)
+	} else {
+		fmt.Println("[TradeCost] mempool fee data bootstrapped")
+	}
 	return &TradeCostEstimator{
-		exchange:   exchange,
-		taker:      newTakerFeeFetcher(exchange),
-		withdrawal: newWithdrawalFeeFetcher(exchange),
 		dexFees: map[string]*cachedFee{
 			"bisq":     newCachedFee(feeTTL),
 			"robosats": newCachedFee(feeTTL),
 			"hodlhodl": newCachedFee(feeTTL),
 		},
-		btcPredictor: bitcoin.NewBitcoinFeePredictorWithClient(torClient),
-		cexProfile:   cexProfileFor(exchange),
+		btcPredictor:      predictor,
+		withdrawalTxShape: defaultCexProfile.txShape(),
+		txEngine:          routing.NewEngine(predictor),
+		cexEngine:         cextrading.NewEngine(),
 	}
+}
+
+// fixedRoutingCost returns a deterministic, offline routing.Cost for tests: each
+// on-chain hop costs networkFeeBTC (direct=1, hub=2), and the swap method adds a
+// fixed Boltz-fallback conversion (0.1% service + 150 sats miner).
+func fixedRoutingCost(networkFeeBTC float64) func(routing.Kind, routing.Input) routing.Cost {
+	return func(kind routing.Kind, in routing.Input) routing.Cost {
+		hops := 1
+		if kind == routing.MethodOnChainHubWallet {
+			hops = 2
+		}
+		c := routing.Cost{
+			Method:        kind,
+			NetworkFeeBTC: networkFeeBTC * float64(hops),
+			NumOnchainTxs: hops,
+			Tier:          "standard",
+			Confidence:    0.875,
+			Detail: &routing.NetworkFeeDetail{
+				NumTxs:                          hops,
+				SelectedFullConfirmationMinutes: 30,
+			},
+		}
+		if kind == routing.MethodOnChainSwap {
+			serviceBTC := round8(0.001 * in.BTCAmount)
+			minerBTC := round8(150.0 / 1e8)
+			c.Conversion = routing.ConversionBreakdown{
+				Strategy:         routing.StrategySubmarineSwap,
+				ServiceFeeBTC:    serviceBTC,
+				ProviderMinerBTC: minerBTC,
+				FeeSumBTC:        round8(serviceBTC + minerBTC),
+			}
+		}
+		return c
+	}
+}
+
+// fixedCexCost builds a deterministic cextrading.Selection override for tests: the
+// given CEX wins with a fixed taker/withdrawal fee, and hedgeFn (optional) supplies
+// the hedge breakdown. Withdrawal applies on the bid side only.
+func fixedCexCost(exchange string, takerFeeFrac, withdrawalFeeBTC float64, hedgeFn func(in cextrading.Input) cextrading.HedgeBreakdown) func(cextrading.Input) (cextrading.Selection, bool) {
+	return func(in cextrading.Input) (cextrading.Selection, bool) {
+		takerBTC := in.BTCAmount * takerFeeFrac
+		withdrawalBTC := 0.0
+		if in.Direction != "sell" {
+			withdrawalBTC = withdrawalFeeBTC
+		}
+		sel := cextrading.Selection{
+			CEX:              exchange,
+			TakerFeeFrac:     takerFeeFrac,
+			TakerFeeBTC:      takerBTC,
+			WithdrawalFeeBTC: withdrawalBTC,
+		}
+		if hedgeFn != nil {
+			h := hedgeFn(in)
+			sel.Hedge = h
+			sel.HedgeFeeBTC = h.FeeSumBTC
+			sel.Position = h.Position
+		}
+		sel.ComboBTC = takerBTC + withdrawalBTC + sel.HedgeFeeBTC
+		return sel, true
+	}
+}
+
+// hedgeSideForTestDirection mirrors cextrading's bid→short / ask→long mapping.
+func hedgeSideForTestDirection(direction string) string {
+	if direction == "sell" {
+		return "long"
+	}
+	return "short"
 }
 
 // NewFixedEstimatorForTesting builds a deterministic estimator for handler
 // tests outside this package.
 func NewFixedEstimatorForTesting(exchange, dexExchange string, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC float64) *TradeCostEstimator {
-	cache := func(value float64) *cachedFee {
+	seed := func(value float64) *cachedFee {
 		return &cachedFee{value: value, fetchedAt: time.Now(), ttl: feeTTL}
 	}
-	withdrawal := newWithdrawalFeeFetcher(exchange)
-	withdrawal.caches[MethodOnchain] = cache(withdrawalFeeBTC)
-	withdrawal.caches[MethodLightning] = cache(withdrawalFeeBTC)
-
 	return &TradeCostEstimator{
-		exchange:   exchange,
-		taker:      &takerFeeFetcher{exchange: exchange, cache: cache(takerFeeFrac)},
-		withdrawal: withdrawal,
 		dexFees: map[string]*cachedFee{
-			dexExchange: cache(dexFeeFrac),
+			dexExchange: seed(dexFeeFrac),
 		},
-		cexProfile: cexProfileFor(exchange),
-		networkFeeOverride: func(method WithdrawalMethod, btcAmount float64) networkFeeDetails {
-			return networkFeeDetails{
-				feeBTC:     networkFeeBTC,
-				method:     method,
-				tier:       "standard",
-				confidence: 0.875,
-				detail: &BTCNetworkFeeDetail{
-					SelectedFullConfirmationMinutes: 30,
-				},
-			}
-		},
-		hedgeCostOverride: func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails {
-			return hedgeCostDetails{}
-		},
+		withdrawalTxShape:   defaultCexProfile.txShape(),
+		routingCostOverride: fixedRoutingCost(networkFeeBTC),
+		cexCostOverride:     fixedCexCost(exchange, takerFeeFrac, withdrawalFeeBTC, nil),
 	}
 }
 
 func NewFixedEstimatorWithHedgeForTesting(exchange, dexExchange string, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC, hedgeFeeBTC float64) *TradeCostEstimator {
 	est := NewFixedEstimatorForTesting(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
-	est.hedgeCostOverride = func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails {
-		return hedgeCostDetails{
-			feeBTC:          hedgeFeeBTC,
-			feePct:          hedgeFeeBTC / btcAmount * 100,
-			side:            side,
-			venue:           "coinbase_futures",
-			instrument:      "BTC-PERP",
-			transferMinutes: transferMinutes,
+	hedgeFn := func(in cextrading.Input) cextrading.HedgeBreakdown {
+		feePct := 0.0
+		if in.BTCAmount > 0 {
+			feePct = round4(hedgeFeeBTC / in.BTCAmount * 100)
+		}
+		return cextrading.HedgeBreakdown{
+			FeeSumBTC:       round8(hedgeFeeBTC),
+			FeeSumPct:       feePct,
+			Side:            hedgeSideForTestDirection(in.Direction),
+			Venue:           "coinbase_futures",
+			Instrument:      "BTC-PERP",
+			TransferMinutes: int(math.Round(in.TransferMinutes)),
 		}
 	}
+	est.cexCostOverride = fixedCexCost(exchange, takerFeeFrac, withdrawalFeeBTC, hedgeFn)
 	return est
 }
 
 func NewFixedEstimatorWithHedgeRatesForTesting(exchange, dexExchange string, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC float64, openRate, closeRate, fundingRate float64) *TradeCostEstimator {
 	est := NewFixedEstimatorForTesting(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
-	est.hedgeCostOverride = func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails {
-		fundingCostRate := nonNegativeFundingCostRate(fundingRate, side)
-		return hedgeCostDetails{
-			feeBTC:          btcAmount * (openRate + closeRate + fundingCostRate),
-			openFeeBTC:      btcAmount * openRate,
-			closeFeeBTC:     btcAmount * closeRate,
-			fundingFeeBTC:   btcAmount * fundingCostRate,
-			side:            side,
-			venue:           "kraken_futures",
-			instrument:      "PI_XBTUSD",
-			transferMinutes: transferMinutes,
+	hedgeFn := func(in cextrading.Input) cextrading.HedgeBreakdown {
+		side := hedgeSideForTestDirection(in.Direction)
+		fundingCostRate := fundingRate
+		if side == "long" {
+			fundingCostRate = -fundingRate
+		}
+		if fundingCostRate < 0 {
+			fundingCostRate = 0
+		}
+		openFeeBTC := in.BTCAmount * openRate
+		closeFeeBTC := in.BTCAmount * closeRate
+		fundingFeeBTC := in.BTCAmount * fundingCostRate
+		feeBTC := openFeeBTC + closeFeeBTC + fundingFeeBTC
+		pct := func(b float64) float64 {
+			if in.BTCAmount <= 0 || b == 0 {
+				return 0
+			}
+			return round4(b / in.BTCAmount * 100)
+		}
+		return cextrading.HedgeBreakdown{
+			OpenFeePct:      pct(openFeeBTC),
+			OpenFeeBTC:      round8(openFeeBTC),
+			CloseFeePct:     pct(closeFeeBTC),
+			CloseFeeBTC:     round8(closeFeeBTC),
+			FundingFeePct:   pct(fundingFeeBTC),
+			FundingFeeBTC:   round8(fundingFeeBTC),
+			FeeSumPct:       pct(feeBTC),
+			FeeSumBTC:       round8(feeBTC),
+			Side:            side,
+			Venue:           "kraken_futures",
+			Instrument:      "PI_XBTUSD",
+			TransferMinutes: int(math.Round(in.TransferMinutes)),
 		}
 	}
+	est.cexCostOverride = fixedCexCost(exchange, takerFeeFrac, withdrawalFeeBTC, hedgeFn)
 	return est
 }
 
@@ -872,7 +441,8 @@ func (e *TradeCostEstimator) TakerFeeBTC(btcAmount float64) float64 {
 	if btcAmount <= 0 {
 		return 0
 	}
-	return btcAmount * e.taker.get()
+	sel, _ := e.cexCost(cextrading.Input{BTCAmount: btcAmount, Direction: "buy"})
+	return sel.TakerFeeBTC
 }
 
 func (e *TradeCostEstimator) DexFeeBTC(btcAmount float64, dexExchange string) float64 {
@@ -887,114 +457,54 @@ func (e *TradeCostEstimator) EstimateHedgeBreakdown(btcAmount float64, refPriceE
 }
 
 func (e *TradeCostEstimator) EstimateHedgeBreakdownForDirection(btcAmount float64, refPriceEUR float64, transferMinutes float64, coupledHedge bool, direction string) HedgeBreakdown {
-	hedgeCost := e.estimateBestHedgeCost(btcAmount, refPriceEUR, transferMinutes, coupledHedge, hedgeSideForDirection(direction))
-	pct := func(btc float64) float64 {
-		if btcAmount <= 0 || btc == 0 {
-			return 0
-		}
-		return round4(btc / btcAmount * 100)
-	}
-	return HedgeBreakdown{
-		OpenFeePct:      pct(hedgeCost.openFeeBTC),
-		OpenFeeBTC:      round8(hedgeCost.openFeeBTC),
-		CloseFeePct:     pct(hedgeCost.closeFeeBTC),
-		CloseFeeBTC:     round8(hedgeCost.closeFeeBTC),
-		FundingFeePct:   pct(hedgeCost.fundingFeeBTC),
-		FundingFeeBTC:   round8(hedgeCost.fundingFeeBTC),
-		FeeSumPct:       pct(hedgeCost.feeBTC),
-		FeeSumBTC:       round8(hedgeCost.feeBTC),
-		Side:            hedgeCost.side,
-		Venue:           hedgeCost.venue,
-		Instrument:      hedgeCost.instrument,
-		TransferMinutes: int(math.Round(hedgeCost.transferMinutes)),
-		Position:        hedgeCost.position,
-	}
+	sel, _ := e.cexCost(cextrading.Input{
+		BTCAmount:       btcAmount,
+		RefPriceEUR:     refPriceEUR,
+		TransferMinutes: transferMinutes,
+		Direction:       direction,
+		CoupledHedge:    coupledHedge,
+	})
+	return sel.Hedge
 }
 
+// TradeRouteOptimizer wraps a single orchestrator estimator. The cheapest CEX is
+// now chosen inside the cextrading engine, so the optimizer no longer loops a
+// per-CEX estimator map.
 type TradeRouteOptimizer struct {
-	estimators map[string]*TradeCostEstimator
-	supported  []string
+	est *TradeCostEstimator
 }
 
 func NewTradeRouteOptimizer(estimators map[string]*TradeCostEstimator) *TradeRouteOptimizer {
 	return NewOptimizer(SupportedCEXes(), estimators)
 }
 
+// NewOptimizer adopts a single orchestrator estimator. The map argument is the
+// historical per-CEX signature; post-refactor one estimator serves every CEX (it
+// picks the cheapest internally via cextrading), so any non-nil entry is used.
 func NewOptimizer(supported []string, estimators map[string]*TradeCostEstimator) *TradeRouteOptimizer {
-	list := make([]string, len(supported))
-	copy(list, supported)
-	return &TradeRouteOptimizer{estimators: estimators, supported: list}
-}
-
-// BTCNetworkFeeDetail carries the full onchain fee calculation context for display.
-// Only populated for onchain transfers; nil for Lightning.
-type BTCNetworkFeeDetail struct {
-	TxVBytes                        int64   `json:"tx_vbytes"` // calculated virtual size (per tx)
-	TxType                          string  `json:"tx_type"`   // "P2WPKH", "P2TR", etc.
-	TxInputs                        int     `json:"tx_inputs"`
-	TxOutputs                       int     `json:"tx_outputs"`
-	NumTxs                          int     `json:"num_txs"`         // number of transactions (2 for bid side, 1 for ask side)
-	SelectedSatVB                   int64   `json:"selected_sat_vb"` // fee rate for the chosen tier
-	RequiredConfirmations           int     `json:"required_confirmations"`
-	SelectedInclusionMinutes        int     `json:"selected_inclusion_minutes"`
-	SelectedFullConfirmationMinutes int     `json:"selected_full_confirmation_minutes"`
-	EconomicSatVB                   int64   `json:"economic_sat_vb"` // all-tier rates for comparison
-	EconomicInclusionMinutes        int     `json:"economic_inclusion_minutes"`
-	EconomicFullConfirmationMinutes int     `json:"economic_full_confirmation_minutes"`
-	StandardSatVB                   int64   `json:"standard_sat_vb"`
-	StandardInclusionMinutes        int     `json:"standard_inclusion_minutes"`
-	StandardFullConfirmationMinutes int     `json:"standard_full_confirmation_minutes"`
-	FastSatVB                       int64   `json:"fast_sat_vb"`
-	FastInclusionMinutes            int     `json:"fast_inclusion_minutes"`
-	FastFullConfirmationMinutes     int     `json:"fast_full_confirmation_minutes"`
-	ExpressSatVB                    int64   `json:"express_sat_vb"`
-	ExpressInclusionMinutes         int     `json:"express_inclusion_minutes"`
-	ExpressFullConfirmationMinutes  int     `json:"express_full_confirmation_minutes"`
-	CongestionLevel                 string  `json:"congestion_level"`
-	MempoolSizeMB                   float64 `json:"mempool_size_mb"`
-	UnconfirmedTxCount              int64   `json:"unconfirmed_tx_count"`
-	DataAgeMinutes                  int     `json:"data_age_minutes"`
-}
-
-// networkFeeDetails bundles the fee amount with metadata about how it was calculated.
-type networkFeeDetails struct {
-	feeBTC     float64
-	method     WithdrawalMethod
-	tier       string  // "economic", "standard", "fast", "express", "lightning"
-	confidence float64 // 0–1.0
-	detail     *BTCNetworkFeeDetail
-}
-
-type hedgeCostDetails struct {
-	feeBTC          float64
-	feePct          float64
-	openFeeBTC      float64
-	openFeePct      float64
-	closeFeeBTC     float64
-	closeFeePct     float64
-	fundingFeeBTC   float64
-	fundingFeePct   float64
-	side            string
-	venue           string
-	instrument      string
-	transferMinutes float64
-	position        *HedgePositionDetail
-}
-
-func hedgeSideForDirection(direction string) string {
-	if direction == "sell" {
-		return "long"
+	var est *TradeCostEstimator
+	for _, c := range supported {
+		if e := estimators[c]; e != nil {
+			est = e
+			break
+		}
 	}
-	return "short"
+	if est == nil {
+		for _, e := range estimators {
+			if e != nil {
+				est = e
+				break
+			}
+		}
+	}
+	return &TradeRouteOptimizer{est: est}
 }
 
-func nonNegativeFundingCostRate(fundingRate float64, side string) float64 {
-	costRate := fundingRate
-	if side == "long" {
-		costRate = -fundingRate
-	}
-	return math.Max(costRate, 0)
-}
+// BTCNetworkFeeDetail and ConversionBreakdown are owned by the routing package;
+// these aliases keep the existing tradecost/API type names valid.
+type BTCNetworkFeeDetail = routing.NetworkFeeDetail
+
+type ConversionBreakdown = routing.ConversionBreakdown
 
 func resolveRequiredConfirmations(direction string, requested int) int {
 	if requested >= 1 && requested <= 6 {
@@ -1021,121 +531,51 @@ func (e *TradeCostEstimator) CostPctWithConfirmations(btcAmount float64, dexExch
 	if btcAmount <= 0 {
 		return 0
 	}
-	method := resolveWithdrawalMethod(e.cexProfile, dexExchange)
-	return e.costPctForMethod(btcAmount, dexExchange, method, requiredConfirmations)
-}
-
-func (e *TradeCostEstimator) costPctForMethod(btcAmount float64, dexExchange string, method WithdrawalMethod, requiredConfirmations int) float64 {
-	if btcAmount <= 0 {
+	// CostPct uses the bid side (default), where a CEX withdrawal fee applies.
+	requiredConfirmations = resolveRequiredConfirmations("buy", requiredConfirmations)
+	dexFeeFrac := e.getDexFeeFrac(dexExchange)
+	cost := e.routingCost(dexExchange, "buy", btcAmount, requiredConfirmations, "")
+	sel, ok := e.cexCost(cextrading.Input{BTCAmount: btcAmount, Direction: "buy"})
+	if !ok {
 		return 0
 	}
-	takerFrac := e.taker.get()
-	withdrawalFee := e.withdrawal.get(method)
-	netFee := e.getNetworkFeeForMethod(method, btcAmount, requiredConfirmations)
-	dexFeeFrac := e.getDexFeeFrac(dexExchange)
 
-	tradingFee := btcAmount * takerFrac
 	dexFee := btcAmount * dexFeeFrac
-	return (tradingFee + withdrawalFee + netFee.feeBTC + dexFee) / btcAmount * 100
+	total := sel.TakerFeeBTC + sel.WithdrawalFeeBTC + cost.NetworkFeeBTC + cost.Conversion.FeeSumBTC + dexFee
+	return total / btcAmount * 100
 }
 
-// getNetworkFee returns the network fee for a CEX→DEX transfer, taking into account
-// the settlement method supported by the selected CEX and DEX combination.
-//
-//   - Lightning: both CEX and DEX support LN → returns a small constant routing estimate.
-//   - Onchain: uses the CEX's address format and typical tx structure for an accurate
-//     congestion-adaptive prediction via the bitcoin fee predictor.
-func (e *TradeCostEstimator) getNetworkFee(dexExchange string, btcAmount float64) networkFeeDetails {
-	method := resolveWithdrawalMethod(e.cexProfile, dexExchange)
-	return e.getNetworkFeeForMethod(method, btcAmount, 1)
+// routingCost prices the CEX→DEX transfer leg for a DEX/side using the routing engine
+// (or the test override). The method is fixed by the DEX and offer side.
+func (e *TradeCostEstimator) routingCost(dexExchange, direction string, btcAmount float64, requiredConfirmations int, feeTier string) routing.Cost {
+	side := routing.SideForDirection(direction)
+	kind := routing.MethodFor(dexExchange, side)
+	in := routing.Input{
+		BTCAmount:             btcAmount,
+		RequiredConfirmations: requiredConfirmations,
+		FeeTier:               feeTier,
+		WithdrawalTx:          e.withdrawalTxShape,
+	}
+	if e.routingCostOverride != nil {
+		return e.routingCostOverride(kind, in)
+	}
+	if e.txEngine == nil {
+		return routing.Cost{Method: kind}
+	}
+	return e.txEngine.Cost(kind, in)
 }
 
-func (e *TradeCostEstimator) getNetworkFeeForMethod(method WithdrawalMethod, btcAmount float64, requiredConfirmations int) networkFeeDetails {
-	return e.getNetworkFeeForMethodWithTier(method, btcAmount, requiredConfirmations, "")
-}
-
-func (e *TradeCostEstimator) getNetworkFeeForMethodWithTier(method WithdrawalMethod, btcAmount float64, requiredConfirmations int, feeTier string) networkFeeDetails {
-	if e.networkFeeOverride != nil {
-		return e.networkFeeOverride(method, btcAmount)
+// cexCost picks the cheapest CEX fee combo (taker + withdrawal + hedge) for the
+// input, using the cextrading engine (or the test override). The bool is false
+// when no CEX is available (all excluded).
+func (e *TradeCostEstimator) cexCost(in cextrading.Input) (cextrading.Selection, bool) {
+	if e.cexCostOverride != nil {
+		return e.cexCostOverride(in)
 	}
-
-	if method == MethodLightning {
-		if e.btcPredictor.IsDataStale(feeTTL) {
-			if err := e.btcPredictor.FetchLatestData(); err != nil {
-				fmt.Printf("[TradeCost] lightning fee fetch failed: %v\n", err)
-			}
-		}
-		return networkFeeDetails{
-			feeBTC:     e.btcPredictor.EstimateLightningRoutingFee(btcAmount),
-			method:     MethodLightning,
-			tier:       "lightning",
-			confidence: 0.5,
-		}
+	if e.cexEngine == nil {
+		return cextrading.Selection{}, false
 	}
-
-	// Onchain: refresh predictor cache if stale.
-	if e.btcPredictor.IsDataStale(feeTTL) {
-		if err := e.btcPredictor.FetchLatestData(); err != nil {
-			fmt.Printf("[TradeCost] bitcoin fee fetch failed: %v\n", err)
-		}
-	}
-
-	ctx, err := e.btcPredictor.GetDetailedRecommendationForTier(
-		e.cexProfile.TypicalInputs,
-		e.cexProfile.TypicalOutputs,
-		e.cexProfile.OnchainTxType,
-		requiredConfirmations,
-		feeTier,
-	)
-	if err != nil || ctx.Recommendation == nil {
-		return networkFeeDetails{method: MethodOnchain}
-	}
-
-	var detail *BTCNetworkFeeDetail
-	if ctx.Estimate != nil {
-		detail = &BTCNetworkFeeDetail{
-			TxVBytes:                        ctx.Estimate.TransactionSize,
-			TxType:                          ctx.TxType,
-			TxInputs:                        ctx.TxInputs,
-			TxOutputs:                       ctx.TxOutputs,
-			SelectedSatVB:                   ctx.Recommendation.FeeRateSatVB,
-			RequiredConfirmations:           requiredConfirmations,
-			SelectedInclusionMinutes:        int(ctx.Recommendation.EstimatedInclusionTime / time.Minute),
-			SelectedFullConfirmationMinutes: int(ctx.Recommendation.EstimatedFullConfirmationTime / time.Minute),
-			CongestionLevel:                 ctx.Estimate.NetworkCongestion,
-			DataAgeMinutes:                  ctx.DataAgeMinutes,
-		}
-		if ctx.FeeRates != nil {
-			detail.EconomicSatVB = ctx.FeeRates.EconomicFee
-			detail.EconomicInclusionMinutes = int(ctx.Estimate.EconomicInclusionTime / time.Minute)
-			detail.EconomicFullConfirmationMinutes = int(ctx.Estimate.EconomicTime / time.Minute)
-			detail.StandardSatVB = ctx.FeeRates.StandardFee
-			detail.StandardInclusionMinutes = int(ctx.Estimate.StandardInclusionTime / time.Minute)
-			detail.StandardFullConfirmationMinutes = int(ctx.Estimate.StandardTime / time.Minute)
-			detail.FastSatVB = ctx.FeeRates.FastFee
-			detail.FastInclusionMinutes = int(ctx.Estimate.FastInclusionTime / time.Minute)
-			detail.FastFullConfirmationMinutes = int(ctx.Estimate.FastTime / time.Minute)
-			detail.ExpressSatVB = ctx.FeeRates.ExpressFee
-			detail.ExpressInclusionMinutes = int(ctx.Estimate.ExpressInclusionTime / time.Minute)
-			detail.ExpressFullConfirmationMinutes = int(ctx.Estimate.ExpressTime / time.Minute)
-		}
-		if ctx.NetworkStats != nil {
-			detail.MempoolSizeMB = math.Round(float64(ctx.NetworkStats.MempoolSize)/(1024*1024)*100) / 100
-			detail.UnconfirmedTxCount = ctx.NetworkStats.TransactionCount
-		}
-	}
-
-	confidence := 0.0
-	if ctx.Estimate != nil {
-		confidence = ctx.Estimate.EstimatedConfidence
-	}
-	return networkFeeDetails{
-		feeBTC:     ctx.Recommendation.TotalFeeBTC,
-		method:     MethodOnchain,
-		tier:       ctx.Recommendation.Tier,
-		confidence: confidence,
-		detail:     detail,
-	}
+	return e.cexEngine.Best(in)
 }
 
 // ---------------------------------------------------------------------------
@@ -1150,7 +590,7 @@ type CostBreakdown struct {
 	RouteDEX             string               `json:"route_dex"`              // DEX of the evaluated offer
 	RouteMethod          string               `json:"route_method"`           // chosen settlement method for the cheapest route
 	TradeDirection       string               `json:"trade_direction"`        // "bid" (buy CEX→sell DEX) or "ask" (buy DEX→sell CEX)
-	NumNetworkTxs        int                  `json:"num_network_txs"`        // 2 for bid side (pre-approved addr hop), 1 for ask side
+	NumNetworkTxs        int                  `json:"num_network_txs"`        // on-chain transactions in the chosen route (1 direct/swap, 2 hub-wallet)
 	EstimatedProfitPct   float64              `json:"estimated_profit_pct"`   // net premium after costs as % of trade
 	EstimatedProfitBTC   float64              `json:"estimated_profit_btc"`   // estimated profit in BTC for the chosen trade size
 	CexTakerFeePct       float64              `json:"cex_taker_fee_pct"`      // CEX taker fee as % of trade
@@ -1163,6 +603,7 @@ type CostBreakdown struct {
 	NetworkFeeTier       string               `json:"network_fee_tier"`       // "economic", "standard", "fast", "express", "lightning"
 	NetworkFeeConfidence float64              `json:"network_fee_confidence"` // 0–1.0 estimate reliability
 	NetworkFeeDetail     *BTCNetworkFeeDetail `json:"network_fee_detail"`     // full onchain calc context; nil for Lightning
+	Conversion           ConversionBreakdown  `json:"conversion"`             // on-chain → Lightning local conversion; zero-value unless RouteMethod is onchain_swap
 	Hedge                HedgeBreakdown       `json:"hedge"`                  // perp hedge detail grouped under its own nested object
 	DexFeePct            float64              `json:"dex_fee_pct"`            // DEX platform fee as % of trade
 	DexFeeBTC            float64              `json:"dex_fee_btc"`            // DEX platform fee in BTC
@@ -1188,46 +629,11 @@ type AbortCostBreakdown struct {
 	Total          AbortCostComponent `json:"total"`
 }
 
-type HedgeBreakdown struct {
-	OpenFeePct      float64              `json:"open_fee_pct"`     // perp opening fee as % of trade
-	OpenFeeBTC      float64              `json:"open_fee_btc"`     // perp opening fee in BTC
-	CloseFeePct     float64              `json:"close_fee_pct"`    // perp closing fee as % of trade
-	CloseFeeBTC     float64              `json:"close_fee_btc"`    // perp closing fee in BTC
-	FundingFeePct   float64              `json:"funding_fee_pct"`  // perp funding cost over transfer window as % of trade
-	FundingFeeBTC   float64              `json:"funding_fee_btc"`  // perp funding cost over transfer window in BTC
-	FeeSumPct       float64              `json:"fee_sum_pct"`      // perp open+close+funding as % of trade
-	FeeSumBTC       float64              `json:"fee_sum_btc"`      // perp open+close+funding in BTC
-	Side            string               `json:"side"`             // "short" for bid-side hedges, "long" for ask-side hedges
-	Venue           string               `json:"venue"`            // chosen hedge venue
-	Instrument      string               `json:"instrument"`       // chosen perp instrument
-	TransferMinutes int                  `json:"transfer_minutes"` // transfer-time input used for hedge costing
-	Position        *HedgePositionDetail `json:"position"`         // position sizing simulation; nil when unavailable (e.g. missing ref price)
-}
+// HedgeBreakdown and HedgePositionDetail are owned by the cextrading package;
+// these aliases keep the existing tradecost/API type names valid.
+type HedgeBreakdown = cextrading.HedgeBreakdown
 
-// HedgePositionDetail is the per-offer simulation of how the perp hedge
-// would be executed: hedge notional, leverage, collateral, and liquidation
-// headroom. All EUR amounts are rounded to 2 decimals; rates are unrounded.
-type HedgePositionDetail struct {
-	Side                         string  `json:"side"`                             // "short" or "long"
-	HedgeRatio                   float64 `json:"hedge_ratio"`                      // fraction of spot transfer that is hedged (1.0 = full)
-	LeverageUsed                 float64 `json:"leverage_used"`                    // leverage assumed for sizing (venue max)
-	HedgeNotionalEUR             float64 `json:"hedge_notional_eur"`               // perp notional in EUR
-	InitialMarginEUR             float64 `json:"initial_margin_eur"`               // required initial margin = notional / leverage
-	RecommendedCollateralEUR     float64 `json:"recommended_collateral_eur"`       // collateral to post so the position survives the stress move
-	StressMovePct                float64 `json:"stress_move_pct"`                  // adverse BTC move assumed in the stress scenario (e.g. 0.10)
-	StressLossEUR                float64 `json:"stress_loss_eur"`                  // unrealized loss on the short under the stress move
-	MaintenanceRequirementEUR    float64 `json:"maintenance_requirement_eur"`      // venue maintenance margin on the notional
-	FreeCollateralAfterStressEUR float64 `json:"free_collateral_after_stress_eur"` // equity left above maintenance after the stress move
-	LiquidationMovePct           float64 `json:"liquidation_move_pct"`             // adverse BTC move that would liquidate the position at the chosen leverage
-	BTCPriceEUR                  float64 `json:"btc_price_eur"`                    // CEX ref price used to size the notional
-	// Historical is true when this position was reconstructed from persisted
-	// per-cycle averages (order_lifecycle) for a closed offer, rather than
-	// freshly simulated for a live one. Only Side, HedgeRatio, LeverageUsed,
-	// HedgeNotionalEUR, RecommendedCollateralEUR, and BTCPriceEUR are
-	// populated in that case — the other fields were never persisted and are
-	// left zero, so consumers should hide them rather than display a fake 0.
-	Historical bool `json:"historical,omitempty"`
-}
+type HedgePositionDetail = cextrading.HedgePositionDetail
 
 // CapitalRequirement is the capital a trader must commit to *execute* the trade,
 // as opposed to the fees consumed by it (CostBreakdown). It is broken out into
@@ -1279,96 +685,83 @@ func (e *TradeCostEstimator) Breakdown(btcAmount float64, dexExchange string, di
 }
 
 func (e *TradeCostEstimator) BreakdownWithConfirmations(btcAmount float64, dexExchange string, direction string, requiredConfirmations int) CostBreakdown {
+	return e.breakdown(btcAmount, 0, dexExchange, direction, requiredConfirmations, "", nil, false, nil)
+}
+
+// breakdown builds a full per-component cost breakdown by combining three cost
+// sources: the txrouting leg (BTC network fee + Lightning conversion, fixed by the
+// DEX and offer side), the cheapest CEX fee combo (spot taker + on-chain withdrawal
+// + hedge, chosen by the cextrading engine honoring excludedCEXes/coupledHedge), and
+// the static DEX platform fee.
+func (e *TradeCostEstimator) breakdown(btcAmount float64, refPriceEUR float64, dexExchange string, direction string, requiredConfirmations int, feeTier string, excludedCEXes []string, coupledHedge bool, realDepositPct *float64) CostBreakdown {
 	if btcAmount <= 0 {
 		return CostBreakdown{}
 	}
 	requiredConfirmations = resolveRequiredConfirmations(direction, requiredConfirmations)
-	method := resolveWithdrawalMethod(e.cexProfile, dexExchange)
-	return e.breakdownForMethod(btcAmount, 0, dexExchange, method, direction, requiredConfirmations, false)
-}
+	dexFeeFrac := e.getDexFeeFrac(dexExchange)
+	cost := e.routingCost(dexExchange, direction, btcAmount, requiredConfirmations, feeTier)
 
-func (e *TradeCostEstimator) breakdownForMethod(btcAmount float64, refPriceEUR float64, dexExchange string, method WithdrawalMethod, direction string, requiredConfirmations int, coupledHedge bool) CostBreakdown {
-	return e.breakdownForMethodWithTier(btcAmount, refPriceEUR, dexExchange, method, direction, requiredConfirmations, "", coupledHedge, nil)
-}
+	networkFeeBTC := cost.NetworkFeeBTC
+	conversionBTC := cost.Conversion.FeeSumBTC
+	transferMinutes := 0.0
+	if cost.Detail != nil && cost.Detail.SelectedFullConfirmationMinutes > 0 {
+		transferMinutes = float64(cost.Detail.SelectedFullConfirmationMinutes * cost.NumOnchainTxs)
+	}
 
-func (e *TradeCostEstimator) breakdownForMethodWithTier(btcAmount float64, refPriceEUR float64, dexExchange string, method WithdrawalMethod, direction string, requiredConfirmations int, feeTier string, coupledHedge bool, realDepositPct *float64) CostBreakdown {
-	if btcAmount <= 0 {
+	// Pick the cheapest CEX fee combo. Ask side: BTC is deposited to the CEX, so no
+	// withdrawal fee (the cextrading engine side-gates it); bid side withdraws.
+	sel, ok := e.cexCost(cextrading.Input{
+		BTCAmount:       btcAmount,
+		RefPriceEUR:     refPriceEUR,
+		TransferMinutes: transferMinutes,
+		Direction:       direction,
+		ExcludedCEXes:   excludedCEXes,
+		CoupledHedge:    coupledHedge,
+	})
+	if !ok {
 		return CostBreakdown{}
 	}
-	takerFrac := e.taker.get()
-	dexFeeFrac := e.getDexFeeFrac(dexExchange)
-	netFee := e.getNetworkFeeForMethodWithTier(method, btcAmount, requiredConfirmations, feeTier)
 
-	// Ask side: buyer purchases BTC from DEX seller then deposits to CEX — no CEX withdrawal fee,
-	// and only 1 network transaction (DEX wallet → CEX deposit address).
-	// Bid side (default): buyer purchases BTC on CEX then withdraws — withdrawal fee applies,
-	// and 2 network transactions are needed because withdrawals must go via a pre-approved address.
 	isBid := direction != "sell"
 	tradeDir := "bid"
-	withdrawalFee := 0.0
-	numNetworkTxs := 1
-	if isBid {
-		withdrawalFee = e.withdrawal.get(method)
-		numNetworkTxs = 2
-	} else {
+	if !isBid {
 		tradeDir = "ask"
 	}
 
-	if netFee.detail != nil {
-		netFee.detail.NumTxs = numNetworkTxs
-	}
-
-	takerBTC := btcAmount * takerFrac
+	takerBTC := sel.TakerFeeBTC
+	withdrawalFee := sel.WithdrawalFeeBTC
+	hedgeFeeBTC := sel.HedgeFeeBTC
 	dexBTC := btcAmount * dexFeeFrac
-	networkFeeBTC := netFee.feeBTC * float64(numNetworkTxs)
-	transferMinutes := 0.0
-	if netFee.detail != nil && netFee.detail.SelectedFullConfirmationMinutes > 0 {
-		transferMinutes = float64(netFee.detail.SelectedFullConfirmationMinutes * numNetworkTxs)
-	}
-	hedgeCost := e.estimateBestHedgeCost(btcAmount, refPriceEUR, transferMinutes, coupledHedge, hedgeSideForDirection(direction))
-
-	totalBTC := takerBTC + withdrawalFee + networkFeeBTC + hedgeCost.feeBTC + dexBTC
-	totalPct := totalBTC / btcAmount * 100
 
 	pct := func(btc float64) float64 { return round4(btc / btcAmount * 100) }
 
+	totalBTC := takerBTC + withdrawalFee + networkFeeBTC + hedgeFeeBTC + dexBTC + conversionBTC
+	totalPct := totalBTC / btcAmount * 100
+
 	return CostBreakdown{
 		BTCAmount:            round8(btcAmount),
-		RouteCEX:             e.exchange,
+		RouteCEX:             sel.CEX,
 		RouteDEX:             dexExchange,
-		RouteMethod:          string(method),
+		RouteMethod:          string(cost.Method),
 		TradeDirection:       tradeDir,
-		NumNetworkTxs:        numNetworkTxs,
+		NumNetworkTxs:        cost.NumOnchainTxs,
 		CexTakerFeePct:       pct(takerBTC),
 		CexTakerFeeBTC:       round8(takerBTC),
 		WithdrawalFeePct:     pct(withdrawalFee),
 		WithdrawalFeeBTC:     round8(withdrawalFee),
 		NetworkFeePct:        pct(networkFeeBTC),
 		NetworkFeeBTC:        round8(networkFeeBTC),
-		NetworkFeeMethod:     string(netFee.method),
-		NetworkFeeTier:       netFee.tier,
-		NetworkFeeConfidence: round4(netFee.confidence),
-		NetworkFeeDetail:     netFee.detail,
-		Hedge: HedgeBreakdown{
-			OpenFeePct:      pct(hedgeCost.openFeeBTC),
-			OpenFeeBTC:      round8(hedgeCost.openFeeBTC),
-			CloseFeePct:     pct(hedgeCost.closeFeeBTC),
-			CloseFeeBTC:     round8(hedgeCost.closeFeeBTC),
-			FundingFeePct:   pct(hedgeCost.fundingFeeBTC),
-			FundingFeeBTC:   round8(hedgeCost.fundingFeeBTC),
-			FeeSumPct:       pct(hedgeCost.feeBTC),
-			FeeSumBTC:       round8(hedgeCost.feeBTC),
-			Side:            hedgeCost.side,
-			Venue:           hedgeCost.venue,
-			Instrument:      hedgeCost.instrument,
-			TransferMinutes: int(math.Round(hedgeCost.transferMinutes)),
-			Position:        hedgeCost.position,
-		},
-		DexFeePct:    pct(dexBTC),
-		DexFeeBTC:    round8(dexBTC),
-		TotalCostPct: round4(totalPct),
-		TotalCostBTC: round8(totalBTC),
-		Capital:      computeCapitalRequirement(btcAmount, refPriceEUR, dexExchange, isBid, hedgeCost.position, realDepositPct),
+		NetworkFeeMethod:     string(cost.Method),
+		NetworkFeeTier:       cost.Tier,
+		NetworkFeeConfidence: round4(cost.Confidence),
+		NetworkFeeDetail:     cost.Detail,
+		Hedge:                sel.Hedge,
+		Conversion:           cost.Conversion,
+		DexFeePct:            pct(dexBTC),
+		DexFeeBTC:            round8(dexBTC),
+		TotalCostPct:         round4(totalPct),
+		TotalCostBTC:         round8(totalBTC),
+		Capital:              computeCapitalRequirement(btcAmount, refPriceEUR, dexExchange, isBid, sel.Position, realDepositPct),
 	}
 }
 
@@ -1481,98 +874,6 @@ func (e *TradeCostEstimator) AbortCostFromBreakdown(bd CostBreakdown) AbortCostB
 	return AbortCostFromBreakdown(bd)
 }
 
-// cexToHedgeVenue maps a spot CEX name to its paired perp hedge venue.
-// Used in coupled mode to ensure the same exchange is used for both legs.
-var cexToHedgeVenue = map[string]hedge.Venue{
-	"kraken":   hedge.VenueKrakenFutures,
-	"coinbase": hedge.VenueCoinbaseFutures,
-}
-
-func (e *TradeCostEstimator) estimateBestHedgeCost(btcAmount float64, refPriceEUR float64, transferMinutes float64, coupledHedge bool, side string) hedgeCostDetails {
-	if e.hedgeCostOverride != nil {
-		return e.hedgeCostOverride(btcAmount, refPriceEUR, transferMinutes, side)
-	}
-	if btcAmount <= 0 {
-		return hedgeCostDetails{}
-	}
-
-	allCandidates := []hedge.Venue{hedge.VenueKrakenFutures, hedge.VenueCoinbaseFutures, hedge.VenueBinanceFutures}
-	candidates := allCandidates
-	if coupledHedge {
-		if paired, ok := cexToHedgeVenue[e.exchange]; ok {
-			candidates = []hedge.Venue{paired}
-		}
-	}
-	best := hedgeCostDetails{}
-	found := false
-
-	for _, venue := range candidates {
-		profile, err := hedge.DefaultVenueProfile(venue)
-		if err != nil {
-			continue
-		}
-
-		inputs, err := hedgeInputCache.get(venue)
-		if err != nil {
-			continue
-		}
-
-		cfg := hedge.Config{TransferMinutes: transferMinutes}
-		cfg = hedge.ApplyVenueProfile(cfg, profile)
-		cfg = hedge.ApplyLivePerpInputs(cfg, inputs)
-		cfg.FundingCostRate = nonNegativeFundingCostRate(cfg.FundingCostRate, side)
-		openFeeBTC := btcAmount * cfg.PerpOpenFeeRate
-		closeFeeBTC := btcAmount * cfg.PerpCloseFeeRate
-		fundingFeeBTC := btcAmount * cfg.FundingCostRate
-		feeBTC := openFeeBTC + closeFeeBTC + fundingFeeBTC
-		rate := cfg.PerpOpenFeeRate + cfg.PerpCloseFeeRate + cfg.FundingCostRate
-
-		var position *HedgePositionDetail
-		if refPriceEUR > 0 {
-			sim := hedge.SimulatePositionWithSide(cfg, btcAmount, refPriceEUR, side)
-			position = &HedgePositionDetail{
-				Side:                         sim.Side,
-				HedgeRatio:                   round4(sim.HedgeRatio),
-				LeverageUsed:                 round4(sim.LeverageUsed),
-				HedgeNotionalEUR:             round2(sim.HedgeNotionalEUR),
-				InitialMarginEUR:             round2(sim.InitialMarginEUR),
-				RecommendedCollateralEUR:     round2(sim.RecommendedCollateralEUR),
-				StressMovePct:                round4(sim.StressMovePct),
-				StressLossEUR:                round2(sim.StressLossEUR),
-				MaintenanceRequirementEUR:    round2(sim.MaintenanceRequirementEUR),
-				FreeCollateralAfterStressEUR: round2(sim.FreeCollateralAfterStressEUR),
-				LiquidationMovePct:           round4(sim.LiquidationMovePct),
-				BTCPriceEUR:                  round2(sim.BTCPriceEUR),
-			}
-		}
-
-		details := hedgeCostDetails{
-			feeBTC:          feeBTC,
-			feePct:          rate * 100,
-			openFeeBTC:      openFeeBTC,
-			openFeePct:      cfg.PerpOpenFeeRate * 100,
-			closeFeeBTC:     closeFeeBTC,
-			closeFeePct:     cfg.PerpCloseFeeRate * 100,
-			fundingFeeBTC:   fundingFeeBTC,
-			fundingFeePct:   cfg.FundingCostRate * 100,
-			side:            side,
-			venue:           inputs.Venue,
-			instrument:      inputs.Instrument,
-			transferMinutes: transferMinutes,
-			position:        position,
-		}
-		if !found || details.feeBTC < best.feeBTC {
-			best = details
-			found = true
-		}
-	}
-
-	if !found {
-		return hedgeCostDetails{}
-	}
-	return best
-}
-
 func (o *TradeRouteOptimizer) BestBreakdown(btcAmount float64, dexExchange string, direction string) CostBreakdown {
 	return o.BestBreakdownWithConfirmations(btcAmount, dexExchange, direction, 0)
 }
@@ -1587,42 +888,13 @@ func (o *TradeRouteOptimizer) BestBreakdownWithConfirmations(btcAmount float64, 
 // simulation; pass 0 to skip the simulation.
 // coupledHedge forces the hedge venue to match the spot CEX where a pairing exists.
 func (o *TradeRouteOptimizer) BestBreakdownFull(btcAmount float64, refPriceEUR float64, dexExchange string, direction string, requiredConfirmations int, excludedCEXes []string, feeTier string, coupledHedge bool, realDepositPct *float64) CostBreakdown {
-	if o == nil || btcAmount <= 0 {
+	if o == nil || o.est == nil || btcAmount <= 0 {
 		return CostBreakdown{}
 	}
-
-	excluded := make(map[string]struct{}, len(excludedCEXes))
-	for _, c := range excludedCEXes {
-		excluded[c] = struct{}{}
-	}
-
-	best := CostBreakdown{}
-	found := false
-	supported := o.supported
-	if len(supported) == 0 {
-		supported = supportedCEXes
-	}
-	for _, cex := range supported {
-		if _, skip := excluded[cex]; skip {
-			continue
-		}
-		est := o.estimators[cex]
-		if est == nil {
-			continue
-		}
-		for _, method := range supportedWithdrawalMethods(est.cexProfile, dexExchange) {
-			bd := est.breakdownForMethodWithTier(btcAmount, refPriceEUR, dexExchange, method, direction, requiredConfirmations, feeTier, coupledHedge, realDepositPct)
-			if !found || bd.TotalCostPct < best.TotalCostPct {
-				best = bd
-				found = true
-			}
-		}
-	}
-
-	if !found {
-		return CostBreakdown{}
-	}
-	return best
+	// The routing method is fixed per DEX and offer side; the cheapest non-excluded
+	// CEX (with its taker/withdrawal/hedge combo) is chosen inside breakdown via the
+	// cextrading engine.
+	return o.est.breakdown(btcAmount, refPriceEUR, dexExchange, direction, requiredConfirmations, feeTier, excludedCEXes, coupledHedge, realDepositPct)
 }
 
 func (o *TradeRouteOptimizer) AbortCostFromBreakdown(bd CostBreakdown) AbortCostBreakdown {

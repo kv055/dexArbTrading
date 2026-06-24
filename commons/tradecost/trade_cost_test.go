@@ -3,63 +3,22 @@ package tradecost
 import (
 	"errors"
 	"math"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"commons/tradecost/cextrading"
+	routing "commons/tradecost/txrouting"
 )
 
-func seededCachedFee(value float64) *cachedFee {
-	return &cachedFee{
-		value:     value,
-		fetchedAt: time.Now(),
-		ttl:       feeTTL,
-	}
-}
-
 func fixedCostEstimator(exchange, dexExchange string, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC float64) *TradeCostEstimator {
-	withdrawal := newWithdrawalFeeFetcher(exchange)
-	withdrawal.caches[MethodOnchain] = seededCachedFee(withdrawalFeeBTC)
-	withdrawal.caches[MethodLightning] = seededCachedFee(withdrawalFeeBTC)
-
-	return &TradeCostEstimator{
-		exchange:   exchange,
-		taker:      &takerFeeFetcher{exchange: exchange, cache: seededCachedFee(takerFeeFrac)},
-		withdrawal: withdrawal,
-		dexFees: map[string]*cachedFee{
-			dexExchange: seededCachedFee(dexFeeFrac),
-		},
-		cexProfile: cexProfileFor(exchange),
-		networkFeeOverride: func(method WithdrawalMethod, btcAmount float64) networkFeeDetails {
-			return networkFeeDetails{
-				feeBTC:     networkFeeBTC,
-				method:     method,
-				tier:       "standard",
-				confidence: 0.875,
-				detail: &BTCNetworkFeeDetail{
-					SelectedFullConfirmationMinutes: 30,
-				},
-			}
-		},
-		hedgeCostOverride: func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails {
-			return hedgeCostDetails{}
-		},
-	}
+	return NewFixedEstimatorForTesting(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
 }
 
 func fixedCostEstimatorWithHedge(exchange, dexExchange string, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC, hedgeFeeBTC float64) *TradeCostEstimator {
-	est := fixedCostEstimator(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
-	est.hedgeCostOverride = func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails {
-		return hedgeCostDetails{
-			feeBTC:          hedgeFeeBTC,
-			feePct:          hedgeFeeBTC / btcAmount * 100,
-			side:            side,
-			venue:           "coinbase_futures",
-			instrument:      "BTC-PERP",
-			transferMinutes: transferMinutes,
-		}
-	}
-	return est
+	return NewFixedEstimatorWithHedgeForTesting(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC, hedgeFeeBTC)
 }
 
 func assertFloat(t *testing.T, got, want float64) {
@@ -87,14 +46,21 @@ func TestTradeCostEstimatorBreakdownMatchesComponentSum(t *testing.T) {
 	assertFloat(t, bd.CexTakerFeePct, 0.25)
 	assertFloat(t, bd.WithdrawalFeeBTC, 0.00015)
 	assertFloat(t, bd.WithdrawalFeePct, 0.15)
-	assertFloat(t, bd.NetworkFeeBTC, 0.0001) // 2 txs × 0.00005
-	assertFloat(t, bd.NetworkFeePct, 0.1)
+	// bisq bid routes on-chain direct (1 tx) into our Bisq wallet.
+	assertFloat(t, bd.NetworkFeeBTC, 0.00005)
+	assertFloat(t, bd.NetworkFeePct, 0.05)
 	assertFloat(t, bd.DexFeeBTC, 0.0001)
 	assertFloat(t, bd.DexFeePct, 0.1)
-	assertFloat(t, bd.TotalCostBTC, 0.0006)
-	assertFloat(t, bd.TotalCostPct, 0.6)
-	if bd.NetworkFeeMethod != "onchain" {
-		t.Fatalf("network method = %q, want onchain", bd.NetworkFeeMethod)
+	assertFloat(t, bd.TotalCostBTC, 0.00055)
+	assertFloat(t, bd.TotalCostPct, 0.55)
+	if bd.RouteMethod != string(routing.MethodOnChainDirect) {
+		t.Fatalf("route method = %q, want onchain_direct", bd.RouteMethod)
+	}
+	if bd.NetworkFeeMethod != string(routing.MethodOnChainDirect) {
+		t.Fatalf("network method = %q, want onchain_direct", bd.NetworkFeeMethod)
+	}
+	if bd.NumNetworkTxs != 1 {
+		t.Fatalf("network txs = %d, want 1", bd.NumNetworkTxs)
 	}
 	if bd.NetworkFeeConfidence != 0.875 {
 		t.Fatalf("network confidence = %.12f, want 0.875", bd.NetworkFeeConfidence)
@@ -111,13 +77,61 @@ func TestTradeCostEstimatorBreakdownIncludesHedgeCostOnBidSide(t *testing.T) {
 	if bd.Hedge.Side != "short" {
 		t.Fatalf("hedge side = %q, want short", bd.Hedge.Side)
 	}
-	assertFloat(t, bd.TotalCostBTC, 0.0008)
-	assertFloat(t, bd.TotalCostPct, 0.8)
+	assertFloat(t, bd.TotalCostBTC, 0.00075)
+	assertFloat(t, bd.TotalCostPct, 0.75)
 	if bd.Hedge.Venue != "coinbase_futures" {
 		t.Fatalf("hedge venue = %q, want coinbase_futures", bd.Hedge.Venue)
 	}
-	if bd.Hedge.TransferMinutes != 60 {
-		t.Fatalf("hedge transfer minutes = %d, want 60", bd.Hedge.TransferMinutes)
+	if bd.Hedge.TransferMinutes != 30 {
+		t.Fatalf("hedge transfer minutes = %d, want 30", bd.Hedge.TransferMinutes)
+	}
+}
+
+func TestBisq2BidUsesHubWalletTwoTxs(t *testing.T) {
+	est := fixedCostEstimator("kraken", "bisq2", 0.0025, 0.00015, 0.0, 0.00005)
+
+	bd := est.Breakdown(0.1, "bisq2", "buy")
+
+	if bd.RouteMethod != string(routing.MethodOnChainHubWallet) {
+		t.Fatalf("route method = %q, want onchain_hub", bd.RouteMethod)
+	}
+	if bd.NumNetworkTxs != 2 {
+		t.Fatalf("network txs = %d, want 2", bd.NumNetworkTxs)
+	}
+	// Hub wallet routes two on-chain txs: 2 × 0.00005.
+	assertFloat(t, bd.NetworkFeeBTC, 0.0001)
+}
+
+func TestBisq2AskSendsDirectToCex(t *testing.T) {
+	est := fixedCostEstimator("kraken", "bisq2", 0.0025, 0.00015, 0.0, 0.00005)
+
+	bd := est.Breakdown(0.1, "bisq2", "sell")
+
+	if bd.RouteMethod != string(routing.MethodOnChainDirect) {
+		t.Fatalf("ask route method = %q, want onchain_direct", bd.RouteMethod)
+	}
+	if bd.NumNetworkTxs != 1 {
+		t.Fatalf("network txs = %d, want 1", bd.NumNetworkTxs)
+	}
+	// Ask side withdraws nothing from the CEX.
+	assertFloat(t, bd.WithdrawalFeeBTC, 0)
+}
+
+func TestRobosatsRoutesViaSwapBothSides(t *testing.T) {
+	est := fixedCostEstimator("kraken", "robosats", 0.0025, 0.00015, 0.00175, 0.00005)
+
+	for _, dir := range []string{"buy", "sell"} {
+		bd := est.Breakdown(0.01, "robosats", dir)
+		if bd.RouteMethod != string(routing.MethodOnChainSwap) {
+			t.Fatalf("%s route method = %q, want onchain_swap", dir, bd.RouteMethod)
+		}
+		if bd.Conversion.Strategy != routing.StrategySubmarineSwap {
+			t.Fatalf("%s conversion strategy = %q, want submarine_swap", dir, bd.Conversion.Strategy)
+		}
+		// service 0.1% of 0.01 BTC + 150 sats miner.
+		assertFloat(t, bd.Conversion.ServiceFeeBTC, 0.00001)
+		assertFloat(t, bd.Conversion.ProviderMinerBTC, 0.0000015)
+		assertFloat(t, bd.Conversion.FeeSumBTC, 0.0000115)
 	}
 }
 
@@ -219,16 +233,40 @@ func TestComputeCapitalRequirementRealDepositAppliesToRoboSats(t *testing.T) {
 // notional, so capped vs full breakdowns can be compared.
 func fixedCostEstimatorWithHedgePosition(exchange, dexExchange string, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC, hedgeFeeBTC float64) *TradeCostEstimator {
 	est := fixedCostEstimator(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
-	est.hedgeCostOverride = func(btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) hedgeCostDetails {
-		return hedgeCostDetails{
-			feeBTC:          hedgeFeeBTC,
-			feePct:          hedgeFeeBTC / btcAmount * 100,
-			side:            side,
-			venue:           "coinbase_futures",
-			instrument:      "BTC-PERP",
-			transferMinutes: transferMinutes,
-			position:        &HedgePositionDetail{RecommendedCollateralEUR: btcAmount * refPriceEUR * 0.1},
+	est.cexCostOverride = func(in cextrading.Input) (cextrading.Selection, bool) {
+		takerBTC := in.BTCAmount * takerFeeFrac
+		withdrawalBTC := 0.0
+		if in.Direction != "sell" {
+			withdrawalBTC = withdrawalFeeBTC
 		}
+		side := "short"
+		if in.Direction == "sell" {
+			side = "long"
+		}
+		pos := &cextrading.HedgePositionDetail{RecommendedCollateralEUR: in.BTCAmount * in.RefPriceEUR * 0.1}
+		feePct := 0.0
+		if in.BTCAmount > 0 {
+			feePct = round4(hedgeFeeBTC / in.BTCAmount * 100)
+		}
+		h := cextrading.HedgeBreakdown{
+			FeeSumBTC:       round8(hedgeFeeBTC),
+			FeeSumPct:       feePct,
+			Side:            side,
+			Venue:           "coinbase_futures",
+			Instrument:      "BTC-PERP",
+			TransferMinutes: int(math.Round(in.TransferMinutes)),
+			Position:        pos,
+		}
+		return cextrading.Selection{
+			CEX:              exchange,
+			TakerFeeFrac:     takerFeeFrac,
+			TakerFeeBTC:      takerBTC,
+			WithdrawalFeeBTC: withdrawalBTC,
+			HedgeFeeBTC:      h.FeeSumBTC,
+			Hedge:            h,
+			Position:         pos,
+			ComboBTC:         takerBTC + withdrawalBTC + h.FeeSumBTC,
+		}, true
 	}
 	return est
 }
@@ -236,8 +274,8 @@ func fixedCostEstimatorWithHedgePosition(exchange, dexExchange string, takerFeeF
 func TestBreakdownCapitalRespectsFullAndCappedVolume(t *testing.T) {
 	est := fixedCostEstimatorWithHedgePosition("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 
-	full := est.breakdownForMethodWithTier(0.1, 45000, "bisq", MethodOnchain, "buy", 0, "", false, nil)
-	capped := est.breakdownForMethodWithTier(0.04, 45000, "bisq", MethodOnchain, "buy", 0, "", false, nil)
+	full := est.breakdown(0.1, 45000, "bisq", "buy", 0, "", nil, false, nil)
+	capped := est.breakdown(0.04, 45000, "bisq", "buy", 0, "", nil, false, nil)
 
 	// Full size.
 	assertFloat(t, full.Capital.SpotNotionalEUR, 4500)     // 0.1 * 45000
@@ -260,8 +298,8 @@ func TestBreakdownRealDepositPctScalesWithCappedVolume(t *testing.T) {
 	est := fixedCostEstimatorWithHedgePosition("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 	realPct := 0.18
 
-	full := est.breakdownForMethodWithTier(0.1, 45000, "bisq", MethodOnchain, "buy", 0, "", false, &realPct)
-	capped := est.breakdownForMethodWithTier(0.04, 45000, "bisq", MethodOnchain, "buy", 0, "", false, &realPct)
+	full := est.breakdown(0.1, 45000, "bisq", "buy", 0, "", nil, false, &realPct)
+	capped := est.breakdown(0.04, 45000, "bisq", "buy", 0, "", nil, false, &realPct)
 
 	// The real pct is fixed, but since SecurityDepositBTC = btcAmount * pct, the
 	// absolute deposit still scales down correctly with the smaller capped size.
@@ -287,10 +325,10 @@ func TestAbortCostFromBreakdownIncludesBidUnwindComponents(t *testing.T) {
 	assertFloat(t, abort.CexBuyTaker.BTC, 0.00025)
 	assertFloat(t, abort.CexSellTaker.BTC, 0.00025)
 	assertFloat(t, abort.Withdrawal.BTC, 0.00015)
-	assertFloat(t, abort.Network.BTC, 0.0001)
+	assertFloat(t, abort.Network.BTC, 0.00005) // bisq bid is a single on-chain tx
 	assertFloat(t, abort.Hedge.FeeSumBTC, 0.0002)
-	assertFloat(t, abort.Total.BTC, 0.00095)
-	assertFloat(t, abort.Total.Pct, 0.95)
+	assertFloat(t, abort.Total.BTC, 0.0009)
+	assertFloat(t, abort.Total.Pct, 0.9)
 	if abort.TradeDirection != "bid" {
 		t.Fatalf("trade direction = %q, want bid", abort.TradeDirection)
 	}
@@ -360,10 +398,10 @@ func TestAbortCostFromBreakdownRecalculatesPercentForCappedSize(t *testing.T) {
 	assertFloat(t, abort.CexBuyTaker.BTC, 0.000125)
 	assertFloat(t, abort.CexSellTaker.BTC, 0.000125)
 	assertFloat(t, abort.Withdrawal.BTC, 0.00015)
-	assertFloat(t, abort.Network.BTC, 0.0001)
+	assertFloat(t, abort.Network.BTC, 0.00005) // bisq bid is a single on-chain tx
 	assertFloat(t, abort.Hedge.FeeSumBTC, 0.0002)
-	assertFloat(t, abort.Total.BTC, 0.0007)
-	assertFloat(t, abort.Total.Pct, 1.4)
+	assertFloat(t, abort.Total.BTC, 0.00065)
+	assertFloat(t, abort.Total.Pct, 1.3)
 }
 
 func TestTradeCostEstimatorBreakdownRoundsBTCAndPercentFields(t *testing.T) {
@@ -385,7 +423,7 @@ func TestTradeCostEstimatorZeroAmountReturnsEmptyCost(t *testing.T) {
 	est := fixedCostEstimator("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005)
 
 	assertFloat(t, est.CostPct(0, "bisq"), 0)
-	if bd := est.Breakdown(0, "bisq", "buy"); bd != (CostBreakdown{}) {
+	if bd := est.Breakdown(0, "bisq", "buy"); !reflect.DeepEqual(bd, CostBreakdown{}) {
 		t.Fatalf("zero amount breakdown = %#v, want empty breakdown", bd)
 	}
 }
