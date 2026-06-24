@@ -407,12 +407,26 @@ jobs:
             test -f "$f" || { echo "Missing $f — run: cp .env .env.enc && dotenvx encrypt -f .env.enc in each directory, then commit"; exit 1; }
           done
           curl -sfS https://dotenvx.sh | sh
-          # Decrypt each .env.enc in place (file becomes plain text after this)
-          DOTENV_PRIVATE_KEY_ENC="$KEY_ROOT"            dotenvx decrypt -f .env.enc
-          DOTENV_PRIVATE_KEY_ENC="$KEY_UNIFIED_API"     dotenvx decrypt -f dexUnifiedApi/.env.enc
-          DOTENV_PRIVATE_KEY_ENC="$KEY_MONITOR"         dotenvx decrypt -f dexMonitor/.env.enc
-          DOTENV_PRIVATE_KEY_ENC="$KEY_MM_CONTROLLER"   dotenvx decrypt -f dexMmController/.env.enc
-          DOTENV_PRIVATE_KEY_ENC="$KEY_FIAT_CONTROLLER" dotenvx decrypt -f dexFiatController/.env.enc
+          # Decrypt each .env.enc in place (file becomes plain text after this).
+          # Fail fast with a clear diagnostic if the committed pubkey doesn't match the
+          # CI secret — usual cause is the post-commit encrypt-env.sh hook rotating the
+          # keypair (cp .env .env.enc strips the pubkey). See project_dotenvx_hook_rekey.
+          decrypt_or_die () {
+            local f="$1" key="$2" secret="$3"
+            if ! DOTENV_PRIVATE_KEY_ENC="$key" dotenvx decrypt -f "$f" >/dev/null 2>&1; then
+              local pub; pub=$(grep -oE 'DOTENV_PUBLIC_KEY_ENC="[0-9a-f]+"' "$f" | head -1 || true)
+              echo "::error::Cannot decrypt $f with secret $secret."
+              echo "  Committed ${pub:-<no pubkey>} does not match that key. Likely the post-commit"
+              echo "  encrypt-env.sh hook rotated the keypair (new privkey only lands in gitignored .env.keys)."
+              echo "  Fix: re-encrypt $f pinned to the pubkey matching $secret, or rotate that secret."
+              exit 1
+            fi
+          }
+          decrypt_or_die .env.enc                   "$KEY_ROOT"            DOTENV_PRIVATE_KEY_ROOT
+          decrypt_or_die dexUnifiedApi/.env.enc     "$KEY_UNIFIED_API"     DOTENV_PRIVATE_KEY_UNIFIED_API
+          decrypt_or_die dexMonitor/.env.enc        "$KEY_MONITOR"         DOTENV_PRIVATE_KEY_MONITOR
+          decrypt_or_die dexMmController/.env.enc   "$KEY_MM_CONTROLLER"   DOTENV_PRIVATE_KEY_MM_CONTROLLER
+          decrypt_or_die dexFiatController/.env.enc "$KEY_FIAT_CONTROLLER" DOTENV_PRIVATE_KEY_FIAT_CONTROLLER
           # Upload decrypted files to VPS as .env
           scp -i ~/.ssh/id_ed25519 .env.enc                  "$SSH_USER@$SSH_HOST:$REPO_DIR/.env"
           scp -i ~/.ssh/id_ed25519 dexUnifiedApi/.env.enc    "$SSH_USER@$SSH_HOST:$REPO_DIR/dexUnifiedApi/.env"
