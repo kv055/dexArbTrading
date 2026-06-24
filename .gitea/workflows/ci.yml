@@ -153,7 +153,7 @@ jobs:
 
       - name: Create buildx builder (Gitea-registry aware)
         if: github.ref != 'refs/heads/main'
-        run: docker buildx create --use --driver docker-container --config /tmp/buildkitd.toml
+        run: docker buildx use ci-builder 2>/dev/null || docker buildx create --name ci-builder --use --driver docker-container --config /tmp/buildkitd.toml
 
       - name: Login to Gitea registry
         if: github.ref != 'refs/heads/main'
