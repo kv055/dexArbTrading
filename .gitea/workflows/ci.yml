@@ -422,6 +422,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Full history so the commit pushed to the VPS repo carries every object the
+          # VPS lacks (git's receive-pack connectivity check needs the ancestry).
+          fetch-depth: 0
       - name: Fetch submodules from the Gitea mirror
         run: |
           host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
@@ -492,6 +496,24 @@ jobs:
             '$REPO_DIR/dexMmController/.env' \
             '$REPO_DIR/dexFiatController/.env'"
 
+      - name: Push deploy commit into the VPS repo
+        env:
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_USER: ${{ secrets.VPS_SSH_USER }}
+          REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
+          NEW_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          # GitHub Actions is disabled on this repo (billing), so the VPS cannot pull this
+          # commit from GitHub. Deliver the exact built commit straight from the runner's
+          # checkout into the VPS git repo over the existing SSH channel; the remote
+          # sync_tree then checks it out locally with no GitHub dependency. Pushed to a
+          # per-SHA ref under refs/deploy/* (never a checked-out branch, so receive-pack's
+          # denyCurrentBranch can't reject it) — this also keeps the previous deploy's
+          # commit reachable for the auto-rollback path.
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_ed25519" \
+            git push --force "ssh://$SSH_USER@$SSH_HOST$REPO_DIR" "HEAD:refs/deploy/$NEW_SHA"
+
       - name: Sync VPS repo to commit, restart stack & verify (auto-rollback on failure)
         timeout-minutes: 10
         env:
@@ -516,13 +538,15 @@ jobs:
           docker run --rm -v "$REPO_DIR:/d" busybox:1.37 \
             chown -R "$(id -u):$(id -g)" /d/deploy /d/nginx 2>/dev/null || true
 
+          # The deploy commit is delivered into this repo by the runner's "Push deploy
+          # commit into the VPS repo" step (refs/deploy/<sha>); the previous deploy's
+          # commit is still present for rollback. So just check it out — no remote fetch.
           sync_tree() {
-            git fetch --no-tags origin "$1" || git fetch --no-tags origin main
             git checkout --force --detach "$1"
           }
 
           deploy() {
-            sync_tree "$1"
+            sync_tree "$1" || { echo "::error::commit $1 not present in VPS repo — tree delivery failed"; return 1; }
             if [ -f deploy/nginx/gen-self-signed-cert.sh ]; then
               ENSURE=1 CERT_CN="${CERT_CN:-localhost}" bash deploy/nginx/gen-self-signed-cert.sh "${CERT_CN:-localhost}"
             fi
@@ -545,9 +569,13 @@ jobs:
             [ "$code" = 200 ] || [ "$code" = 401 ] || curl -fsSL --max-time 10 http://127.0.0.1:5000/ >/dev/null
           }
           app_get() {
-            docker compose exec -T dexmonitor curl -fsS --max-time 30 "http://localhost:5000$1" >/dev/null \
-              || curl -fsSLk --max-time 30 "https://127.0.0.1:5443$1" >/dev/null \
-              || curl -fsSL --max-time 30 "http://127.0.0.1:5000$1" >/dev/null
+            local code
+            code=$(docker compose exec -T dexmonitor curl -so /dev/null -w '%{http_code}' --max-time 30 "http://localhost:5000$1" 2>/dev/null) || code=000
+            { [ "$code" = 200 ] || [ "$code" = 401 ]; } && return 0
+            code=$(curl -sko /dev/null -w '%{http_code}' --max-time 30 "https://127.0.0.1:5443$1" 2>/dev/null) || code=000
+            { [ "$code" = 200 ] || [ "$code" = 401 ]; } && return 0
+            code=$(curl -so /dev/null -w '%{http_code}' --max-time 30 "http://127.0.0.1:5000$1" 2>/dev/null) || code=000
+            [ "$code" = 200 ] || [ "$code" = 401 ]
           }
           smoke() {
             local name probe ok attempt
