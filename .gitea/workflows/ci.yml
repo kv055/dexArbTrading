@@ -157,7 +157,7 @@ jobs:
     needs: [test-go, test-frontend, detect-changes]
     runs-on: ubuntu-latest
     env:
-      DOCKER_BUILD_SUMMARY: false
+      DOCKER_BUILD_SUMMARY: "false"
     strategy:
       fail-fast: false
       matrix:
