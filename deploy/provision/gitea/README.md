@@ -56,12 +56,39 @@ cp deploy/provision/gitea/.env.gitea.example deploy/provision/gitea/.env.gitea
 | `GITEA_OWNER` | User/org that will own the repos (e.g. `kv055`). |
 | `GITEA_TOKEN` | The **Gitea** PAT from step 3 above (NOT the GitHub PAT). |
 | `RUNNER_NAME` / `RUNNER_LABELS` | Runner identity + the `ubuntu-latest → catthehacker` image mapping. |
-| `HOMESERVER_SSH_USER` | SSH user on the homeserver (e.g. `kili`). |
+| `HOMESERVER_ADMIN_SSH_USER` | Sudo-capable account (e.g. `umbrel`) used **once** by `provision-runner-user.sh` to create the runner user. Must differ from `HOMESERVER_SSH_USER`. Only needed for the one-time bootstrap below. |
+| `HOMESERVER_SSH_USER` | The **unprivileged** runner account that `setup-gitea.sh` logs in as to deploy/start the runner (default `gitea-runner`). Created by the bootstrap step, not pre-existing. |
 | `HOMESERVER_SSH_HOST` | Tailscale IP of the homeserver (e.g. `100.x.y.z`). Use the IP, not a `*.ts.net` hostname. |
 | `HOMESERVER_RUNNER_DIR` | Directory on the homeserver where runner files are placed (default `~/gitea-runner`). |
 
 Also reused: `GH_PAT` in the repo-root `.env` (the GitHub PAT) — written as a Gitea
 secret so the runner can fetch submodules from github.com.
+
+## Bootstrap the runner user (first time only)
+
+`setup-gitea.sh` logs in to the homeserver **as** the unprivileged `HOMESERVER_SSH_USER`
+(`gitea-runner`) to copy the runner files and `docker compose up` — so it can't be the thing
+that *creates* that user. That needs a sudo-capable admin login, which is the chicken-and-egg
+`provision-runner-user.sh` solves. Run it **once** before the first `setup-gitea.sh`:
+
+```bash
+bash deploy/provision/gitea/provision-runner-user.sh
+```
+
+Over a single sudo SSH session as `HOMESERVER_ADMIN_SSH_USER` (e.g. `umbrel`) it:
+
+1. creates the `gitea-runner` user (no password — key-only, like the admin account);
+2. adds it to the `docker` group so it can run `docker compose` for the runner;
+3. authorizes the **same** SSH key(s) the admin account uses (copies the admin's
+   `authorized_keys`) — no separate keypair to manage for a homelab trial.
+
+It's idempotent (safe to re-run) and forces correct home-dir ownership so sshd's `StrictModes`
+still accepts key auth on a re-run over a stale home dir. Verify it worked (should not prompt
+for a password, and docker must work):
+
+```bash
+ssh gitea-runner@100.x.y.z docker ps
+```
 
 ## Run it
 
