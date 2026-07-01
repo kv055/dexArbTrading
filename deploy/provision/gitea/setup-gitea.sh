@@ -30,6 +30,10 @@ ENV_GITEA="$SCRIPT_DIR/.env.gitea"
 # shellcheck disable=SC1090
 set -a; . "$ENV_GITEA"; set +a
 
+# Shared repo list + ROOT_REPO (single source of truth; see the file's header).
+# shellcheck source=../manifest.sh
+. "$REPO_ROOT/deploy/provision/manifest.sh"
+
 : "${GITEA_URL:?GITEA_URL not set in .env.gitea}"
 : "${GITEA_OWNER:?GITEA_OWNER not set in .env.gitea}"
 : "${GITEA_TOKEN:?GITEA_TOKEN not set in .env.gitea}"
@@ -84,17 +88,7 @@ echo "  owner: $GITEA_OWNER ($OWNER_TYPE)"
 # ---------------------------------------------------------------------------
 # 2 + 3. Ensure repos exist, then push local clones (additive 'gitea' remote)
 # ---------------------------------------------------------------------------
-# name -> local path. Root repo lives at the repo root; submodules at their dir.
-REPOS=(dexArbTrading dexUnifiedApi dexMmTradingLogicHummingBot dexMmController dexMonitor dexFiatController)
-declare -A REPO_DIR=(
-  [dexArbTrading]="."
-  [dexUnifiedApi]="dexUnifiedApi"
-  [dexMmTradingLogicHummingBot]="dexMmTradingLogicHummingBot"
-  [dexMmController]="dexMmController"
-  [dexMonitor]="dexMonitor"
-  [dexFiatController]="dexFiatController"
-)
-
+# The repo list (name|dir|dotenv_secret entries) comes from the shared manifest.
 ensure_repo() {
   local name="$1" code
   code="$(api_code GET "/repos/$GITEA_OWNER/$name")"
@@ -119,7 +113,7 @@ ensure_repo() {
 }
 
 push_repo() {
-  local name="$1" dir="${REPO_DIR[$1]}"
+  local name="$1" dir="$2"
   [[ -d "$dir/.git" || -f "$dir/.git" ]] || { echo "  WARN: $dir is not a git checkout — skipping push"; return; }
 
   local url="$GITEA_URL/$GITEA_OWNER/$name.git"
@@ -150,20 +144,21 @@ push_repo() {
 }
 
 log "Ensuring repos exist on Gitea"
-for r in "${REPOS[@]}"; do ensure_repo "$r"; done
+for entry in "${REPOS[@]}"; do ensure_repo "$(repo_name "$entry")"; done
 
 log "Pushing local clones (additive 'gitea' remote; origin untouched)"
-for r in "${REPOS[@]}"; do push_repo "$r"; done
+for entry in "${REPOS[@]}"; do push_repo "$(repo_name "$entry")" "$(repo_dir "$entry")"; done
 
 # Point the root repo's default branch at 'develop' (the trial branch) so the Gitea
 # UI and workflow_dispatch target it. No-op if develop wasn't pushed.
-api_code PATCH "/repos/$GITEA_OWNER/dexArbTrading" '{"default_branch":"develop"}' >/dev/null || true
+api_code PATCH "/repos/$GITEA_OWNER/$ROOT_REPO" '{"default_branch":"develop"}' >/dev/null || true
 
 # ---------------------------------------------------------------------------
 # 4. Enable Actions per repo
 # ---------------------------------------------------------------------------
 log "Enabling Actions on each repo"
-for r in "${REPOS[@]}"; do
+for entry in "${REPOS[@]}"; do
+  r="$(repo_name "$entry")"
   rc="$(api_code PATCH "/repos/$GITEA_OWNER/$r" '{"has_actions": true}')"
   [[ "$rc" == "200" ]] && echo "  actions on: $r" || echo "  WARN: could not enable actions on $r (HTTP $rc)"
 done
@@ -193,7 +188,7 @@ echo "  wrote $SCRIPT_DIR/daemon.json (insecure-registries: $REGISTRY_HOST)"
 # 6. Runner registration token + act-runner.env
 # ---------------------------------------------------------------------------
 log "Fetching runner registration token"
-reg_path="/repos/$GITEA_OWNER/dexArbTrading/actions/runners/registration-token"
+reg_path="/repos/$GITEA_OWNER/$ROOT_REPO/actions/runners/registration-token"
 [[ "$OWNER_TYPE" == "org" ]] && reg_path="/orgs/$GITEA_OWNER/actions/runners/registration-token"
 
 # Endpoint is GET on current Gitea; older builds used POST. Try GET then POST.
@@ -232,6 +227,8 @@ scp \
   "$SCRIPT_DIR/runner-config.yaml" \
   "$SCRIPT_DIR/act-runner.env" \
   "$SCRIPT_DIR/daemon.json" \
+  "$SCRIPT_DIR/teardown.sh" \
+  "$REPO_ROOT/deploy/provision/manifest.sh" \
   "$SSH_TARGET:$HOMESERVER_RUNNER_DIR/"
 
 ssh "$SSH_TARGET" "cd $HOMESERVER_RUNNER_DIR && docker compose -f act-runner-compose.yml up -d"
@@ -247,7 +244,7 @@ Trigger the trial:
   git push gitea develop
   — or use "Run workflow" (workflow_dispatch) in the Gitea UI.
 
-The runner should appear online in Gitea → dexArbTrading → Settings → Actions → Runners.
+The runner should appear online in Gitea → $ROOT_REPO → Settings → Actions → Runners.
 
 Tear everything down later (no artifacts left):
   ssh $SSH_TARGET "cd $HOMESERVER_RUNNER_DIR && bash teardown.sh"

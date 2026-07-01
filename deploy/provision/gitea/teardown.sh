@@ -9,6 +9,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 COMPOSE="act-runner-compose.yml"
 
+# ROOT_REPO from the shared manifest if setup-gitea.sh deployed it alongside the
+# runner files; fall back for older runner dirs that predate the manifest.
+# shellcheck source=manifest.sh
+[[ -f manifest.sh ]] && . ./manifest.sh
+: "${ROOT_REPO:=dexArbTrading}"
+
 # 1. Best-effort: unregister the runner from Gitea (needs .env.gitea + jq + curl).
 if [[ -f .env.gitea ]] && command -v curl >/dev/null && command -v jq >/dev/null; then
   # shellcheck disable=SC1091
@@ -18,7 +24,7 @@ if [[ -f .env.gitea ]] && command -v curl >/dev/null && command -v jq >/dev/null
   if curl -fsS -o /dev/null "${AUTH[@]}" "$API/orgs/$GITEA_OWNER" 2>/dev/null; then
     base="/orgs/$GITEA_OWNER/actions/runners"
   else
-    base="/repos/$GITEA_OWNER/dexArbTrading/actions/runners"
+    base="/repos/$GITEA_OWNER/$ROOT_REPO/actions/runners"
   fi
   ids="$(curl -fsS "${AUTH[@]}" "$API$base" 2>/dev/null \
           | jq -r --arg n "${RUNNER_NAME:-homeserver-1}" '.runners[]? | select(.name==$n) | .id' 2>/dev/null || true)"

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Writes the 11 repository Actions secrets to a Gitea repo via the REST API.
-# Connection details come from the environment (exported by setup-gitea.sh) or,
-# when run standalone, from deploy/provision/gitea/.env.gitea.
+# Writes the repository Actions secrets to a Gitea repo via the REST API. The secret
+# set (per-repo dotenv keys + GH_PAT + VPS_*) is declared in the shared manifest
+# deploy/provision/manifest.sh; the 3 REGISTRY_* secrets are computed here from the
+# Gitea connection. Connection details come from the environment (exported by
+# setup-gitea.sh) or, when run standalone, from deploy/provision/gitea/.env.gitea.
 #
 #   GITEA_URL    base URL, no trailing slash, no /api (e.g. https://gitea.x.ts.net)
 #   GITEA_OWNER  user/org that owns the repo
@@ -14,6 +16,10 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/../../.."   # repo root
+
+# Shared repo list + secret set (single source of truth; see the file's header).
+# shellcheck source=../manifest.sh
+. "$SCRIPT_DIR/../manifest.sh"
 
 # Fall back to the gitea env file when not invoked via setup-gitea.sh.
 if [[ -z "${GITEA_URL:-}" || -z "${GITEA_OWNER:-}" || -z "${GITEA_TOKEN:-}" ]]; then
@@ -29,7 +35,7 @@ fi
 : "${GITEA_TOKEN:?GITEA_TOKEN not set (env or deploy/provision/gitea/.env.gitea)}"
 
 GITEA_URL="${GITEA_URL%/}"
-REPO="$GITEA_OWNER/dexArbTrading"
+REPO="$GITEA_OWNER/$ROOT_REPO"
 
 for tool in curl jq git; do
   command -v "$tool" >/dev/null 2>&1 || { echo "ERROR: missing required tool: $tool (install with: sudo apt install -y curl jq git)" >&2; exit 1; }
@@ -52,11 +58,6 @@ read_vps_var() {
 
 if [[ ! -f .env ]]; then
   echo "ERROR: .env not found" >&2
-  exit 1
-fi
-GH_PAT_VALUE=$(grep '^GH_PAT=' .env | cut -d= -f2-)
-if [[ -z "$GH_PAT_VALUE" ]]; then
-  echo "ERROR: GH_PAT not set in .env" >&2
   exit 1
 fi
 
@@ -90,26 +91,43 @@ JSON
   echo "  set $name"
 }
 
-set_secret DOTENV_PRIVATE_KEY_ROOT            "$(extract_key .env.keys)"
-set_secret DOTENV_PRIVATE_KEY_UNIFIED_API     "$(extract_key dexUnifiedApi/.env.keys)"
-set_secret DOTENV_PRIVATE_KEY_MONITOR         "$(extract_key dexMonitor/.env.keys)"
-set_secret DOTENV_PRIVATE_KEY_MM_CONTROLLER   "$(extract_key dexMmController/.env.keys)"
-set_secret DOTENV_PRIVATE_KEY_FIAT_CONTROLLER "$(extract_key dexFiatController/.env.keys)"
-set_secret GH_PAT                             "$GH_PAT_VALUE"
-set_secret VPS_SSH_PRIVATE_KEY                "$(read_vps_var VPS_SSH_PRIVATE_KEY)"
-set_secret VPS_SSH_KNOWN_HOSTS                "$(read_vps_var VPS_SSH_KNOWN_HOSTS)"
-set_secret VPS_SSH_HOST                       "$(read_vps_var VPS_SSH_HOST)"
-set_secret VPS_SSH_USER                       "$(read_vps_var VPS_SSH_USER)"
-set_secret VPS_REPO_DIR                       "$(read_vps_var VPS_REPO_DIR)"
+count=0
+
+# Per-repo dotenv private keys, from each repo's <dir>/.env.keys (manifest REPOS).
+for entry in "${REPOS[@]}"; do
+  secret="$(repo_dotenv_secret "$entry")"
+  [[ -n "$secret" ]] || continue
+  set_secret "$secret" "$(extract_key "$(keys_file_for_dir "$(repo_dir "$entry")")")"
+  count=$((count + 1))
+done
+
+# Plain secrets read from the root .env by name (currently just GH_PAT).
+for name in "${ENV_SECRETS[@]}"; do
+  value=$(grep "^$name=" .env | cut -d= -f2-)
+  if [[ -z "$value" ]]; then
+    echo "ERROR: $name not set in .env" >&2
+    exit 1
+  fi
+  set_secret "$name" "$value"
+  count=$((count + 1))
+done
+
+# VPS_* secrets sourced from deploy/provision/.env.vps (manifest VPS_SECRETS).
+for name in "${VPS_SECRETS[@]}"; do
+  set_secret "$name" "$(read_vps_var "$name")"
+  count=$((count + 1))
+done
 
 # Gitea container-registry login for the build-and-push job (pushes images to the
 # Gitea store instead of GHCR). USER defaults to the owner; the orchestrator passes
 # the token's actual login. TOKEN reuses the Gitea PAT (needs write:package scope).
 # NB: secret names must NOT start with GITEA_ — Gitea reserves that prefix (and
 # GITHUB_), rejecting such names with HTTP 400. Hence REGISTRY_* not GITEA_REGISTRY_*.
+# These are computed from the Gitea connection, not the shared manifest.
 set_secret REGISTRY_URL                       "${GITEA_REGISTRY_URL_VALUE:-$GITEA_URL}"
 set_secret REGISTRY_USER                      "${GITEA_REGISTRY_USER:-$GITEA_OWNER}"
 set_secret REGISTRY_TOKEN                     "$GITEA_TOKEN"
+count=$((count + 3))
 
 echo ""
-echo "Done — 14 secrets written to gitea:$REPO"
+echo "Done — $count secrets written to gitea:$REPO"

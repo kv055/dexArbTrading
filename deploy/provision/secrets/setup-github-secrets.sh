@@ -4,6 +4,10 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/../../.."
 
+# Shared repo list + secret set (single source of truth; see the file's header).
+# shellcheck source=../manifest.sh
+. "$SCRIPT_DIR/../manifest.sh"
+
 extract_key() {
   local file="$1"
   if [[ ! -f "$file" ]]; then
@@ -59,17 +63,32 @@ set_secret() {
   echo "  set $1"
 }
 
-set_secret DOTENV_PRIVATE_KEY_ROOT            "$(extract_key .env.keys)"
-set_secret DOTENV_PRIVATE_KEY_UNIFIED_API     "$(extract_key dexUnifiedApi/.env.keys)"
-set_secret DOTENV_PRIVATE_KEY_MONITOR         "$(extract_key dexMonitor/.env.keys)"
-set_secret DOTENV_PRIVATE_KEY_MM_CONTROLLER   "$(extract_key dexMmController/.env.keys)"
-set_secret DOTENV_PRIVATE_KEY_FIAT_CONTROLLER "$(extract_key dexFiatController/.env.keys)"
-set_secret GH_PAT                             "$TOKEN"
-set_secret VPS_SSH_PRIVATE_KEY                "$(read_vps_var VPS_SSH_PRIVATE_KEY)"
-set_secret VPS_SSH_KNOWN_HOSTS                "$(read_vps_var VPS_SSH_KNOWN_HOSTS)"
-set_secret VPS_SSH_HOST                       "$(read_vps_var VPS_SSH_HOST)"
-set_secret VPS_SSH_USER                       "$(read_vps_var VPS_SSH_USER)"
-set_secret VPS_REPO_DIR                       "$(read_vps_var VPS_REPO_DIR)"
+count=0
+
+# Per-repo dotenv private keys, from each repo's <dir>/.env.keys (manifest REPOS).
+for entry in "${REPOS[@]}"; do
+  secret="$(repo_dotenv_secret "$entry")"
+  [[ -n "$secret" ]] || continue
+  set_secret "$secret" "$(extract_key "$(keys_file_for_dir "$(repo_dir "$entry")")")"
+  count=$((count + 1))
+done
+
+# Plain secrets read from the root .env by name (currently just GH_PAT; == $TOKEN).
+for name in "${ENV_SECRETS[@]}"; do
+  value=$(grep "^$name=" .env | cut -d= -f2-)
+  if [[ -z "$value" ]]; then
+    echo "ERROR: $name not set in .env" >&2
+    exit 1
+  fi
+  set_secret "$name" "$value"
+  count=$((count + 1))
+done
+
+# VPS_* secrets sourced from deploy/provision/.env.vps (manifest VPS_SECRETS).
+for name in "${VPS_SECRETS[@]}"; do
+  set_secret "$name" "$(read_vps_var "$name")"
+  count=$((count + 1))
+done
 
 echo ""
-echo "Done — 11 secrets written to github:$REPO"
+echo "Done — $count secrets written to github:$REPO"

@@ -105,19 +105,23 @@ Calls `GET /api/v1/user` to confirm the token works and to get the authenticated
 Then checks whether `GITEA_OWNER` is an **org** or a **personal user** (the repo-creation
 API endpoint differs between the two).
 
-### Step 2 — ensure the 6 repos exist
+### Step 2 — ensure the repos exist
 
 Checks `GET /repos/{owner}/{name}` for each repo. If a repo does not exist yet (HTTP 404)
-it creates it as **private + empty** (`auto_init: false`). The 6 repos are:
+it creates it as **private + empty** (`auto_init: false`). The repo list is **not hardcoded
+here** — it comes from the shared manifest
+[`deploy/provision/manifest.sh`](../manifest.sh) (`REPOS` array + `ROOT_REPO`), which is the
+single source of truth shared with the secrets scripts. By default:
 
 | Repo | What it is |
 |---|---|
 | `dexArbTrading` | Root repo (the one you're running this from) |
 | `dexUnifiedApi` | Submodule |
-| `dexMmTradingLogicHummingBot` | Submodule |
 | `dexMmController` | Submodule |
 | `dexMonitor` | Submodule |
 | `dexFiatController` | Submodule |
+
+To add or remove a repo, edit the `REPOS` array in the manifest — nothing else needs to change.
 
 ### Step 3 — push local clones
 
@@ -137,16 +141,19 @@ this, the Gitea Actions tab does not appear and workflows do not run.
 ### Step 5 — transfer secrets + write daemon.json
 
 Runs [`deploy/provision/secrets/setup-gitea-secrets.sh`](../secrets/setup-gitea-secrets.sh),
-which writes **14 Actions secrets** to the root repo (`dexArbTrading`). These mirror the
-secrets the CI workflow needs:
+which writes the Actions secrets to the root repo (`ROOT_REPO`). The secret set is declared
+in the shared manifest [`deploy/provision/manifest.sh`](../manifest.sh) (the same list the
+GitHub secrets script uses), plus 3 `REGISTRY_*` secrets computed here from the Gitea
+connection. These mirror the secrets the CI workflow needs:
 
 | Secret | Source |
 |---|---|
-| `GH_PAT` | Root `.env` — GitHub PAT so the runner can fetch submodules from github.com |
-| `GITEA_REGISTRY_URL` | `.env.gitea` `GITEA_URL` |
-| `GITEA_REGISTRY_USER` | Detected from the authenticated Gitea login |
-| `GITEA_REGISTRY_TOKEN` | `.env.gitea` `GITEA_TOKEN` |
-| `DOTENV_PRIVATE_KEY_*`, `VPS_*`, `KNOWN_HOSTS` | Sourced from `deploy/provision/.env.vps` and `.env.keys` |
+| `DOTENV_PRIVATE_KEY_*` (one per repo) | Each repo's `<dir>/.env.keys` — from the manifest `REPOS` entries |
+| `GH_PAT` | Root `.env` — GitHub PAT so the runner can fetch submodules from github.com (manifest `ENV_SECRETS`) |
+| `VPS_*` | `deploy/provision/.env.vps` (manifest `VPS_SECRETS`) |
+| `REGISTRY_URL` | `.env.gitea` `GITEA_URL` (or `GITEA_INTERNAL_URL`) — computed, not in the manifest |
+| `REGISTRY_USER` | Detected from the authenticated Gitea login |
+| `REGISTRY_TOKEN` | `.env.gitea` `GITEA_TOKEN` |
 
 Also writes `daemon.json` (marks the Gitea registry as an insecure registry for the DinD
 Docker daemon, needed when `GITEA_URL` is HTTP or uses a self-signed cert).
