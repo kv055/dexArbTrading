@@ -178,40 +178,39 @@ jobs:
       - name: Build (tsc + vite)
         run: npm run build
 
-      # TEMP: Playwright e2e disabled while dashboard analytics changes stabilize.
-      # - name: Cache Playwright browsers
-      #   uses: actions/cache@v5
-      #   id: playwright-cache
-      #   with:
-      #     path: ~/.cache/ms-playwright
-      #     key: playwright-chromium-${{ hashFiles('dexMonitor/react-frontend/package-lock.json') }}
-      #
-      # - name: Install Playwright browsers + deps
-      #   if: steps.playwright-cache.outputs.cache-hit != 'true'
-      #   # The browser download intermittently stalls with no internal timeout, which
-      #   # hung this job for hours before. Bound each attempt and retry; re-running the
-      #   # apt portion is cheap since the system deps are already installed.
-      #   run: |
-      #     for i in 1 2 3; do
-      #       timeout 300 npx playwright install --with-deps chromium && exit 0
-      #       echo "::warning::playwright install attempt $i stalled/failed; retrying"
-      #     done
-      #     exit 1
-      #
-      # - name: Install Playwright system deps (cache hit)
-      #   if: steps.playwright-cache.outputs.cache-hit == 'true'
-      #   run: npx playwright install-deps chromium
-      #
-      # - name: Run Playwright e2e tests
-      #   run: npm run test:e2e
-      #
-      # - name: Upload Playwright report
-      #   if: failure()
-      #   uses: actions/upload-artifact@v6
-      #   with:
-      #     name: playwright-report
-      #     path: dexMonitor/react-frontend/playwright-report/
-      #     retention-days: 7
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ hashFiles('dexMonitor/react-frontend/package-lock.json') }}
+
+      - name: Install Playwright browsers + deps
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        # The browser download intermittently stalls with no internal timeout, which
+        # hung this job for hours before. Bound each attempt and retry; re-running the
+        # apt portion is cheap since the system deps are already installed.
+        run: |
+          for i in 1 2 3; do
+            timeout 300 npx playwright install --with-deps chromium && exit 0
+            echo "::warning::playwright install attempt $i stalled/failed; retrying"
+          done
+          exit 1
+
+      - name: Install Playwright system deps (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Run Playwright e2e tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playwright-report
+          path: dexMonitor/react-frontend/playwright-report/
+          retention-days: 7
 
   build-and-push:
     name: Build & push ${{ matrix.service }}
