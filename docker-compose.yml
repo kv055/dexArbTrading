@@ -73,7 +73,7 @@ services:
       unified-api:
         condition: service_healthy
     environment:
-      - BISQ_VERSION=1.10.1
+      - BISQ_VERSION=1.10.2
       - BISQ_ACCOUNT_PROVIDER=Bisq
       - BISQ_ACCOUNT_FILE_PATH=${BISQ_ACCOUNT_FILE_PATH:-}
       - BISQ_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
