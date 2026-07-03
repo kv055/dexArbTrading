@@ -192,7 +192,7 @@ jobs:
           printf '%s\n' "$CHANGED"
 
           changed() { printf '%s\n' "$CHANGED" | grep -qE "$1"; }
-          if changed '^(docker-compose\.yml|\.gitmodules|go\.work|go\.work\.sum)$'; then
+          if changed '^(docker-compose\.yml|\.gitea/workflows/ci\.yml|\.gitmodules|go\.work|go\.work\.sum)$'; then
             emit_all "infra change -> build all"; exit 0
           fi
 
