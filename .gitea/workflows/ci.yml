@@ -12,16 +12,34 @@ on:
   workflow_dispatch:
   push:
     branches: [develop, main]
+    paths-ignore:
+      - '**.md'
+      - '.vscode/**'
+      - '.codex'
+      - '.agents/**'
+      - '.lefthook/**'
+      - 'lefthook.yml'
+      - 'deploy/provision/**'
+      - 'dexMmController/docs/**'
+      - 'dexMonitor/docs/**'
+      - 'dexUnifiedApi/docs/**'
+      - 'dexMmTradingLogicHummingBot/**'
+      - '.gitignore'
+      - '.gitmodules'
+      - 'LICENSE'
 
 jobs:
   detect-changes:
-    # Decide which service images actually need (re)building for this push, so the
-    # build-and-push matrix can skip the rest. See .claude plan + memory
-    # [[project_gitea_ci_trial]]. Runs in parallel with the test jobs.
+    # Diff the push range and decide which tests, image builds, and GHCR re-tags run.
     name: Detect changed services
     runs-on: ubuntu-latest
     outputs:
       changes: ${{ steps.detect.outputs.changes }}
+      test_modules: ${{ steps.detect.outputs.test_modules }}
+      test_modules_json: ${{ steps.detect.outputs.test_modules_json }}
+      run_frontend: ${{ steps.detect.outputs.run_frontend }}
+      build_matrix_json: ${{ steps.detect.outputs.build_matrix_json }}
+      retag_services_json: ${{ steps.detect.outputs.retag_services_json }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -36,67 +54,159 @@ jobs:
           AFTER: ${{ github.sha }}
         run: |
           set -Eeuo pipefail
-          ALL="tor,bisq,bisq2,unified-api,unified-snapshot,postgres-backup,dexmonitor,mm-controller,totp-api,fiat-controller"
+          ALL_SERVICES="tor,bisq,bisq2,unified-api,unified-snapshot,postgres-backup,dexmonitor,mm-controller,totp-api,fiat-controller"
+          ALL_MODULES="commons,dexUnifiedApi,dexMmController,dexMonitor,dexFiatController"
+          ZERO="0000000000000000000000000000000000000000"
 
-          emit() { echo "changes=$1" >> "$GITHUB_OUTPUT"; echo "services to build: ${1:-<none>}"; }
+          add_csv() {
+            local list="$1" item="$2"
+            case ",$list," in *",$item,"*) echo "$list" ;; *) echo "${list:+$list,}$item" ;; esac
+          }
 
-          # Manual run: rebuild everything.
-          if [ "$EVENT" = "workflow_dispatch" ]; then
-            echo "manual trigger -> build all"; emit "$ALL"; exit 0
+          comma_to_json_array() {
+            local csv="${1:-}"
+            if [ -z "$csv" ]; then echo '[]'; return; fi
+            local IFS=',' parts=() p json='[' first=true
+            read -ra parts <<< "$csv"
+            for p in "${parts[@]}"; do
+              [ -n "$p" ] || continue
+              $first || json+=','
+              first=false
+              json+="\"$p\""
+            done
+            json+=']'
+            echo "$json"
+          }
+
+          build_matrix_json_for() {
+            local csv="${1:-}"
+            [ -n "$csv" ] || { echo '[]'; return; }
+            jq -n --arg csv "$csv" '
+              ($csv | split(",") | map(select(length > 0))) as $want |
+              [
+                {service:"tor",             context:"./dexUnifiedApi", dockerfile:"dexUnifiedApi/Dockerfile.tor"},
+                {service:"bisq",            context:"./dexUnifiedApi", dockerfile:"dexUnifiedApi/Dockerfile.bisq"},
+                {service:"bisq2",           context:"./dexUnifiedApi", dockerfile:"dexUnifiedApi/Dockerfile.bisq2"},
+                {service:"unified-api",     context:".", dockerfile:"dexUnifiedApi/Dockerfile"},
+                {service:"unified-snapshot",context:".", dockerfile:"dexUnifiedApi/Dockerfile.snapshot"},
+                {service:"postgres-backup", context:".", dockerfile:"dexUnifiedApi/Dockerfile.backup"},
+                {service:"dexmonitor",      context:".", dockerfile:"dexMonitor/Dockerfile"},
+                {service:"mm-controller",   context:"./dexMmController", dockerfile:"dexMmController/Dockerfile"},
+                {service:"totp-api",        context:"./dexFiatController/services/totp-api", dockerfile:"dexFiatController/services/totp-api/Dockerfile"},
+                {service:"fiat-controller",context:"./dexFiatController", dockerfile:"dexFiatController/Dockerfile"}
+              ] | map(select(.service as $s | $want | index($s)))
+            '
+          }
+
+          retag_services_json_for() {
+            local changes_csv="${1:-}"
+            jq -n --arg all "$ALL_SERVICES" --arg changed "${changes_csv:-}" '
+              ($all | split(",")) as $all |
+              ($changed | split(",") | map(select(length > 0))) as $changed |
+              [$all[] | select(. as $s | ($changed | index($s) | not))]
+            '
+          }
+
+          write_outputs() {
+            local changes="$1" test_modules="$2" run_frontend="$3"
+            local test_modules_json build_matrix_json retag_services_json
+            test_modules_json=$(comma_to_json_array "$test_modules")
+            build_matrix_json=$(build_matrix_json_for "$changes")
+            retag_services_json=$(retag_services_json_for "$changes")
+            echo "changes=${changes:-}" >> "$GITHUB_OUTPUT"
+            echo "test_modules=${test_modules:-}" >> "$GITHUB_OUTPUT"
+            echo "run_frontend=${run_frontend}" >> "$GITHUB_OUTPUT"
+            {
+              echo 'test_modules_json<<EOF'
+              echo "$test_modules_json"
+              echo 'EOF'
+              echo 'build_matrix_json<<EOF'
+              echo "$build_matrix_json"
+              echo 'EOF'
+              echo 'retag_services_json<<EOF'
+              echo "$retag_services_json"
+              echo 'EOF'
+            } >> "$GITHUB_OUTPUT"
+            echo "services to build: ${changes:-<none>}"
+            echo "test modules: ${test_modules:-<none>}"
+            echo "run frontend: ${run_frontend}"
+            echo "build matrix: ${build_matrix_json}"
+            echo "retag services: ${retag_services_json}"
+          }
+
+          emit_all() {
+            echo "${1:-build all}"
+            write_outputs "$ALL_SERVICES" "$ALL_MODULES" "true"
+          }
+
+          resolve_base() {
+            local before="${1:-}" after="${2:-}"
+            echo "resolve_base: event=${EVENT:-} before=${before:-<empty>} after=${after:-<empty>}" >&2
+            if [ -n "$before" ] && [ "$before" != "$ZERO" ] && git cat-file -e "${before}^{commit}" 2>/dev/null; then
+              echo "$before"; return 0
+            fi
+            if git cat-file -e "${after}^{commit}" 2>/dev/null && parent=$(git rev-parse "${after}^" 2>/dev/null); then
+              echo "before unusable (${before:-<empty>}); falling back to parent ${parent}" >&2
+              echo "$parent"; return 0
+            fi
+            echo ""
+          }
+
+          map_paths() {
+            local changed="$1" S="" M="" run_frontend=false
+            path_changed() { printf '%s\n' "$changed" | grep -qE "$1"; }
+            if path_changed '^commons(/|$)'; then
+              S=$(add_csv "$S" unified-api); S=$(add_csv "$S" unified-snapshot)
+              S=$(add_csv "$S" postgres-backup); S=$(add_csv "$S" dexmonitor)
+              M=$(add_csv "$M" commons); M=$(add_csv "$M" dexUnifiedApi); M=$(add_csv "$M" dexMonitor)
+              run_frontend=true
+            fi
+            if path_changed '^dexUnifiedApi(/|$)'; then
+              S=$(add_csv "$S" tor); S=$(add_csv "$S" bisq); S=$(add_csv "$S" bisq2)
+              S=$(add_csv "$S" unified-api); S=$(add_csv "$S" unified-snapshot); S=$(add_csv "$S" postgres-backup)
+              M=$(add_csv "$M" dexUnifiedApi)
+            fi
+            if path_changed '^dexMonitor(/|$)'; then
+              S=$(add_csv "$S" dexmonitor); M=$(add_csv "$M" dexMonitor); run_frontend=true
+            fi
+            if path_changed '^dexMmController(/|$)'; then
+              S=$(add_csv "$S" mm-controller); M=$(add_csv "$M" dexMmController)
+            fi
+            if path_changed '^dexFiatController(/|$)'; then
+              S=$(add_csv "$S" fiat-controller); S=$(add_csv "$S" totp-api); M=$(add_csv "$M" dexFiatController)
+            fi
+            if $run_frontend; then write_outputs "$S" "$M" "true"; else write_outputs "$S" "$M" "false"; fi
+          }
+
+          if [ "${EVENT:-}" = "workflow_dispatch" ]; then emit_all "manual trigger -> build all"; exit 0; fi
+
+          if [ "${EVENT:-}" = "pull_request" ]; then BASE="${PR_BASE:-}"; HEAD="${PR_HEAD:-}"
+          else BASE="${BEFORE:-}"; HEAD="${AFTER:-}"; fi
+
+          BASE=$(resolve_base "$BASE" "$HEAD")
+          if [ -z "$BASE" ]; then emit_all "no usable base commit -> build all"; exit 0; fi
+
+          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          echo "diff range: ${BASE}..${HEAD}"
+          echo "changed paths:"
+          printf '%s\n' "$CHANGED"
+
+          changed() { printf '%s\n' "$CHANGED" | grep -qE "$1"; }
+          if changed '^(docker-compose\.yml|\.gitmodules|go\.work|go\.work\.sum)$'; then
+            emit_all "infra change -> build all"; exit 0
           fi
 
-          # New branch / first push / unfetchable base: can't diff -> rebuild everything.
-          zero="0000000000000000000000000000000000000000"
-          if [ -z "${BEFORE:-}" ] || [ "$BEFORE" = "$zero" ] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            echo "no usable 'before' commit -> build all"; emit "$ALL"; exit 0
-          fi
-
-          CHANGED=$(git diff --name-only "$BEFORE" "$AFTER")
-          echo "changed paths:"; echo "$CHANGED"
-
-          changed() { echo "$CHANGED" | grep -qE "$1"; }
-
-          # Infra-level changes rebuild everything (compose topology, this workflow,
-          # submodule wiring, or the Go workspace files if/when they exist).
-          if changed '^(docker-compose\.yml|\.gitea/workflows/ci\.yml|\.gitmodules|go\.work|go\.work\.sum)$'; then
-            echo "infra change -> build all"; emit "$ALL"; exit 0
-          fi
-
-          S=""
-          add() { case ",$S," in *",$1,"*) ;; *) S="${S:+$S,}$1";; esac; }
-
-          # commons/ is a regular in-repo dir consumed by these four Go images.
-          if changed '^commons(/|$)'; then
-            add unified-api; add unified-snapshot; add postgres-backup; add dexmonitor
-          fi
-
-          # dexUnifiedApi is a git submodule: a pointer bump shows only as the bare
-          # gitlink path, so we can't tell which file inside changed. The tor/bisq/bisq2
-          # Dockerfiles AND the three Go services all live in it -> conservatively rebuild all six.
-          if changed '^dexUnifiedApi(/|$)'; then
-            add tor; add bisq; add bisq2
-            add unified-api; add unified-snapshot; add postgres-backup
-          fi
-
-          # dexMonitor submodule -> dexmonitor image.
-          if changed '^dexMonitor(/|$)'; then add dexmonitor; fi
-
-          # dexMmController submodule -> mm-controller image.
-          if changed '^dexMmController(/|$)'; then add mm-controller; fi
-
-          # dexFiatController submodule hosts both fiat-controller and totp-api
-          # (services/totp-api/ lives inside it); a bump can't be split -> rebuild both.
-          if changed '^dexFiatController(/|$)'; then add fiat-controller; add totp-api; fi
-
-          emit "$S"
+          map_paths "$CHANGED"
 
   test-go:
     name: Go tests (${{ matrix.module }})
+    needs: detect-changes
+    if: needs.detect-changes.outputs.test_modules != ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        module: [commons, dexUnifiedApi, dexMmController, dexMonitor, dexFiatController]
+        module: ${{ fromJson(needs.detect-changes.outputs.test_modules_json) }}
     steps:
       - uses: actions/checkout@v5
       - name: Fetch submodules from the Gitea mirror
@@ -120,6 +230,8 @@ jobs:
 
   test-frontend:
     name: Frontend tests
+    needs: detect-changes
+    if: needs.detect-changes.outputs.run_frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -154,64 +266,21 @@ jobs:
 
   build-and-push:
     name: Build & push ${{ matrix.service }}
-    needs: [test-go, test-frontend, detect-changes]
+    needs: [detect-changes, test-go, test-frontend]
+    if: |
+      always() &&
+      needs.detect-changes.result == 'success' &&
+      needs.detect-changes.outputs.changes != ''
     runs-on: ubuntu-latest
     env:
       DOCKER_BUILD_SUMMARY: "false"
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - service: tor
-            context: ./dexUnifiedApi
-            dockerfile: dexUnifiedApi/Dockerfile.tor
-          - service: bisq
-            context: ./dexUnifiedApi
-            dockerfile: dexUnifiedApi/Dockerfile.bisq
-          - service: bisq2
-            context: ./dexUnifiedApi
-            dockerfile: dexUnifiedApi/Dockerfile.bisq2
-          - service: unified-api
-            context: .
-            dockerfile: dexUnifiedApi/Dockerfile
-          - service: unified-snapshot
-            context: .
-            dockerfile: dexUnifiedApi/Dockerfile.snapshot
-          - service: postgres-backup
-            context: .
-            dockerfile: dexUnifiedApi/Dockerfile.backup
-          - service: dexmonitor
-            context: .
-            dockerfile: dexMonitor/Dockerfile
-          - service: mm-controller
-            context: ./dexMmController
-            dockerfile: dexMmController/Dockerfile
-          - service: totp-api
-            context: ./dexFiatController/services/totp-api
-            dockerfile: dexFiatController/services/totp-api/Dockerfile
-          - service: fiat-controller
-            context: ./dexFiatController
-            dockerfile: dexFiatController/Dockerfile
+        include: ${{ fromJson(needs.detect-changes.outputs.build_matrix_json) }}
     steps:
-      - name: Check if this service needs building
-        id: check
-        env:
-          CHANGES: ${{ needs.detect-changes.outputs.changes }}
-          SERVICE: ${{ matrix.service }}
-        run: |
-          # Comma-delimited match so "bisq" can't match "bisq2".
-          if case ",$CHANGES," in *",$SERVICE,"*) true;; *) false;; esac; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "$SERVICE changed -> building"
-          else
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "$SERVICE unchanged -> skipping build"
-          fi
-
       - uses: actions/checkout@v5
-        if: steps.check.outputs.build == 'true'
       - name: Fetch submodules from the Gitea mirror
-        if: steps.check.outputs.build == 'true'
         run: |
           host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
           git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
@@ -222,7 +291,6 @@ jobs:
           OWNER: ${{ github.repository_owner }}
 
       - name: Resolve registry + build metadata
-        if: steps.check.outputs.build == 'true'
         id: reg
         env:
           URL: ${{ secrets.REGISTRY_URL }}
@@ -246,7 +314,6 @@ jobs:
           fi
 
       - name: Prune orphaned buildx builders
-        if: steps.check.outputs.build == 'true'
         run: |
           docker ps -a --filter "name=buildx_buildkit_" --format "{{.Names}}" \
             | grep -v "ci-builder0" \
@@ -256,11 +323,11 @@ jobs:
             | xargs -r docker volume rm || true
 
       - name: Create buildx builder (Gitea-registry aware)
-        if: steps.check.outputs.build == 'true' && github.ref != 'refs/heads/main'
+        if: github.ref != 'refs/heads/main'
         run: docker buildx use ci-builder 2>/dev/null || docker buildx create --name ci-builder --use --driver docker-container --config /tmp/buildkitd.toml
 
       - name: Login to Gitea registry
-        if: steps.check.outputs.build == 'true' && github.ref != 'refs/heads/main'
+        if: github.ref != 'refs/heads/main'
         uses: docker/login-action@v4
         with:
           registry: ${{ steps.reg.outputs.registry }}
@@ -268,7 +335,7 @@ jobs:
           password: ${{ secrets.REGISTRY_TOKEN }}
 
       - name: Login to GHCR
-        if: steps.check.outputs.build == 'true' && github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -276,7 +343,6 @@ jobs:
           password: ${{ secrets.GH_PAT }}
 
       - uses: docker/build-push-action@v7
-        if: steps.check.outputs.build == 'true'
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
@@ -288,12 +354,24 @@ jobs:
             ${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:latest
             ${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:${{ github.sha }}
 
-      # On main, an unchanged service still needs a SHA-tagged image so pre-deploy's
-      # manifest check and deploy's `compose pull` succeed. Copy the existing :latest
-      # manifest to :<sha> in GHCR — pure registry op, no layer transfer, no rebuild.
-      # (develop pushes to the Gitea registry and has no deploy gate, so skip it there.)
+  retag-images:
+    name: Re-tag ${{ matrix.service }}
+    needs: [detect-changes, test-go, test-frontend]
+    if: |
+      always() &&
+      needs.detect-changes.result == 'success' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.detect-changes.outputs.retag_services_json != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.retag_services_json) }}
+    steps:
+      # Unchanged services still need a SHA-tagged image so pre-deploy's manifest check
+      # and deploy's `compose pull` succeed. Copy :latest -> :<sha> in GHCR.
       - name: Re-tag latest as SHA (unchanged service)
-        if: steps.check.outputs.build == 'false' && github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
           SHA: ${{ github.sha }}
@@ -310,7 +388,7 @@ jobs:
 
   pre-deploy:
     name: Pre-deploy checks
-    needs: build-and-push
+    needs: [build-and-push, retag-images]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
