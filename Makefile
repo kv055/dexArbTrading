@@ -10,10 +10,12 @@
 # `-f docker-compose.yml`, so it never picks up this Makefile.
 
 COMPOSE ?= docker compose
+SONAR_COMPOSE := deploy/sonarqube/docker-compose.yml
 ENV_FILES := .env dexUnifiedApi/.env dexMonitor/.env
 
 .DEFAULT_GOAL := help
-.PHONY: help staging-up staging-wait staging-down staging-logs staging-rebuild staging-ps staging-env-check prune
+.PHONY: help staging-up staging-wait staging-down staging-logs staging-rebuild staging-ps staging-env-check \
+	prune sonar-up sonar-scan sonar-down sonar-reset
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -56,3 +58,20 @@ prune: ## Drop stale remote refs and delete local branches already merged into d
 		echo "no locally-merged branches to prune"; \
 	fi
 	@echo "(squash-merged branches aren't detected by --merged; remove those with: git branch -D <name>)"
+
+sonar-up: ## Start local SonarQube (Docker); first run: login admin/admin, create token in .env.sonar
+	@map_count=$$(sysctl -n vm.max_map_count 2>/dev/null || echo 0); \
+	if [ "$$map_count" -lt 262144 ] 2>/dev/null; then \
+		echo "⚠ vm.max_map_count=$$map_count (need >= 262144). Run: sudo sysctl -w vm.max_map_count=262144"; \
+	fi
+	$(COMPOSE) -f $(SONAR_COMPOSE) up -d
+	@bash scripts/sonar-wait.sh
+
+sonar-scan: ## Analyze this repo against local SonarQube (requires sonar-up + .env.sonar)
+	@bash scripts/sonar-scan.sh
+
+sonar-down: ## Stop local SonarQube containers (keeps scan history in Docker volumes)
+	$(COMPOSE) -f $(SONAR_COMPOSE) down
+
+sonar-reset: ## Stop SonarQube and wipe all scan history (docker compose down -v)
+	$(COMPOSE) -f $(SONAR_COMPOSE) down -v
