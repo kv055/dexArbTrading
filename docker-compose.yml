@@ -353,8 +353,8 @@ services:
     logging: *default-logging
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-mm-controller:${IMAGE_TAG:-latest}
     build:
-      context: ./dexMmController
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: dexMmController/Dockerfile
     network_mode: host
     env_file:
       - ./dexMmController/.env
@@ -475,11 +475,21 @@ services:
   #     dockerfile: Dockerfile
   #   env_file:
   #     - ./dexFiatController/.env
+  #   ports:
+  #     - "${FIAT_CONTROLLER_PORT:-8080}:8080"
+  #   volumes:
+  #     - fiat-controller-data:/data
   #   depends_on:
   #     totp-api:
   #       condition: service_healthy
   #     postgres:
   #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 5s
   #   environment:
   #     - DATABASE_URL=postgres://dex_fiat_controller:${POSTGRES_FIAT_CONTROLLER_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
   #     - HEADLESS=true
@@ -499,6 +509,17 @@ services:
   #     - PAYMENT_NOTIFICATIONS_API_URL=${PAYMENT_NOTIFICATIONS_API_URL:-http://unified-api:5010/internal/payment_notifications}
   #     - PAYMENT_NOTIFICATIONS_SHARED_SECRET=${PAYMENT_NOTIFICATIONS_SHARED_SECRET:-}
   #     - PAYMENT_NOTIFICATIONS_DEX=${PAYMENT_NOTIFICATIONS_DEX:-}
+  #     # pushpush (primary fiat-arrival path)
+  #     - SCRAPING_ENABLED=${SCRAPING_ENABLED:-false}
+  #     - PUSHPUSH_ADDR=:8080
+  #     - PUSHPUSH_NOTIFY_SECRET=${PUSHPUSH_NOTIFY_SECRET:-}
+  #     - PUSHPUSH_DATA_DIR=/data
+  #     - PUSHPUSH_DEX_RELEASE_URL=${PUSHPUSH_DEX_RELEASE_URL:-http://dexmmcontroller:8080/api/webhooks/dex-release}
+  #     - PUSHPUSH_DEX_RELEASE_TOKEN=${PUSHPUSH_DEX_RELEASE_TOKEN:-}
+  #     - PUSHPUSH_RELEASE_TIMEOUT=${PUSHPUSH_RELEASE_TIMEOUT:-10s}
+  #     - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+  #     - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+  #     - PUSHPUSH_TELEGRAM_WEBHOOK_URL=${PUSHPUSH_TELEGRAM_WEBHOOK_URL:-}
   #   deploy:
   #     resources:
   #       limits:
@@ -674,6 +695,7 @@ volumes:
   bisq-data:
   bisq2-data:
   # mm-controller-data:
+  # fiat-controller-data:
   lnd-data:
   prometheus-data:
   grafana-data:
