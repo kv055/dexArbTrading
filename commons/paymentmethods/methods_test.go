@@ -150,14 +150,14 @@ func TestCategoryOf(t *testing.T) {
 		canonical string
 		want      string
 	}{
-		{"Revolut", CategoryMoneyTransmitter},
+		{"Revolut", CategoryFiatTransmitter},
 		{"SEPA Instant", CategoryBankTransfer},
 		{"National Bank", CategoryBankTransfer},
 		{"Monero", CategoryCrypto},
 		{"Litecoin", CategoryCrypto},
 		{"Other Coins", CategoryCrypto},
 		{"Altcoins", CategoryCrypto},
-		{"Unknown Thing", CategoryOther},
+		{"Unknown Thing", CategoryOthers},
 	}
 	for _, tt := range tests {
 		if got := CategoryOf(tt.canonical); got != tt.want {
