@@ -2,12 +2,14 @@
 // stable set of atomic, canonical method names.
 //
 // DEX makers (notably Bisq 2) enter payment methods as free text, often
-// concatenating several into one label in arbitrary order. A provider registry
-// drives splitting, spelling normalization, regex matching, traditional-bank
-// collapse, and category assignment.
+// concatenating several into one label in arbitrary order. The rows of the
+// payment_methods table (see MethodRow/LoadRows; SeedRows for the built-in
+// fallback) drive splitting, spelling normalization, regex matching,
+// traditional-bank collapse, and category assignment. The splitting algorithm
+// itself lives here; only the matching data is table-driven.
 //
-// Canonicalize is order-independent: any permutation of the same methods yields
-// the same atoms after CanonicalizeAll.
+// Canonicalize is order-independent: any permutation of the same methods
+// yields the same atoms after CanonicalizeAll.
 package paymentmethods
 
 import (
@@ -22,23 +24,15 @@ func normalize(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
-func splitFields(s string) []string {
-	return strings.Fields(s)
-}
-
 // Canonicalize splits one raw payment-method label into its canonical atoms.
-func Canonicalize(raw string) []string {
+func (r *Registry) Canonicalize(raw string) []string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil
 	}
 
-	norm := normalize(trimmed)
-	if c, ok := aliasToCanonical[norm]; ok {
-		return []string{c}
-	}
-	if isTraditionalBank(norm) {
-		return []string{CanonicalNationalBank}
+	if name, ok := r.matchPhrase(normalize(trimmed)); ok {
+		return []string{name}
 	}
 
 	// Tokenize compound labels; also split on / and parentheses for "SEPA/Instant", "Revolut (EUR)".
@@ -58,18 +52,18 @@ func Canonicalize(raw string) []string {
 		}
 		chunk := strings.Join(leftover, " ")
 		leftover = nil
-		if resolved := resolveUnknownChunk(chunk); resolved != "" && !isNoiseChunk(resolved) {
+		if resolved := r.resolveUnknownChunk(chunk); resolved != "" && !isNoiseChunk(resolved) {
 			out = append(out, resolved)
 		}
 	}
 
 	for i := 0; i < len(words); {
 		matched := false
-		for n := min(maxAliasWords, len(words)-i); n >= 1; n-- {
+		for n := min(r.maxNameWords, len(words)-i); n >= 1; n-- {
 			phrase := strings.Join(lower[i:i+n], " ")
-			if c, ok := aliasToCanonical[phrase]; ok {
+			if name, ok := r.matchPhrase(phrase); ok {
 				flush()
-				out = append(out, c)
+				out = append(out, name)
 				i += n
 				matched = true
 				break
@@ -85,7 +79,7 @@ func Canonicalize(raw string) []string {
 	flush()
 
 	if len(out) == 0 {
-		if resolved := resolveUnknownChunk(trimmed); resolved != "" && resolved != trimmed && !isNoiseChunk(resolved) {
+		if resolved := r.resolveUnknownChunk(trimmed); resolved != "" && resolved != trimmed && !isNoiseChunk(resolved) {
 			return []string{resolved}
 		}
 		return []string{trimmed}
@@ -93,6 +87,8 @@ func Canonicalize(raw string) []string {
 	return dedupe(out)
 }
 
+// isNoiseChunk drops meaningless leftover tokens (currency codes, the bare
+// word "bank"). Algorithm policy, not table data.
 func isNoiseChunk(s string) bool {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "bank", "eur", "usd", "gbp":
@@ -104,10 +100,10 @@ func isNoiseChunk(s string) bool {
 
 // CanonicalizeAll canonicalizes every label and returns the sorted, de-duplicated
 // union — the form to store as an offer's payment_methods array.
-func CanonicalizeAll(raw []string) []string {
+func (r *Registry) CanonicalizeAll(raw []string) []string {
 	var all []string
-	for _, r := range raw {
-		all = append(all, Canonicalize(r)...)
+	for _, s := range raw {
+		all = append(all, r.Canonicalize(s)...)
 	}
 	all = dedupe(all)
 	all = SuppressRedundantNationalBank(all)
@@ -119,11 +115,11 @@ func CanonicalizeAll(raw []string) []string {
 // sorted union. Unlike CanonicalizeAll, this does not apply per-offer National
 // Bank suppression across unrelated labels — use when building global method lists
 // from DISTINCT unnest(payment_methods).
-func CanonicalizeDistinct(raw []string) []string {
+func (r *Registry) CanonicalizeDistinct(raw []string) []string {
 	seen := make(map[string]bool)
 	var out []string
-	for _, r := range raw {
-		for _, c := range Canonicalize(r) {
+	for _, s := range raw {
+		for _, c := range r.Canonicalize(s) {
 			if c == "" || seen[c] {
 				continue
 			}
@@ -134,6 +130,16 @@ func CanonicalizeDistinct(raw []string) []string {
 	sort.Strings(out)
 	return out
 }
+
+// Canonicalize splits one raw payment-method label into its canonical atoms
+// using the process-wide Default() registry.
+func Canonicalize(raw string) []string { return Default().Canonicalize(raw) }
+
+// CanonicalizeAll canonicalizes every label via the Default() registry.
+func CanonicalizeAll(raw []string) []string { return Default().CanonicalizeAll(raw) }
+
+// CanonicalizeDistinct canonicalizes each raw string via the Default() registry.
+func CanonicalizeDistinct(raw []string) []string { return Default().CanonicalizeDistinct(raw) }
 
 func dedupe(in []string) []string {
 	seen := make(map[string]bool, len(in))

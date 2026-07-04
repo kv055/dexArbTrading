@@ -7,7 +7,6 @@ type Provider struct {
 	Category  string
 	Aliases   []string
 	Patterns  []string
-	MultiRail bool
 }
 
 // providers is ordered for matching priority: longer / more specific entries first.
@@ -31,64 +30,64 @@ var providers = []Provider{
 	{ID: "interac", Canonical: "Interac", Category: CategoryBankTransfer, Aliases: []string{"interac"}},
 
 	// PayPal F&F before plain PayPal
-	{ID: "paypal_ff", Canonical: "PayPal F&F", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{
+	{ID: "paypal_ff", Canonical: "PayPal F&F", Category: CategoryFiatTransmitter, Aliases: []string{
 		"paypal friends & family", "paypal friends and family", "paypal f&f",
 		"f&f", "frnds&fam", "frnd&fam", "(frnds&fam)", "(frnd&fam)",
 		"paypal(frnd&fam)", "paypal(frnds&fam)",
 	}, Patterns: []string{`(?i)paypal\s*(f&?f|friends)`}},
-	{ID: "paypal", Canonical: "PayPal", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{
+	{ID: "paypal", Canonical: "PayPal", Category: CategoryFiatTransmitter, Aliases: []string{
 		"paypal", "pay pal", "paypall",
 	}, Patterns: []string{`(?i)\bpay\s*pal+l?\b`}},
 
 	// Money transmitters / e-wallets (multi-rail)
-	{ID: "revolut", Canonical: "Revolut", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{
+	{ID: "revolut", Canonical: "Revolut", Category: CategoryFiatTransmitter, Aliases: []string{
 		"revolut",
 	}, Patterns: []string{`(?i)\brevou?l?t\b`}},
-	{ID: "wise", Canonical: "Wise", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{
+	{ID: "wise", Canonical: "Wise", Category: CategoryFiatTransmitter, Aliases: []string{
 		"wise", "transferwise", "transfer wise",
 	}},
-	{ID: "n26", Canonical: "N26", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{"n26"}},
-	{ID: "bizum", Canonical: "Bizum", Category: CategoryMoneyTransmitter, Aliases: []string{"bizum"}},
-	{ID: "strike", Canonical: "Strike", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{"strike"}},
-	{ID: "mb_way", Canonical: "MB Way", Category: CategoryMoneyTransmitter, Aliases: []string{"mb way", "mbway"}},
-	{ID: "paysera", Canonical: "Paysera", Category: CategoryMoneyTransmitter, Aliases: []string{"paysera"}},
-	{ID: "vivid", Canonical: "Vivid", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{
+	{ID: "n26", Canonical: "N26", Category: CategoryFiatTransmitter, Aliases: []string{"n26"}},
+	{ID: "bizum", Canonical: "Bizum", Category: CategoryFiatTransmitter, Aliases: []string{"bizum"}},
+	{ID: "strike", Canonical: "Strike", Category: CategoryFiatTransmitter, Aliases: []string{"strike"}},
+	{ID: "mb_way", Canonical: "MB Way", Category: CategoryFiatTransmitter, Aliases: []string{"mb way", "mbway"}},
+	{ID: "paysera", Canonical: "Paysera", Category: CategoryFiatTransmitter, Aliases: []string{"paysera"}},
+	{ID: "vivid", Canonical: "Vivid", Category: CategoryFiatTransmitter, Aliases: []string{
 		"vivid", "vivid money",
 	}},
-	{ID: "skrill", Canonical: "Skrill", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{"skrill"}},
-	{ID: "neteller", Canonical: "Neteller", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{"neteller"}},
-	{ID: "satispay", Canonical: "Satispay", Category: CategoryMoneyTransmitter, Aliases: []string{"satispay"}},
-	{ID: "blik", Canonical: "BLIK", Category: CategoryMoneyTransmitter, Aliases: []string{"blik"}},
-	{ID: "lydia", Canonical: "Lydia", Category: CategoryMoneyTransmitter, Aliases: []string{"lydia"}},
-	{ID: "bunq", Canonical: "Bunq", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{"bunq"}},
-	{ID: "monese", Canonical: "Monese", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{"monese"}},
-	{ID: "wero", Canonical: "Wero", Category: CategoryMoneyTransmitter, Aliases: []string{"wero"}},
-	{ID: "postepay", Canonical: "Postepay", Category: CategoryMoneyTransmitter, Aliases: []string{"postepay"}},
-	{ID: "moneybeam", Canonical: "MoneyBeam", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{
+	{ID: "skrill", Canonical: "Skrill", Category: CategoryFiatTransmitter, Aliases: []string{"skrill"}},
+	{ID: "neteller", Canonical: "Neteller", Category: CategoryFiatTransmitter, Aliases: []string{"neteller"}},
+	{ID: "satispay", Canonical: "Satispay", Category: CategoryFiatTransmitter, Aliases: []string{"satispay"}},
+	{ID: "blik", Canonical: "BLIK", Category: CategoryFiatTransmitter, Aliases: []string{"blik"}},
+	{ID: "lydia", Canonical: "Lydia", Category: CategoryFiatTransmitter, Aliases: []string{"lydia"}},
+	{ID: "bunq", Canonical: "Bunq", Category: CategoryFiatTransmitter, Aliases: []string{"bunq"}},
+	{ID: "monese", Canonical: "Monese", Category: CategoryFiatTransmitter, Aliases: []string{"monese"}},
+	{ID: "wero", Canonical: "Wero", Category: CategoryFiatTransmitter, Aliases: []string{"wero"}},
+	{ID: "postepay", Canonical: "Postepay", Category: CategoryFiatTransmitter, Aliases: []string{"postepay"}},
+	{ID: "moneybeam", Canonical: "MoneyBeam", Category: CategoryFiatTransmitter, Aliases: []string{
 		"moneybeam", "money beam", "moneybeam (n26)",
 	}},
-	{ID: "western_union", Canonical: "Western Union", Category: CategoryMoneyTransmitter, Aliases: []string{
+	{ID: "western_union", Canonical: "Western Union", Category: CategoryFiatTransmitter, Aliases: []string{
 		"western union", "western union (cash)",
 	}},
-	{ID: "moneygram", Canonical: "Moneygram", Category: CategoryMoneyTransmitter, Aliases: []string{
+	{ID: "moneygram", Canonical: "Moneygram", Category: CategoryFiatTransmitter, Aliases: []string{
 		"moneygram", "money gram",
 	}},
-	{ID: "remitly", Canonical: "Remitly", Category: CategoryMoneyTransmitter, Aliases: []string{"remitly"}},
-	{ID: "worldremit", Canonical: "Worldremit", Category: CategoryMoneyTransmitter, Aliases: []string{"worldremit"}},
-	{ID: "payoneer", Canonical: "Payoneer", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{"payoneer"}},
-	{ID: "venmo", Canonical: "Venmo", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{"venmo"}},
-	{ID: "cash_app", Canonical: "Cash App", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{
+	{ID: "remitly", Canonical: "Remitly", Category: CategoryFiatTransmitter, Aliases: []string{"remitly"}},
+	{ID: "worldremit", Canonical: "Worldremit", Category: CategoryFiatTransmitter, Aliases: []string{"worldremit"}},
+	{ID: "payoneer", Canonical: "Payoneer", Category: CategoryFiatTransmitter, Aliases: []string{"payoneer"}},
+	{ID: "venmo", Canonical: "Venmo", Category: CategoryFiatTransmitter, Aliases: []string{"venmo"}},
+	{ID: "cash_app", Canonical: "Cash App", Category: CategoryFiatTransmitter, Aliases: []string{
 		"cash app", "cashapp",
 	}},
-	{ID: "zelle", Canonical: "Zelle", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{"zelle"}},
-	{ID: "twint", Canonical: "Twint", Category: CategoryMoneyTransmitter, Aliases: []string{"twint"}},
-	{ID: "pix", Canonical: "Pix", Category: CategoryMoneyTransmitter, Aliases: []string{"pix"}},
-	{ID: "promptpay", Canonical: "PromptPay", Category: CategoryMoneyTransmitter, Aliases: []string{"promptpay"}},
-	{ID: "gcash", Canonical: "GCash", Category: CategoryMoneyTransmitter, Aliases: []string{"gcash"}},
-	{ID: "vipps", Canonical: "Vipps", Category: CategoryMoneyTransmitter, Aliases: []string{"vipps"}},
-	{ID: "apple_pay", Canonical: "Apple Pay", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{"apple pay"}},
-	{ID: "google_pay", Canonical: "Google Pay", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{"google pay"}},
-	{ID: "monzo", Canonical: "Monzo", Category: CategoryMoneyTransmitter, MultiRail: true, Aliases: []string{
+	{ID: "zelle", Canonical: "Zelle", Category: CategoryFiatTransmitter, Aliases: []string{"zelle"}},
+	{ID: "twint", Canonical: "Twint", Category: CategoryFiatTransmitter, Aliases: []string{"twint"}},
+	{ID: "pix", Canonical: "Pix", Category: CategoryFiatTransmitter, Aliases: []string{"pix"}},
+	{ID: "promptpay", Canonical: "PromptPay", Category: CategoryFiatTransmitter, Aliases: []string{"promptpay"}},
+	{ID: "gcash", Canonical: "GCash", Category: CategoryFiatTransmitter, Aliases: []string{"gcash"}},
+	{ID: "vipps", Canonical: "Vipps", Category: CategoryFiatTransmitter, Aliases: []string{"vipps"}},
+	{ID: "apple_pay", Canonical: "Apple Pay", Category: CategoryFiatTransmitter, Aliases: []string{"apple pay"}},
+	{ID: "google_pay", Canonical: "Google Pay", Category: CategoryFiatTransmitter, Aliases: []string{"google pay"}},
+	{ID: "monzo", Canonical: "Monzo", Category: CategoryFiatTransmitter, Aliases: []string{
 		"monzo", "monzo bank",
 	}},
 
