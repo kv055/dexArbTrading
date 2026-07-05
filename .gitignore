@@ -26,3 +26,6 @@ test-results/
 .env.sonar
 # Claude Code
 .claude/
+
+# Local git worktrees (isolation for in-progress edits)
+.worktrees/
