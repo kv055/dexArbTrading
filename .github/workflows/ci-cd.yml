@@ -114,7 +114,7 @@ jobs:
                 {service:"unified-snapshot",context:".", dockerfile:"dexUnifiedApi/Dockerfile.snapshot"},
                 {service:"postgres-backup", context:".", dockerfile:"dexUnifiedApi/Dockerfile.backup"},
                 {service:"dexmonitor",      context:".", dockerfile:"dexMonitor/Dockerfile"},
-                {service:"mm-controller",   context:"./dexMmController", dockerfile:"dexMmController/Dockerfile"},
+                {service:"mm-controller",   context:".", dockerfile:"dexMmController/Dockerfile"},
                 {service:"totp-api",        context:"./dexFiatController/services/totp-api", dockerfile:"dexFiatController/services/totp-api/Dockerfile"},
                 {service:"fiat-controller",context:"./dexFiatController", dockerfile:"dexFiatController/Dockerfile"}
               ] | map(select(.service as $s | $want | index($s)))
