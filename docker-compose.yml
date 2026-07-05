@@ -366,6 +366,10 @@ services:
     environment:
       - DB_PATH=/app/mm-controller.db
       - API_ADDR=:5001
+      # Postgres reached via docker DNS. mm-controller builds DATABASE_URL from
+      # POSTGRES_HOST/PORT/DB/USER/PASSWORD (see resolveDatabaseURL in main.go),
+      # so the bridge-network host is set here without re-stating credentials.
+      - POSTGRES_HOST=postgres
       - OPENCLAW_URL=
       # Internal traffic hits unified-api directly on the bridge network.
       # (Previously ws://localhost:5010 — that only worked under network_mode:
