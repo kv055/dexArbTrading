@@ -268,6 +268,42 @@ jobs:
         working-directory: ${{ matrix.module }}
         run: go test ./...
 
+  bisq-patches-apply:
+    # Fast guard (seconds, not the full image build): prove the bisq source
+    # patches still apply against the pinned BISQ_VERSION. Mirrors the job of
+    # the same name in .github/workflows/ci-cd.yml — without it, a patch that
+    # no longer applies is only caught deep inside the from-source bisq build.
+    name: Bisq patches apply cleanly
+    needs: detect-changes
+    if: contains(needs.detect-changes.outputs.changes, 'bisq')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fetch submodules from the Gitea mirror
+        run: |
+          host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
+          git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
+          git submodule update --init --recursive dexUnifiedApi
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Clone pinned bisq and apply patches
+        run: |
+          set -Eeuo pipefail
+          version=$(grep -oP '^ARG BISQ_VERSION=\K[0-9]+\.[0-9]+\.[0-9]+' dexUnifiedApi/Dockerfile.bisq)
+          echo "Checking patches against bisq v${version}"
+          # bisq-network is NOT rewritten by the mirror insteadOf (kv055 only),
+          # so this clone goes to real github.com.
+          git clone --depth 1 --branch "v${version}" https://github.com/bisq-network/bisq.git /tmp/bisq
+          cd /tmp/bisq
+          for p in "$GITHUB_WORKSPACE"/dexUnifiedApi/bisq-patches/*.patch; do
+            echo "applying $(basename "$p")"
+            git apply --3way "$p"
+          done
+          echo "All patches apply cleanly against v${version}."
+
   test-frontend:
     name: Frontend tests
     needs: detect-changes
@@ -444,6 +480,11 @@ jobs:
           tags: |
             ${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:latest
             ${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:${{ github.sha }}
+          # Registry-backed layer cache (gha cache backend doesn't exist on Gitea).
+          # Matters most for bisq/bisq2: without it every run rebuilds the Bisq
+          # daemon from source (git clone + full gradle compile).
+          cache-from: type=registry,ref=${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:buildcache
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}/dexarbtrading-{2}:buildcache,mode=max', steps.reg.outputs.registry, steps.reg.outputs.image_owner, matrix.service) || '' }}
 
   retag-images:
     name: Re-tag ${{ matrix.service }}

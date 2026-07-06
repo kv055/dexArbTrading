@@ -12,11 +12,14 @@ groups:
     rules:
       # CRITICAL: either bisq daemon (bisq v1 or bisq2) is unreachable. dex_exchange_up
       # is set to 0 by the snapshot worker when it cannot fetch that exchange's offers.
+      # The snapshot worker always writes bisq/bisq2 into snapshot_log (count 0 on a
+      # hard fetch failure), so this series only goes missing when the snapshot
+      # pipeline itself is down — treat NoData as alerting too, not as green.
       - uid: dexarb-bisq-exchange-down
         title: bisq / bisq2 exchange down
         condition: C
         for: 3m
-        noDataState: NoData
+        noDataState: Alerting
         execErrState: Error
         isPaused: false
         labels:

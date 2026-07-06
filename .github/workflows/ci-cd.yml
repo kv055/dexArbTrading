@@ -245,6 +245,34 @@ jobs:
         working-directory: ${{ matrix.module }}
         run: go test ./...
 
+  bisq-patches-apply:
+    # Fast guard (seconds, not the full image build): prove the bisq source
+    # patches still apply against the pinned BISQ_VERSION. A version bump that
+    # refactors the patched files fails here immediately instead of deep inside
+    # the slow from-source image build.
+    name: Bisq patches apply cleanly
+    needs: detect-changes
+    if: contains(needs.detect-changes.outputs.changes, 'bisq')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Clone pinned bisq and apply patches
+        run: |
+          set -Eeuo pipefail
+          version=$(grep -oP '^ARG BISQ_VERSION=\K[0-9]+\.[0-9]+\.[0-9]+' dexUnifiedApi/Dockerfile.bisq)
+          echo "Checking patches against bisq v${version}"
+          git clone --depth 1 --branch "v${version}" https://github.com/bisq-network/bisq.git /tmp/bisq
+          cd /tmp/bisq
+          for p in "$GITHUB_WORKSPACE"/dexUnifiedApi/bisq-patches/*.patch; do
+            echo "applying $(basename "$p")"
+            git apply --3way "$p"
+          done
+          echo "All patches apply cleanly against v${version}."
+
   compose-validate:
     name: Compose topology validation
     needs: detect-changes
