@@ -44,8 +44,12 @@ func sessionKey(exchange, orderID string) string {
 
 // ChatRelay polls active trade chats and forwards new inbound messages to Telegram.
 // Operator replies (Telegram reply-to or reply: callbacks) are sent back to the venue.
+//
+// The outbound Telegram client is mutable at runtime via SetClient so the relay
+// picks up a hot-reloaded bot token/chat ID without a restart.
 type ChatRelay struct {
 	tg    *Client
+	tgMu  sync.RWMutex
 	mu    sync.RWMutex
 	active map[string]*ActiveChat
 
@@ -66,6 +70,21 @@ func NewChatRelay(tg *Client, log *slog.Logger) *ChatRelay {
 		ttl:          defaultRelayTTL,
 		log:          log,
 	}
+}
+
+// SetClient swaps the outbound Telegram client. Safe to call concurrently with
+// Run; the next poll uses the new client. Pass nil to disable outbound traffic.
+func (r *ChatRelay) SetClient(tg *Client) {
+	r.tgMu.Lock()
+	r.tg = tg
+	r.tgMu.Unlock()
+}
+
+// client returns the current outbound Telegram client under a read lock.
+func (r *ChatRelay) client() *Client {
+	r.tgMu.RLock()
+	defer r.tgMu.RUnlock()
+	return r.tg
 }
 
 // WithPollInterval overrides the default poll interval.
@@ -108,12 +127,10 @@ func (r *ChatRelay) Unregister(exchange, orderID string) {
 	r.mu.Unlock()
 }
 
-// Run polls active chats until ctx is cancelled.
+// Run polls active chats until ctx is cancelled. A nil/unconfigured client at
+// startup is not fatal: the loop keeps ticking and picks up a client swapped in
+// via SetClient so hot-reloaded config takes effect without a restart.
 func (r *ChatRelay) Run(ctx context.Context) {
-	if r.tg == nil || !r.tg.Enabled() {
-		<-ctx.Done()
-		return
-	}
 	ticker := time.NewTicker(r.pollInterval)
 	defer ticker.Stop()
 	for {
@@ -161,6 +178,7 @@ func (r *ChatRelay) pollChat(ctx context.Context, ac *ActiveChat) {
 		r.log.Warn("telegram relay: read messages", "exchange", ac.Exchange, "order_id", ac.OrderID, "error", err)
 		return
 	}
+	tg := r.client()
 	for _, m := range msgs {
 		if m.Outbound || strings.TrimSpace(m.Text) == "" {
 			continue
@@ -170,8 +188,11 @@ func (r *ChatRelay) pollChat(ctx context.Context, ac *ActiveChat) {
 			continue
 		}
 		r.markSeen(ac, fp)
+		if tg == nil {
+			continue
+		}
 		text := FormatRelayMessage(ac.Exchange, ac.OrderID, m.Sender, m.Text)
-		if err := r.tg.Notify(ctx, text); err != nil {
+		if err := tg.Notify(ctx, text); err != nil {
 			r.log.Warn("telegram relay: forward message", "exchange", ac.Exchange, "order_id", ac.OrderID, "error", err)
 		}
 	}
@@ -240,14 +261,14 @@ func (r *ChatRelay) HandleUpdate(ctx context.Context, u Update) {
 func (r *ChatRelay) handleCallback(ctx context.Context, cq *CallbackQuery) {
 	parts := strings.SplitN(cq.Data, ":", 3)
 	if len(parts) != 3 || parts[0] != "reply" {
-		if r.tg != nil {
-			r.tg.AnswerCallback(ctx, cq.ID, "Unknown action.")
+		if tg := r.client(); tg != nil {
+			tg.AnswerCallback(ctx, cq.ID, "Unknown action.")
 		}
 		return
 	}
 	// reply:<exchange>:<orderID> — operator must send text as a follow-up message for now.
-	if r.tg != nil {
-		r.tg.AnswerCallback(ctx, cq.ID, fmt.Sprintf("Reply in chat to [%s #%s] messages.", parts[1], parts[2]))
+	if tg := r.client(); tg != nil {
+		tg.AnswerCallback(ctx, cq.ID, fmt.Sprintf("Reply in chat to [%s #%s] messages.", parts[1], parts[2]))
 	}
 }
 
@@ -260,15 +281,16 @@ func (r *ChatRelay) handleMessage(ctx context.Context, msg *IncomingMessage) {
 	if exchange == "" || orderID == "" {
 		return
 	}
+	tg := r.client()
 	if err := r.Reply(ctx, exchange, orderID, text); err != nil {
 		r.log.Warn("telegram relay: operator reply failed", "exchange", exchange, "order_id", orderID, "error", err)
-		if r.tg != nil {
-			_ = r.tg.Notify(ctx, fmt.Sprintf("Failed to send reply to %s #%s: %v", exchange, orderID, err))
+		if tg != nil {
+			_ = tg.Notify(ctx, fmt.Sprintf("Failed to send reply to %s #%s: %v", exchange, orderID, err))
 		}
 		return
 	}
-	if r.tg != nil {
-		_ = r.tg.Notify(ctx, fmt.Sprintf("Sent to %s #%s.", exchange, orderID))
+	if tg != nil {
+		_ = tg.Notify(ctx, fmt.Sprintf("Sent to %s #%s.", exchange, orderID))
 	}
 }
 
