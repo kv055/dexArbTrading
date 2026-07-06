@@ -245,6 +245,24 @@ jobs:
         working-directory: ${{ matrix.module }}
         run: go test ./...
 
+  compose-validate:
+    name: Compose topology validation
+    needs: detect-changes
+    # Cheap (docker compose config + grep) and secret-free: the script
+    # materializes empty .env placeholders for any missing env_file, so it
+    # works on a fresh checkout. Run on every PR to catch network-mode /
+    # service-wiring regressions even when only docker-compose.yml changed
+    # (detect-changes treats such edits as "build all" and sets no dedicated
+    # output, so gate on the PR having any testable change rather than a
+    # compose-specific flag).
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate compose topology
+        run: bash scripts/compose-validate.sh
+
   test-frontend:
     name: Frontend tests
     needs: detect-changes
