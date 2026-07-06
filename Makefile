@@ -15,7 +15,7 @@ ENV_FILES := .env dexUnifiedApi/.env dexMonitor/.env
 
 .DEFAULT_GOAL := help
 .PHONY: help staging-up staging-wait staging-down staging-logs staging-rebuild staging-ps staging-env-check \
-	prune sonar-up sonar-scan sonar-down sonar-reset
+	prune sonar-up sonar-scan sonar-down sonar-reset compose-validate
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -48,6 +48,9 @@ staging-ps: ## Show local stack status
 
 staging-logs: ## Tail logs from the local stack
 	$(COMPOSE) logs -f --tail=100
+
+compose-validate: ## Assert docker-compose topology (no host networking, DNS-based service wiring)
+	@bash scripts/compose-validate.sh
 
 prune: ## Drop stale remote refs and delete local branches already merged into develop
 	@git fetch origin --prune

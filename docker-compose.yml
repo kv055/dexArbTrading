@@ -39,10 +39,10 @@ services:
       context: ./dexUnifiedApi
       dockerfile: Dockerfile.tor
     ports:
-      # Loopback only: host-networked services (mm-controller) reach the
-      # SOCKS proxy via 127.0.0.1:9050; compose-network services use tor:9050.
-      # Override TOR_SOCKS_HOST_PORT when the host already runs its own tor
-      # daemon on 9050 (mm-controller can then use that one directly).
+      # Loopback only, for host-side debugging / curl --socks5 tests. Sibling
+      # containers on the bridge network use tor:9050 directly. Override
+      # TOR_SOCKS_HOST_PORT when the host already runs its own tor daemon on
+      # 9050.
       - "127.0.0.1:${TOR_SOCKS_HOST_PORT:-9050}:9050"
     cap_add:
       - NET_ADMIN
@@ -279,7 +279,7 @@ services:
       - DATABASE_URL=postgres://dex_monitor:${POSTGRES_MONITOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - SNAPSHOT_INTERVAL_MIN=1
       - FRONTEND_DIR=/app/react-frontend/dist
-      - MM_CONTROLLER_API_URL=http://host.docker.internal:5001
+      - MM_CONTROLLER_API_URL=http://mm-controller:5001
       - UNIFIED_API_URL=http://unified-api:5010
       - TOR_PROXY_ADDR=tor:9050
       - BISQ_GRPC_HOST=bisq:9998
@@ -316,8 +316,6 @@ services:
           cpus: '0.5'
     ports:
       - "127.0.0.1:5002:5000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
   nginx:
@@ -355,7 +353,9 @@ services:
     build:
       context: .
       dockerfile: dexMmController/Dockerfile
-    network_mode: host
+    # Bridge network: all upstreams (lnd, tor, unified-api, bisq) are reached
+    # via docker DNS, not localhost. The 127.0.0.1:5001 publish below keeps
+    # host-side callers (dev tooling, curl localhost:5001) working.
     env_file:
       - ./dexMmController/.env
     depends_on:
@@ -366,18 +366,28 @@ services:
     environment:
       - DB_PATH=/app/mm-controller.db
       - API_ADDR=:5001
+      # Postgres reached via docker DNS. mm-controller builds DATABASE_URL from
+      # POSTGRES_HOST/PORT/DB/USER/PASSWORD (see resolveDatabaseURL in main.go),
+      # so the bridge-network host is set here without re-stating credentials.
+      - POSTGRES_HOST=postgres
       - OPENCLAW_URL=
-      - HUMMINGBOT_URL=http://localhost:8000
-      - HUMMINGBOT_USERNAME=admin
-      - HUMMINGBOT_PASSWORD=password
-      # Internal traffic must hit unified-api's published port directly. Port 5000
-      # (nginx :80) now 301-redirects to the TLS+basic-auth edge on :5443, which the
-      # WS dialer can't follow (self-signed cert). 5010 is host-published (mm-controller
-      # is network_mode: host), so localhost:5010 reaches unified-api without the edge.
-      - OFFER_PREMIUM_WSS_URL=ws://localhost:5010/ws/live_offers?cex=kraken
-      - LND_HOST=https://localhost:8080
+      # Internal traffic hits unified-api directly on the bridge network.
+      # The /internal/ws/live_offers route is secret-gated (X-Internal-Secret),
+      # not session-cookie-gated like the browser /ws/live_offers path — the
+      # premium-offer watcher is a service-to-service caller with no cookie.
+      # INTERNAL_API_SECRET must match unified-api's (root .env).
+      - OFFER_PREMIUM_WSS_URL=ws://unified-api:5010/internal/ws/live_offers?cex=kraken
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
+      - LND_HOST=https://lnd:8080
       - LND_MACAROON_PATH=/lnd/data/chain/bitcoin/mainnet/admin.macaroon
       - LND_TLS_CERT_PATH=/lnd/tls.cert
+      # Tor SOCKS proxy reached via docker DNS instead of the host loopback.
+      - TOR_PROXY_URL=socks5h://tor:9050
+      # Bisq daemon on the bridge network — fixes "dial tcp 127.0.0.1:9998:
+      # connection refused" seen when this service was host-networked and the
+      # bisq container did not publish 9998 to the host.
+      - BISQ_GRPC_HOST=bisq:9998
+      - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
       # xprv restore disabled: wallet is generated fresh from a new aezeed seed
       # (stored in DB on first boot). Re-enable both lines + the secret mounts
       # below to restore a wallet from the extended master key instead.
@@ -385,12 +395,15 @@ services:
       # - LND_EXTENDED_MASTER_KEY_BIRTHDAY_TIMESTAMP_FILE=/run/secrets/lnd_extended_master_key_birthday_timestamp
       - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
       # RoboSats coordinators are Tor onion services; reach them through the
-      # tor sidecar's SOCKS port published on the host loopback.
-      - TOR_PROXY_URL=socks5h://127.0.0.1:9050
+      # tor sidecar's SOCKS port on the bridge network (tor:9050).
       # Alternative to xprv/tprv:
       # - LND_SEED_MNEMONIC_FILE=/run/secrets/lnd_seed_mnemonic
       # - LND_AEZEED_PASSPHRASE_FILE=/run/secrets/lnd_aezeed_passphrase
       # - LND_RECOVERY_WINDOW=250
+    ports:
+      # Loopback only: host-side dev tooling / curl reaches the API. Sibling
+      # containers use http://mm-controller:5001, not this publish.
+      - "127.0.0.1:5001:5001"
     volumes:
       - lnd-data:/lnd:ro
       # xprv restore disabled (see env block above):
@@ -415,9 +428,16 @@ services:
   lnd:
     logging: *default-logging
     image: lightninglabs/lnd:v0.18.4-beta
-    network_mode: host
+    # Bridge network: reachable from sibling containers at https://lnd:8080.
+    # The TLS cert must include the "lnd" SAN (added below); see the one-time
+    # cert-regeneration note in the README / migration comment before first up.
     volumes:
       - lnd-data:/root/.lnd
+    ports:
+      # Loopback only, for host-side lncli / debugging. Sibling containers use
+      # the docker DNS name (lnd:8080 / lnd:10009), not these publishes.
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:10009:10009"
     healthcheck:
       test: ["CMD", "curl", "-sf", "--cacert", "/root/.lnd/tls.cert",
              "https://localhost:8080/v1/state"]
@@ -438,6 +458,7 @@ services:
       - --rpclisten=0.0.0.0:10009
       - --tlsextraip=127.0.0.1
       - --tlsextradomain=localhost
+      - --tlsextradomain=lnd
     deploy:
       resources:
         limits:
