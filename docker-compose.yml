@@ -1,3 +1,9 @@
+# Pin the compose project name so named-volume prefixes (e.g. postgres-data)
+# stay stable regardless of which directory `docker compose up` is run from.
+# Without this, running compose from a worktree dir mints brand-new empty
+# volumes under a different project prefix and the real data looks "wiped".
+name: dexarbtrading
+
 x-logging: &default-logging
   driver: json-file
   options:
