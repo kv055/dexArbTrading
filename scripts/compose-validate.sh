@@ -83,6 +83,26 @@ assert_absent() {
 	fi
 }
 
+# assert_in_service checks that needle appears within one service's resolved
+# config block. Used for env vars that aren't unique across services (e.g.
+# INTERNAL_API_SECRET is also set on unified-api/unified-snapshot, so a global
+# grep would pass even if mm-controller's were removed).
+assert_in_service() {
+	local label="$1" service="$2" needle="$3"
+	local block
+	block=$(printf '%s\n' "$CONFIG" | awk -v svc="  ${service}:" '
+		$0 == svc { inblk=1; print; next }
+		inblk && /^  [A-Za-z][A-Za-z0-9_-]*:$/ { inblk=0 }
+		inblk { print }
+	')
+	if printf '%s\n' "$block" | grep -qF -- "$needle"; then
+		echo "✓ $label"
+	else
+		echo "✖ $label (missing in $service: $needle)" >&2
+		fail=1
+	fi
+}
+
 echo "Checking compose topology from $COMPOSE_FILE"
 
 # No service may use host networking — everything must be on the bridge.
@@ -93,7 +113,8 @@ assert_contains "mm-controller BISQ_GRPC_HOST=bisq:9998"         "BISQ_GRPC_HOST
 assert_contains "mm-controller POSTGRES_HOST=postgres"           "POSTGRES_HOST: postgres"
 assert_contains "mm-controller LND_HOST=https://lnd:8080"        "LND_HOST: https://lnd:8080"
 assert_contains "mm-controller TOR_PROXY_URL=socks5h://tor:9050" "TOR_PROXY_URL: socks5h://tor:9050"
-assert_contains "mm-controller WS via unified-api DNS"           "OFFER_PREMIUM_WSS_URL: ws://unified-api:5010/ws/live_offers?cex=kraken"
+assert_contains "mm-controller WS via unified-api DNS (internal route)" "OFFER_PREMIUM_WSS_URL: ws://unified-api:5010/internal/ws/live_offers?cex=kraken"
+assert_in_service "mm-controller INTERNAL_API_SECRET wired (secret-gated WS)" "mm-controller" "INTERNAL_API_SECRET:"
 
 # lnd's cert must include the docker DNS name so https://lnd:8080 verifies.
 assert_contains "lnd TLS cert includes lnd SAN" "--tlsextradomain=lnd"

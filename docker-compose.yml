@@ -372,9 +372,12 @@ services:
       - POSTGRES_HOST=postgres
       - OPENCLAW_URL=
       # Internal traffic hits unified-api directly on the bridge network.
-      # (Previously ws://localhost:5010 — that only worked under network_mode:
-      # host, where unified-api's loopback-published 5010 was reachable.)
-      - OFFER_PREMIUM_WSS_URL=ws://unified-api:5010/ws/live_offers?cex=kraken
+      # The /internal/ws/live_offers route is secret-gated (X-Internal-Secret),
+      # not session-cookie-gated like the browser /ws/live_offers path — the
+      # premium-offer watcher is a service-to-service caller with no cookie.
+      # INTERNAL_API_SECRET must match unified-api's (root .env).
+      - OFFER_PREMIUM_WSS_URL=ws://unified-api:5010/internal/ws/live_offers?cex=kraken
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - LND_HOST=https://lnd:8080
       - LND_MACAROON_PATH=/lnd/data/chain/bitcoin/mainnet/admin.macaroon
       - LND_TLS_CERT_PATH=/lnd/tls.cert
