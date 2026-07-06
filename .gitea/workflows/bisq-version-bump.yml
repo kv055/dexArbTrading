@@ -1,0 +1,73 @@
+name: Bisq version bump check
+
+# Gitea-side counterpart of .github/workflows/bisq-version-bump.yml.
+#
+# DELIBERATELY CHECK + NOTIFY ONLY — no pushes, no PRs. GitHub is origin /
+# source of truth and this Gitea repo is a parallel remote receiving the same
+# pushes: a bump branch created or merged here would diverge from GitHub and
+# be clobbered by the next sync (split-brain). The GitHub workflow is the sole
+# actor that mutates repos; this one gives Gitea-side visibility by opening an
+# issue when a new Bisq version is available or when our source patches no
+# longer apply to it. Detection + patch-check logic is shared via
+# scripts/bisq-bump-check.sh.
+
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+jobs:
+  check-and-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: develop
+
+      - name: Fetch submodules from the Gitea mirror
+        run: |
+          host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
+          git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
+          git submodule update --init --recursive dexUnifiedApi
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Check upstream version and patch compatibility
+        id: check
+        # No GITHUB_TOKEN here: it belongs to this Gitea instance and must not
+        # be sent to api.github.com; unauthenticated rate limits are fine for
+        # one nightly release lookup.
+        run: ./scripts/bisq-bump-check.sh
+
+      - name: Open/refresh Gitea issue
+        if: steps.check.outputs.bump == 'true'
+        env:
+          TOKEN: ${{ github.token }}
+          API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}
+          NEW: ${{ steps.check.outputs.latest }}
+          PATCHES_OK: ${{ steps.check.outputs.patches_ok }}
+          FAILED: ${{ steps.check.outputs.failed_patch }}
+        run: |
+          set -Eeuo pipefail
+          if [ "$PATCHES_OK" = "true" ]; then
+            title="bisq v${NEW} available — bump PR runs on GitHub"
+            body="Upstream Bisq **v${NEW}** is available and both patches in \`dexUnifiedApi/bisq-patches/\` apply cleanly against it. The automated bump PR is opened by the GitHub *Bisq version bump* workflow — review/merge it there. This issue is Gitea-side visibility only."
+          else
+            title="bisq v${NEW}: bisq-patches need rebase"
+            body="Upstream Bisq **v${NEW}** is available, but \`dexUnifiedApi/bisq-patches/${FAILED}\` no longer applies (\`git apply --3way\` fails). The automated bump is blocked until the patch is rebased against \`v${NEW}\` and committed to \`dexUnifiedApi/bisq-patches/\`. The bisq image build fails at the same point."
+          fi
+
+          # Dedupe by exact title among open issues.
+          existing=$(curl -fsS -H "Authorization: token ${TOKEN}" "${API}/issues?state=open&type=issues&limit=50" \
+            | jq -r --arg t "$title" '.[] | select(.title == $t) | .number' | head -1) || existing=""
+
+          if [ -n "$existing" ]; then
+            echo "Issue #$existing already open for: $title — leaving it as is."
+          else
+            curl -fsS -X POST -H "Authorization: token ${TOKEN}" -H "Content-Type: application/json" \
+              -d "$(jq -n --arg t "$title" --arg b "$body" '{title: $t, body: $b}')" \
+              "${API}/issues" >/dev/null
+            echo "Opened issue: $title"
+          fi

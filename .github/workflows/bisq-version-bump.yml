@@ -1,5 +1,11 @@
 name: Bisq version bump
 
+# Nightly: detect a new upstream Bisq v1 release, verify our source patches
+# (dexUnifiedApi/bisq-patches/) still apply against it, then either open the
+# bump PR or — if a patch no longer applies — open/refresh a rebase issue
+# instead of a PR. Detection + patch-check logic lives in
+# scripts/bisq-bump-check.sh, shared with the Gitea check workflow.
+
 on:
   schedule:
     - cron: "17 6 * * *"
@@ -8,9 +14,14 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 jobs:
   check-and-bump:
+    # Gitea Actions also executes .github/workflows/. This job can never work
+    # there (gh CLI, GitHub PR/issue semantics), so it only runs on real GitHub;
+    # the Gitea side has its own check-and-notify workflow.
+    if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -26,94 +37,107 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Read current BISQ_VERSION
-        id: current
-        run: |
-          current=$(grep -oP 'BISQ_VERSION=\K[0-9]+\.[0-9]+\.[0-9]+' docker-compose.yml | head -1)
-          echo "version=$current" >> "$GITHUB_OUTPUT"
-
-      - name: Fetch latest upstream release
-        id: upstream
+      - name: Check upstream version and patch compatibility
+        id: check
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          auth_header=""
-          [ -n "$GITHUB_TOKEN" ] && auth_header="-H \"Authorization: Bearer $GITHUB_TOKEN\""
-          latest=$(curl -fsSL $auth_header \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/bisq-network/bisq/releases/latest" \
-            | jq -r '.tag_name' | sed 's/^v//')
-          echo "version=$latest" >> "$GITHUB_OUTPUT"
+        run: ./scripts/bisq-bump-check.sh
 
-      - name: Decide whether to bump
-        id: decide
+      - name: Skip if a bump PR already exists
+        id: dedupe
+        if: steps.check.outputs.bump == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          NEW: ${{ steps.check.outputs.latest }}
         run: |
-          current="${{ steps.current.outputs.version }}"
-          upstream="${{ steps.upstream.outputs.version }}"
-
-          if [ "$current" = "$upstream" ]; then
-            echo "bump=false" >> "$GITHUB_OUTPUT"
-            echo "Up to date at ${current}"
-            exit 0
+          set -Eeuo pipefail
+          if git ls-remote --exit-code origin "refs/heads/bisq-bump/${NEW}" >/dev/null 2>&1 \
+             || [ -n "$(gh pr list --head "bisq-bump/${NEW}" --state open --json number --jq '.[].number')" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "bisq-bump/${NEW} already exists; nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-          higher=$(printf '%s\n%s\n' "$current" "$upstream" | sort -V | tail -1)
-          if [ "$higher" != "$upstream" ]; then
-            echo "bump=false" >> "$GITHUB_OUTPUT"
-            echo "Upstream ${upstream} is not newer than current ${current}; skipping"
-            exit 0
+      - name: Open/refresh rebase issue when patches no longer apply
+        if: steps.check.outputs.bump == 'true' && steps.check.outputs.patches_ok == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          NEW: ${{ steps.check.outputs.latest }}
+          FAILED: ${{ steps.check.outputs.failed_patch }}
+        run: |
+          set -Eeuo pipefail
+          title="bisq v${NEW}: bisq-patches need rebase"
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "Still failing: \`${FAILED}\` does not apply against v${NEW}. Run: ${run_url}"
+            echo "Updated existing issue #$existing"
+          else
+            body="Upstream Bisq **v${NEW}** is available, but \`dexUnifiedApi/bisq-patches/${FAILED}\` no longer applies (\`git apply --3way\` fails), so the automated bump PR was **not** opened."
+            body+=$'\n\n'"To unblock the bump:"
+            body+=$'\n'"1. Rebase the failing patch against \`v${NEW}\` (clone upstream at the tag, re-apply, regenerate the patch)."
+            body+=$'\n'"2. Commit it to \`dexUnifiedApi/bisq-patches/\`."
+            body+=$'\n'"3. Re-run the *Bisq version bump* workflow (workflow_dispatch) or wait for the nightly run."
+            body+=$'\n\n'"The image build (\`Dockerfile.bisq\`) applies these patches with \`git apply --3way\` and would fail at the same point."
+            body+=$'\n\n'"Detected by: ${run_url}"
+            gh issue create --title "$title" --body "$body"
           fi
-
-          auth_header=""
-          [ -n "$GITHUB_TOKEN" ] && auth_header="-H \"Authorization: Bearer $GITHUB_TOKEN\""
-          if ! curl -fsSL -o /dev/null $auth_header \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/bisq-network/bisq/git/ref/tags/v${upstream}"; then
-            echo "bump=false" >> "$GITHUB_OUTPUT"
-            echo "WARNING: bisq ${upstream} has no git tag yet; skipping" >&2
-            exit 0
-          fi
-
-          echo "bump=true" >> "$GITHUB_OUTPUT"
 
       - name: Bump submodule (dexUnifiedApi) and push
-        if: steps.decide.outputs.bump == 'true'
+        if: steps.check.outputs.bump == 'true' && steps.check.outputs.patches_ok == 'true' && steps.dedupe.outputs.exists == 'false'
         env:
-          OLD: ${{ steps.current.outputs.version }}
-          NEW: ${{ steps.upstream.outputs.version }}
+          NEW: ${{ steps.check.outputs.latest }}
         run: |
+          set -Eeuo pipefail
           cd dexUnifiedApi
           # submodule is checked out as detached HEAD; move to main so we can push
           git fetch origin main
           git checkout main
           git pull --ff-only origin main
-          sed -i "s/ARG BISQ_VERSION=$OLD/ARG BISQ_VERSION=$NEW/g" Dockerfile.bisq
+          # Rewrite every ARG line to $NEW (multi-stage Dockerfile declares it
+          # several times) and verify — never trust a silent no-op sed again.
+          sed -i "s/^ARG BISQ_VERSION=.*/ARG BISQ_VERSION=${NEW}/" Dockerfile.bisq
+          if grep -P '^ARG BISQ_VERSION=(?!'"${NEW//./\\.}"'$)' Dockerfile.bisq; then
+            echo "ERROR: Dockerfile.bisq still contains a non-${NEW} ARG after sed" >&2
+            exit 1
+          fi
           git add Dockerfile.bisq
-          git commit -m "chore(bisq): bump BISQ_VERSION ${OLD} -> ${NEW}"
+          if git diff --cached --quiet; then
+            echo "ERROR: expected Dockerfile.bisq to change but nothing is staged (already at ${NEW}?)" >&2
+            exit 1
+          fi
+          git commit -m "chore(bisq): bump BISQ_VERSION to ${NEW}"
           git push origin main
 
       - name: Open auto-merge PR for outer repo bump (submodule pointer + docker-compose.yml)
-        if: steps.decide.outputs.bump == 'true'
+        if: steps.check.outputs.bump == 'true' && steps.check.outputs.patches_ok == 'true' && steps.dedupe.outputs.exists == 'false'
         env:
-          OLD: ${{ steps.current.outputs.version }}
-          NEW: ${{ steps.upstream.outputs.version }}
+          NEW: ${{ steps.check.outputs.latest }}
           # A real PAT (not the default GITHUB_TOKEN) is required so the branch push and PR
           # actually trigger CI — GITHUB_TOKEN-created PRs do not start workflow runs.
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           set -Eeuo pipefail
           BRANCH="bisq-bump/${NEW}"
-          sed -i "s/BISQ_VERSION=$OLD/BISQ_VERSION=$NEW/g" docker-compose.yml
+          # Both compose occurrences (build arg + runtime env) share this pattern.
+          sed -i "s/BISQ_VERSION=[0-9]\+\.[0-9]\+\.[0-9]\+/BISQ_VERSION=${NEW}/g" docker-compose.yml
+          if [ "$(grep -c "BISQ_VERSION=${NEW}" docker-compose.yml)" -lt 2 ]; then
+            echo "ERROR: expected both docker-compose.yml BISQ_VERSION lines (build arg + env) to read ${NEW}" >&2
+            exit 1
+          fi
           git checkout -b "$BRANCH"
           git add dexUnifiedApi docker-compose.yml
-          git commit -m "chore(bisq): bump BISQ_VERSION ${OLD} -> ${NEW}"
+          if git diff --cached --quiet; then
+            echo "ERROR: expected compose/submodule changes but nothing is staged" >&2
+            exit 1
+          fi
+          git commit -m "chore(bisq): bump BISQ_VERSION to ${NEW}"
           git push -u origin "$BRANCH" --force
           gh pr create \
             --base develop --head "$BRANCH" \
-            --title "chore(bisq): bump BISQ_VERSION ${OLD} -> ${NEW}" \
-            --body "Automated Bisq bump ${OLD} -> ${NEW}. The full CI pipeline (including the bisq image build) runs on this PR. Review and merge it into develop once green; it then reaches prod via the usual develop -> main promotion."
+            --title "chore(bisq): bump BISQ_VERSION to ${NEW}" \
+            --body "Automated Bisq bump to ${NEW}. Both bisq-patches were pre-verified to apply against v${NEW}; the bisq-patches-apply job and the full bisq image build re-verify on this PR. Review and merge into develop once green; it then reaches prod via the usual develop -> main promotion."
           # Try auto-merge (needs GitHub Pro / 'Allow auto-merge' — unavailable on a Free
           # private repo). If it isn't available, leave the PR open for a manual merge so
           # the bump never silently fails and a human gates the version change.

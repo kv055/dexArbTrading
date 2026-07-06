@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# bisq-bump-check.sh — shared detection + patch-compatibility check for the
+# nightly Bisq v1 version bump. Used by BOTH bump workflows
+# (.github/workflows/bisq-version-bump.yml and .gitea/workflows/bisq-version-bump.yml)
+# so the logic cannot drift between platforms.
+#
+# What it does:
+#   1. Reads the CURRENT version from dexUnifiedApi/Dockerfile.bisq's ARG —
+#      the single source of truth (docker-compose.yml mirrors it; reading the
+#      compose value while sed-ing the Dockerfile is exactly the drift bug
+#      that made the old bump job fail on every run).
+#   2. Fetches the latest upstream release tag from the GitHub API.
+#   3. Decides whether a bump is warranted (strictly newer + tag exists).
+#   4. If so, clones bisq at the NEW tag and test-applies every patch in
+#      dexUnifiedApi/bisq-patches/ — the bisq image build applies these with
+#      git apply --3way, so an incompatible upstream refactor must be caught
+#      here, before any PR is opened.
+#
+# Outputs (stdout as key=value, and appended to $GITHUB_OUTPUT when set):
+#   current=<x.y.z>   latest=<x.y.z>   bump=true|false
+#   patches_ok=true|false|skipped      failed_patch=<basename|none>
+#
+# Env overrides (testing): CURRENT_OVERRIDE, LATEST_OVERRIDE, PATCH_DIR,
+#   GITHUB_TOKEN (optional API auth).
+set -Eeuo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DOCKERFILE="$REPO_ROOT/dexUnifiedApi/Dockerfile.bisq"
+PATCH_DIR="${PATCH_DIR:-$REPO_ROOT/dexUnifiedApi/bisq-patches}"
+
+emit() {
+  echo "$1"
+  if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "$1" >> "$GITHUB_OUTPUT"; fi
+}
+
+api_curl() {
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" "$@"
+  else
+    curl -fsSL -H "Accept: application/vnd.github+json" "$@"
+  fi
+}
+
+# --- 1. current version (Dockerfile ARG = source of truth) ---
+current="${CURRENT_OVERRIDE:-$(grep -oP '^ARG BISQ_VERSION=\K[0-9]+\.[0-9]+\.[0-9]+' "$DOCKERFILE" | head -1)}"
+if [ -z "$current" ]; then
+  echo "ERROR: could not parse ARG BISQ_VERSION from $DOCKERFILE" >&2
+  exit 1
+fi
+emit "current=$current"
+
+# --- 2. latest upstream release ---
+latest="${LATEST_OVERRIDE:-$(api_curl "https://api.github.com/repos/bisq-network/bisq/releases/latest" | jq -r '.tag_name' | sed 's/^v//')}"
+if [ -z "$latest" ] || [ "$latest" = "null" ]; then
+  echo "ERROR: could not determine latest upstream bisq release" >&2
+  exit 1
+fi
+emit "latest=$latest"
+
+# --- 3. bump decision ---
+no_bump() {
+  emit "bump=false"
+  emit "patches_ok=skipped"
+  emit "failed_patch=none"
+  echo "$1"
+  exit 0
+}
+
+if [ "$current" = "$latest" ]; then
+  no_bump "Up to date at ${current}"
+fi
+higher=$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)
+if [ "$higher" != "$latest" ]; then
+  no_bump "Upstream ${latest} is not newer than current ${current}; skipping"
+fi
+if ! api_curl -o /dev/null "https://api.github.com/repos/bisq-network/bisq/git/ref/tags/v${latest}"; then
+  no_bump "WARNING: bisq ${latest} has no git tag yet; skipping"
+fi
+emit "bump=true"
+
+# --- 4. patch compatibility against the NEW version ---
+workdir=$(mktemp -d)
+trap 'rm -rf "$workdir"' EXIT
+echo "Cloning bisq v${latest} to verify patches from ${PATCH_DIR} ..."
+git clone --depth 1 --branch "v${latest}" --quiet https://github.com/bisq-network/bisq.git "$workdir/bisq"
+
+patches_ok=true
+failed_patch=none
+for p in "$PATCH_DIR"/*.patch; do
+  [ -e "$p" ] || { echo "ERROR: no patches found in $PATCH_DIR" >&2; exit 1; }
+  name=$(basename "$p")
+  if git -C "$workdir/bisq" apply --3way "$p"; then
+    echo "patch OK: $name"
+  else
+    echo "patch FAILED against v${latest}: $name" >&2
+    patches_ok=false
+    failed_patch="$name"
+    break
+  fi
+done
+
+emit "patches_ok=$patches_ok"
+emit "failed_patch=$failed_patch"
