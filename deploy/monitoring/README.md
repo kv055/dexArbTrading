@@ -30,7 +30,7 @@ exporter            exporter    api     (dexMonitor)
 | `cadvisor` | gcr.io/cadvisor/cadvisor:v0.49.1 | Per-container resource metrics |
 | `postgres-exporter` | prometheuscommunity/postgres-exporter:v0.16.0 | PostgreSQL metrics |
 
-The application services (`unified-api`, `app`) expose their own `/metrics` endpoints and are scraped directly.
+The application services (`unified-api`, `dexmonitor`, `mm-controller`) expose their own `/metrics` endpoints and are scraped directly. `fiat-controller` also serves `/metrics`; its scrape job in `prometheus.yml` is commented out until the compose service is re-enabled.
 
 ## Dashboards
 
@@ -51,11 +51,21 @@ from it into the logs, traces and domain dashboards below.
 | `postgres.json` | PostgreSQL connections, transactions, cache hit rate |
 | `host.json` | Node-exporter host metrics (CPU, RAM, disk, network) |
 | `containers.json` | cAdvisor per-container resource usage |
+| `trading-execution.json` | mm-controller trade engine: order submissions/latency, hedge failures, tradeflow runs & recoveries, realized PnL, LND wallet/balances, Telegram API calls |
+| `business-pnl.json` | **(Postgres)** Realized PnL over time, per-trade PnL, transaction status funnel, fiat push pipeline (status timeline, match latency, recent notifications) |
+| `market-history.json` | **(Postgres)** Net-premium history from `order_lifecycle`, offer appearance/lifetime by exchange, reference price, snapshot cycle duration |
 
 The logs/traces dashboards rely on the `loki` and `tempo` datasources (provisioned in
 [grafana/provisioning/datasources/](grafana/provisioning/datasources/)). `service` is the
 same label across metrics, logs and traces (`unified-api`, `unified-snapshot`,
 `dexmonitor`), so you can pivot between dashboards on one identity.
+
+The two **(Postgres)** dashboards query the app schema directly through the read-only
+`postgres-dexarb` datasource (role `dex_grafana_ro`, SELECT-only). unified-api's role
+bootstrap creates the role once `POSTGRES_GRAFANA_RO_PASSWORD` is present in
+`dexUnifiedApi/.env`; the same variable must be in the root `.env` so compose can hand
+it to the grafana container. Until then the datasource shows a connection error and
+everything else keeps working.
 
 Dashboard updates from the Grafana UI are allowed (`allowUiUpdates: true`). To persist changes back to the repo, export the dashboard JSON from Grafana and overwrite the file.
 

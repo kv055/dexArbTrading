@@ -1,0 +1,29 @@
+# Read-only Postgres datasource for business dashboards (PnL, market history,
+# fiat pipeline funnel, offer lifecycle) — data the Prometheus gauges can't
+# express because it lives as row-level history in the app schema.
+#
+# Logs in as the SELECT-only role dex_grafana_ro, which unified-api's role
+# bootstrap creates when POSTGRES_GRAFANA_RO_PASSWORD is set (see
+# dexUnifiedApi/db/bootstrap.go). Both env vars below are injected into the
+# grafana container by docker-compose; until the password is provisioned in
+# .env the datasource simply fails to connect without affecting anything else.
+apiVersion: 1
+
+datasources:
+  - name: Postgres (dexarb)
+    uid: postgres-dexarb
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    user: dex_grafana_ro
+    jsonData:
+      database: $POSTGRES_DB
+      sslmode: disable
+      maxOpenConns: 4
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+      postgresVersion: 1500
+      timescaledb: false
+    secureJsonData:
+      password: $POSTGRES_GRAFANA_RO_PASSWORD
+    editable: false

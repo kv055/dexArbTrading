@@ -379,6 +379,10 @@ services:
     environment:
       - DB_PATH=/app/mm-controller.db
       - API_ADDR=:5001
+      # OpenTelemetry: traces -> Alloy -> Tempo; structured logs scraped from stdout.
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-alloy:4317}
+      - OTEL_SERVICE_NAME=mm-controller
+      - LOG_LEVEL=${LOG_LEVEL:-info}
       # Postgres reached via docker DNS. mm-controller builds DATABASE_URL from
       # POSTGRES_HOST/PORT/DB/USER/PASSWORD (see resolveDatabaseURL in main.go),
       # so the bridge-network host is set here without re-stating credentials.
@@ -593,6 +597,11 @@ services:
       - GF_SERVER_SERVE_FROM_SUB_PATH=true
       - GF_ANALYTICS_REPORTING_ENABLED=false
       - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      # Read-only Postgres datasource credentials, interpolated into
+      # provisioning/datasources/postgres.yml by Grafana. The dex_grafana_ro
+      # role is bootstrapped by unified-api when the password is set.
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_GRAFANA_RO_PASSWORD=${POSTGRES_GRAFANA_RO_PASSWORD:-}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./deploy/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro

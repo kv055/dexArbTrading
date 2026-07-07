@@ -58,9 +58,11 @@ func (c *Client) post(ctx context.Context, method string, body map[string]any) (
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.client.Do(req)
 	if err != nil {
+		recordAPICall(method, 0, err)
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
+	recordAPICall(method, resp.StatusCode, nil)
 	raw, _ := io.ReadAll(resp.Body)
 	return raw, resp.StatusCode, nil
 }
