@@ -1,104 +1,406 @@
 {
-  "annotations": {"list": []},
-  "editable": true,
-  "graphTooltip": 0,
-  "schemaVersion": 39,
-  "title": "Trading — opportunity overview",
-  "tags": ["dexarbtrading", "trading"],
-  "timezone": "",
-  "time": {"from": "now-6h", "to": "now"},
-  "refresh": "30s",
-  "templating": {"list": []},
-  "panels": [
-    {
-      "id": 1,
-      "type": "stat",
-      "title": "Best net premium — sell (%)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
-      "fieldConfig": {"defaults": {"unit": "percent", "decimals": 2, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0}, {"color": "green", "value": 1}]}}, "overrides": []},
-      "targets": [{"expr": "dex_best_net_premium_pct{direction=\"sell\"}", "refId": "A"}]
+ "annotations": {
+  "list": []
+ },
+ "editable": true,
+ "graphTooltip": 0,
+ "schemaVersion": 39,
+ "title": "Trading — opportunity overview",
+ "tags": [
+  "dexarbtrading",
+  "trading"
+ ],
+ "timezone": "",
+ "time": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "refresh": "30s",
+ "templating": {
+  "list": []
+ },
+ "panels": [
+  {
+   "id": 1,
+   "type": "stat",
+   "title": "Best net premium — sell (%)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 0,
+    "y": 0
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "decimals": 2,
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 0
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
     },
+    "overrides": []
+   },
+   "targets": [
     {
-      "id": 2,
-      "type": "stat",
-      "title": "Best net premium — buy (%)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
-      "fieldConfig": {"defaults": {"unit": "percent", "decimals": 2, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 0}, {"color": "green", "value": 1}]}}, "overrides": []},
-      "targets": [{"expr": "dex_best_net_premium_pct{direction=\"buy\"}", "refId": "A"}]
-    },
-    {
-      "id": 3,
-      "type": "stat",
-      "title": "Net-profitable offers (now)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
-      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
-      "targets": [{"expr": "sum(dex_net_profitable_offers)", "refId": "A"}]
-    },
-    {
-      "id": 4,
-      "type": "stat",
-      "title": "Live offers (total)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
-      "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "yellow", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
-      "targets": [{"expr": "sum(dex_live_offers)", "refId": "A"}]
-    },
-    {
-      "id": 5,
-      "type": "timeseries",
-      "title": "Net-profitable offers over time",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
-      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "fillOpacity": 10}}, "overrides": []},
-      "targets": [{"expr": "dex_net_profitable_offers", "legendFormat": "{{direction}}", "refId": "A"}]
-    },
-    {
-      "id": 6,
-      "type": "timeseries",
-      "title": "Best net premium over time (%)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
-      "fieldConfig": {"defaults": {"unit": "percent", "custom": {"drawStyle": "line", "fillOpacity": 0}}, "overrides": []},
-      "targets": [{"expr": "dex_best_net_premium_pct", "legendFormat": "best {{direction}}", "refId": "A"}]
-    },
-    {
-      "id": 7,
-      "type": "timeseries",
-      "title": "Live offers by exchange & direction",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
-      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "bars", "fillOpacity": 60, "stacking": {"mode": "normal"}}}, "overrides": []},
-      "targets": [{"expr": "dex_live_offers", "legendFormat": "{{exchange}} {{direction}}", "refId": "A"}]
-    },
-    {
-      "id": 8,
-      "type": "timeseries",
-      "title": "Net premium distribution (avg / p50 / p90)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
-      "fieldConfig": {"defaults": {"unit": "percent", "custom": {"drawStyle": "line", "fillOpacity": 0}}, "overrides": []},
-      "targets": [{"expr": "dex_live_offer_net_premium_pct", "legendFormat": "{{direction}} {{stat}}", "refId": "A"}]
-    },
-    {
-      "id": 9,
-      "type": "timeseries",
-      "title": "Available BTC liquidity by exchange",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
-      "fieldConfig": {"defaults": {"unit": "none", "decimals": 4, "custom": {"drawStyle": "line", "fillOpacity": 20, "stacking": {"mode": "normal"}}}, "overrides": []},
-      "targets": [{"expr": "sum by (exchange) (dex_live_offer_btc_liquidity)", "legendFormat": "{{exchange}}", "refId": "A"}]
-    },
-    {
-      "id": 10,
-      "type": "timeseries",
-      "title": "BTC reference price by source",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
-      "fieldConfig": {"defaults": {"unit": "currencyEUR", "custom": {"drawStyle": "line", "fillOpacity": 0}}, "overrides": []},
-      "targets": [{"expr": "dex_price_current", "legendFormat": "{{source}}", "refId": "A"}]
+     "expr": "dex_best_net_premium_pct{direction=\"sell\"}",
+     "refId": "A"
     }
-  ]
+   ]
+  },
+  {
+   "id": 2,
+   "type": "stat",
+   "title": "Best net premium — buy (%)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 6,
+    "y": 0
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "decimals": 2,
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 0
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "dex_best_net_premium_pct{direction=\"buy\"}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "type": "stat",
+   "title": "Net-profitable offers (now)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 12,
+    "y": 0
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum(dex_net_profitable_offers)",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "type": "stat",
+   "title": "Live offers (total)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 18,
+    "y": 0
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "yellow",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum(dex_live_offers)",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 5,
+   "type": "timeseries",
+   "title": "Net-profitable offers over time",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 4
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "dex_net_profitable_offers",
+     "legendFormat": "{{direction}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 6,
+   "type": "timeseries",
+   "title": "Best net premium over time (%)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 4
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 0
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "dex_best_net_premium_pct",
+     "legendFormat": "best {{direction}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 7,
+   "type": "timeseries",
+   "title": "Live offers by exchange & direction",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 12
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "drawStyle": "bars",
+      "fillOpacity": 60,
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "dex_live_offers",
+     "legendFormat": "{{exchange}} {{direction}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 8,
+   "type": "timeseries",
+   "title": "Net premium distribution (avg / p50 / p90)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 12
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 0
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "dex_live_offer_net_premium_pct",
+     "legendFormat": "{{direction}} {{stat}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 9,
+   "type": "timeseries",
+   "title": "Available BTC liquidity by exchange",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 20
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "none",
+     "decimals": 4,
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 20,
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "sum by (exchange) (dex_live_offer_btc_liquidity)",
+     "legendFormat": "{{exchange}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 10,
+   "type": "timeseries",
+   "title": "BTC reference price by source",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 20
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "currencyEUR",
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 0
+     }
+    },
+    "overrides": []
+   },
+   "targets": [
+    {
+     "expr": "dex_price_current",
+     "legendFormat": "{{source}}",
+     "refId": "A"
+    }
+   ]
+  }
+ ],
+ "uid": "dexarb-trading-overview"
 }

@@ -22,22 +22,22 @@
       "id": 2,
       "type": "timeseries",
       "title": "HTTP p95 latency by service & route (s)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 3},
       "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 0}}, "overrides": []},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "histogram_quantile(0.95, sum by (service, route, le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{service}} {{route}}", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, sum by (service, route, le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{service}} {{route}}", "refId": "A"}]
     },
     {
       "id": 3,
       "type": "timeseries",
       "title": "Snapshot push ingest latency — unified-api (s)",
       "description": "Time unified-api spends handling the snapshot worker's POST /internal/live_offers.",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 3},
       "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 10}}, "overrides": []},
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{route=~\".*/internal/live_offers\"}[5m])))", "legendFormat": "p50", "refId": "A"},
-        {"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route=~\".*/internal/live_offers\"}[5m])))", "legendFormat": "p95", "refId": "B"}
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{route=~\".*/internal/live_offers\"}[5m])))", "legendFormat": "p50", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route=~\".*/internal/live_offers\"}[5m])))", "legendFormat": "p95", "refId": "B"}
       ]
     },
     {

@@ -15,19 +15,19 @@
       "id": 1,
       "type": "stat",
       "title": "Exchanges up",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
       "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum(dex_exchange_up)", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(dex_exchange_up)", "refId": "A"}]
     },
     {
       "id": 2,
       "type": "stat",
       "title": "Snapshot age (s)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
       "fieldConfig": {"defaults": {"unit": "s", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 120}, {"color": "red", "value": 180}]}}, "overrides": []},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "dex_snapshot_age_seconds", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "dex_snapshot_age_seconds", "refId": "A"}]
     },
     {
       "id": 3,
@@ -42,37 +42,37 @@
       "id": 4,
       "type": "stat",
       "title": "Healthy accounts",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
       "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum(dex_account_healthy)", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(dex_account_healthy)", "refId": "A"}]
     },
     {
       "id": 5,
       "type": "stat",
       "title": "Net-profitable offers",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
       "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "text", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum(dex_net_profitable_offers)", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(dex_net_profitable_offers)", "refId": "A"}]
     },
     {
       "id": 6,
       "type": "stat",
       "title": "Active WS clients",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
       "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "fixed", "fixedColor": "text"}}, "overrides": []},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum(dex_ws_clients)", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(dex_ws_clients)", "refId": "A"}]
     },
     {
       "id": 7,
       "type": "timeseries",
       "title": "HTTP error rate (5xx) by service",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
       "fieldConfig": {"defaults": {"unit": "reqps", "custom": {"drawStyle": "line", "fillOpacity": 20}}, "overrides": []},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum by (service) (rate(http_requests_total{status=~\"5..\"}[5m]))", "legendFormat": "{{service}}", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum by (service) (rate(http_requests_total{status=~\"5..\"}[5m]))", "legendFormat": "{{service}}", "refId": "A"}]
     },
     {
       "id": 8,
@@ -87,23 +87,23 @@
       "id": 9,
       "type": "timeseries",
       "title": "HTTP p95 latency by service (s)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
       "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "fillOpacity": 0}}, "overrides": []},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "histogram_quantile(0.95, sum by (service, le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{service}}", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.95, sum by (service, le) (rate(http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{service}}", "refId": "A"}]
     },
     {
       "id": 10,
       "type": "timeseries",
       "title": "Data freshness — snapshot age & ingest rate",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
       "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 10}}, "overrides": [
         {"matcher": {"id": "byName", "options": "snapshot age (s)"}, "properties": [{"id": "unit", "value": "s"}, {"id": "custom.axisPlacement", "value": "right"}]}
       ]},
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "rate(dex_live_offers_pushed_total[5m]) * 60", "legendFormat": "ingest (pushes/min)", "refId": "A"},
-        {"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "dex_snapshot_age_seconds", "legendFormat": "snapshot age (s)", "refId": "B"}
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(dex_live_offers_pushed_total[5m]) * 60", "legendFormat": "ingest (pushes/min)", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "dex_snapshot_age_seconds", "legendFormat": "snapshot age (s)", "refId": "B"}
       ]
     },
     {

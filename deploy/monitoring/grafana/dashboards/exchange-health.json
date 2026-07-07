@@ -15,72 +15,72 @@
       "id": 1,
       "type": "stat",
       "title": "Exchanges up",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
       "fieldConfig": {"defaults": {"unit": "short", "max": 5, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 3}, {"color": "green", "value": 5}]}}, "overrides": []},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum(dex_exchange_up)", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(dex_exchange_up)", "refId": "A"}]
     },
     {
       "id": 2,
       "type": "stat",
       "title": "bisq (CRITICAL)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
       "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}, "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}], "noValue": "NO DATA"}, "overrides": []},
       "options": {"colorMode": "background", "graphMode": "none", "textMode": "value"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "dex_exchange_up{exchange=\"bisq\"}", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "dex_exchange_up{exchange=\"bisq\"}", "refId": "A"}]
     },
     {
       "id": 3,
       "type": "stat",
       "title": "bisq2 (CRITICAL)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
       "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}, "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}], "noValue": "NO DATA"}, "overrides": []},
       "options": {"colorMode": "background", "graphMode": "none", "textMode": "value"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "dex_exchange_up{exchange=\"bisq2\"}", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "dex_exchange_up{exchange=\"bisq2\"}", "refId": "A"}]
     },
     {
       "id": 4,
       "type": "stat",
       "title": "Exchanges down",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
       "fieldConfig": {"defaults": {"unit": "short", "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}]}}, "overrides": []},
       "options": {"colorMode": "background"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "sum(dex_exchange_up == bool 0)", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(dex_exchange_up == bool 0)", "refId": "A"}]
     },
     {
       "id": 5,
       "type": "state-timeline",
       "title": "Exchange up / down (all)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 7, "w": 24, "x": 0, "y": 4},
       "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
       "options": {"mergeValues": true, "showValue": "never", "rowHeight": 0.9, "alignValue": "left"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "dex_exchange_up", "legendFormat": "{{exchange}}", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "dex_exchange_up", "legendFormat": "{{exchange}}", "refId": "A"}]
     },
     {
       "id": 6,
       "type": "state-timeline",
       "title": "CRITICAL — bisq / bisq2 (alerts after 3m down)",
       "description": "These two are our own daemons. Down = the bisq/bisq2 exchange is unreachable; a Grafana alert fires after 3m (in-Grafana only).",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 7, "w": 12, "x": 0, "y": 11},
       "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
       "options": {"mergeValues": true, "showValue": "never", "rowHeight": 0.9, "alignValue": "left"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "dex_exchange_up{exchange=~\"bisq|bisq2\"}", "legendFormat": "{{exchange}}", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "dex_exchange_up{exchange=~\"bisq|bisq2\"}", "legendFormat": "{{exchange}}", "refId": "A"}]
     },
     {
       "id": 7,
       "type": "state-timeline",
       "title": "WARNING — robosats / peach / hodlhodl (no alert)",
       "description": "External exchanges. Down here is a warning only (yellow) — no alert is raised.",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"h": 7, "w": 12, "x": 12, "y": 11},
       "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "yellow", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
       "options": {"mergeValues": true, "showValue": "never", "rowHeight": 0.9, "alignValue": "left"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"}, "expr": "dex_exchange_up{exchange=~\"robosats|peachbitcoin|hodlhodl\"}", "legendFormat": "{{exchange}}", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "dex_exchange_up{exchange=~\"robosats|peachbitcoin|hodlhodl\"}", "legendFormat": "{{exchange}}", "refId": "A"}]
     },
     {
       "id": 8,

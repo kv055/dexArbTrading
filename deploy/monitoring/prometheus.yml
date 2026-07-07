@@ -28,3 +28,14 @@ scrape_configs:
   - job_name: postgres
     static_configs:
       - targets: ["postgres-exporter:9187"]
+
+  - job_name: mm-controller
+    static_configs:
+      - targets: ["mm-controller:5001"]
+
+  # fiat-controller exposes /metrics on :8080 but the compose service is
+  # currently disabled (commented out in docker-compose.yml). Uncomment this
+  # job together with the service to avoid a permanently-down target.
+  # - job_name: fiat-controller
+  #   static_configs:
+  #     - targets: ["fiat-controller:8080"]

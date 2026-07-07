@@ -1,65 +1,118 @@
 {
-  "annotations": {"list": []},
-  "editable": true,
-  "schemaVersion": 39,
-  "title": "Host — VPS",
-  "tags": ["dexarbtrading", "host"],
-  "time": {"from": "now-1h", "to": "now"},
-  "refresh": "30s",
-  "panels": [
+ "annotations": {
+  "list": []
+ },
+ "editable": true,
+ "schemaVersion": 39,
+ "title": "Host — VPS",
+ "tags": [
+  "dexarbtrading",
+  "host"
+ ],
+ "time": {
+  "from": "now-1h",
+  "to": "now"
+ },
+ "refresh": "30s",
+ "panels": [
+  {
+   "id": 1,
+   "type": "timeseries",
+   "title": "CPU usage (%)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 0
+   },
+   "targets": [
     {
-      "id": 1,
-      "type": "timeseries",
-      "title": "CPU usage (%)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
-      "targets": [
-        {
-          "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
-          "legendFormat": "{{instance}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 2,
-      "type": "timeseries",
-      "title": "Memory used (bytes)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
-      "targets": [
-        {
-          "expr": "node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes",
-          "legendFormat": "used",
-          "refId": "A"
-        },
-        {"expr": "node_memory_MemTotal_bytes", "legendFormat": "total", "refId": "B"}
-      ]
-    },
-    {
-      "id": 3,
-      "type": "timeseries",
-      "title": "Disk used (%, /)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
-      "targets": [
-        {
-          "expr": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"})",
-          "legendFormat": "{{mountpoint}}",
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 4,
-      "type": "timeseries",
-      "title": "Network throughput (bytes/s)",
-      "datasource": {"type": "prometheus", "uid": "PBFA97CFB590B2093"},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
-      "targets": [
-        {"expr": "rate(node_network_receive_bytes_total{device!~\"lo|docker.*|veth.*|br-.*\"}[1m])", "legendFormat": "rx {{device}}", "refId": "A"},
-        {"expr": "rate(node_network_transmit_bytes_total{device!~\"lo|docker.*|veth.*|br-.*\"}[1m])", "legendFormat": "tx {{device}}", "refId": "B"}
-      ]
+     "expr": "100 - (avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[1m])) * 100)",
+     "legendFormat": "{{instance}}",
+     "refId": "A"
     }
-  ]
+   ]
+  },
+  {
+   "id": 2,
+   "type": "timeseries",
+   "title": "Memory used (bytes)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 0
+   },
+   "targets": [
+    {
+     "expr": "node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes",
+     "legendFormat": "used",
+     "refId": "A"
+    },
+    {
+     "expr": "node_memory_MemTotal_bytes",
+     "legendFormat": "total",
+     "refId": "B"
+    }
+   ]
+  },
+  {
+   "id": 3,
+   "type": "timeseries",
+   "title": "Disk used (%, /)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 8
+   },
+   "targets": [
+    {
+     "expr": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"})",
+     "legendFormat": "{{mountpoint}}",
+     "refId": "A"
+    }
+   ]
+  },
+  {
+   "id": 4,
+   "type": "timeseries",
+   "title": "Network throughput (bytes/s)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prometheus"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 8
+   },
+   "targets": [
+    {
+     "expr": "rate(node_network_receive_bytes_total{device!~\"lo|docker.*|veth.*|br-.*\"}[1m])",
+     "legendFormat": "rx {{device}}",
+     "refId": "A"
+    },
+    {
+     "expr": "rate(node_network_transmit_bytes_total{device!~\"lo|docker.*|veth.*|br-.*\"}[1m])",
+     "legendFormat": "tx {{device}}",
+     "refId": "B"
+    }
+   ]
+  }
+ ],
+ "uid": "dexarb-host"
 }
