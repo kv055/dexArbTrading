@@ -30,8 +30,8 @@ type compiledRow struct {
 }
 
 // minPhraseWords is the floor for the greedy longest-phrase tokenizer window.
-// Alias word-counts are hidden inside compiled regexes, so the window cannot
-// be derived from them; the longest current alias is 4 words.
+// Regex-only aliases are hidden inside compiled regexes, so the window cannot
+// be derived from them; the longest current built-in regex alias is 4 words.
 const minPhraseWords = 6
 
 // explicitBankRails are seeded canonical names that make a bare "National
@@ -78,6 +78,18 @@ func NewRegistry(rows []MethodRow) *Registry {
 		}
 		if n := len(strings.Fields(norm)); n > r.maxNameWords {
 			r.maxNameWords = n
+		}
+		for _, alias := range row.AliasList {
+			aliasNorm := normalize(alias)
+			if aliasNorm == "" {
+				continue
+			}
+			if _, exists := r.exactToName[aliasNorm]; !exists {
+				r.exactToName[aliasNorm] = name
+			}
+			if n := len(strings.Fields(aliasNorm)); n > r.maxNameWords {
+				r.maxNameWords = n
+			}
 		}
 		r.catIDByName[name] = CategoryIDFromDisplay(row.Category)
 		r.known[name] = true

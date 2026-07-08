@@ -40,7 +40,7 @@ func TestSeedRowsCategoriesAreDisplayNames(t *testing.T) {
 
 func TestNewRegistrySkipsInvalidRegex(t *testing.T) {
 	reg := NewRegistry([]MethodRow{
-		{Name: "Broken", MergeRegex: "(unclosed", Category: "Others", MatchOrder: 100},
+		{Name: "Broken", MergeRegex: "(unclosed", AliasList: []string{"broken alias"}, Category: "Others", MatchOrder: 100},
 		{Name: "Fine", MergeRegex: "(?i)^(?:fine|fein)$", Category: "Others", MatchOrder: 110},
 	})
 	if len(reg.Warnings()) != 1 || !strings.Contains(reg.Warnings()[0], "Broken") {
@@ -53,6 +53,9 @@ func TestNewRegistrySkipsInvalidRegex(t *testing.T) {
 	// ...and the valid row is unaffected.
 	if got := reg.Canonicalize("FEIN"); len(got) != 1 || got[0] != "Fine" {
 		t.Errorf("regex match for valid row: got %v", got)
+	}
+	if got := reg.Canonicalize("broken_alias"); len(got) != 1 || got[0] != "Broken" {
+		t.Errorf("alias match for broken row: got %v", got)
 	}
 }
 
@@ -69,5 +72,35 @@ func TestRegistryUnknownRowExactNameMatch(t *testing.T) {
 	}
 	if !reg.IsRegisteredCanonical("Frobnicate Pay") {
 		t.Error("IsRegisteredCanonical should be true for a table row")
+	}
+}
+
+func TestRegistryAliasListExactMatch(t *testing.T) {
+	reg := NewRegistry([]MethodRow{
+		{Name: "PayPal", AliasList: []string{"Paypal", "pay pal f & f"}, Category: "Fiat Transmitter", MatchOrder: 100},
+		{Name: "SEPA", AliasList: []string{"National Bank", "Sepa Instant"}, Category: "Bank Transfer", MatchOrder: 110},
+	})
+	for _, c := range []struct {
+		raw  string
+		want string
+	}{
+		{"Paypal", "PayPal"},
+		{"pay_pal_f_&_f", "PayPal"},
+		{"National Bank", "SEPA"},
+		{"sepa instant", "SEPA"},
+	} {
+		if got := reg.Canonicalize(c.raw); len(got) != 1 || got[0] != c.want {
+			t.Errorf("Canonicalize(%q) = %v, want [%s]", c.raw, got, c.want)
+		}
+	}
+}
+
+func TestRegistryAliasListConflictUsesMatchOrder(t *testing.T) {
+	reg := NewRegistry([]MethodRow{
+		{ID: 2, Name: "Later", AliasList: []string{"shared alias"}, Category: "Others", MatchOrder: 200},
+		{ID: 1, Name: "Earlier", AliasList: []string{"shared alias"}, Category: "Others", MatchOrder: 100},
+	})
+	if got := reg.Canonicalize("shared alias"); len(got) != 1 || got[0] != "Earlier" {
+		t.Errorf("alias conflict = %v, want [Earlier]", got)
 	}
 }
