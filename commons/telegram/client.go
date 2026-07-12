@@ -114,7 +114,13 @@ func (c *Client) SetWebhook(ctx context.Context, url string) error {
 	if url == "" {
 		return nil
 	}
-	raw, status, err := c.post(ctx, "setWebhook", map[string]any{"url": url})
+	body := map[string]any{"url": url}
+	// Register the shared secret so Telegram echoes it back on every webhook
+	// request; inbound handlers require it via WebhookAuthorized.
+	if secret := WebhookSecret(); secret != "" {
+		body["secret_token"] = secret
+	}
+	raw, status, err := c.post(ctx, "setWebhook", body)
 	if err != nil {
 		return err
 	}

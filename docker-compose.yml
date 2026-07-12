@@ -90,6 +90,9 @@ services:
       - BISQ_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - BISQ_SEED_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - BISQ_WALLET_PASSWORD=${BISQ_WALLET_PASSWORD:-}
+      # gRPC --apiPassword for :9998; must match the BISQ_API_PASSWORD the
+      # client services (unified-api, snapshot, dexmonitor, mm-controller) send.
+      - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
     volumes:
       - bisq-data:/home/appuser/.local/share/Bisq
       # Optional bring-your-own Bisq account file:
@@ -129,7 +132,11 @@ services:
       # - ./dexUnifiedApi/bisqseed/secrets/bisq2_account:/run/secrets/bisq2_account:ro
       # Set BISQ2_ACCOUNT_FILE_PATH=/run/secrets/bisq2_account when using that mount.
     ports:
-      - "8090:8090"
+      # Loopback only: host-side dev tooling / curl reaches the REST API.
+      # Sibling containers use http://bisq2:8090, not this publish. The API has
+      # no static-password auth in v2.1.11 (only device-pairing), so it must
+      # never be published on a public interface.
+      - "127.0.0.1:8090:8090"
     deploy:
       resources:
         limits:
@@ -218,6 +225,7 @@ services:
       - DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - POSTGRES_HOST=postgres
       - BISQ_GRPC_HOST=bisq:9998
+      - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
       - BISQ2_REST_HOST=bisq2:8090
       - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
       - PRICE_PROVIDER=bisq_tor
@@ -293,6 +301,9 @@ services:
       - SNAPSHOT_INTERVAL_MIN=1
       - FRONTEND_DIR=/app/react-frontend/dist
       - MM_CONTROLLER_API_URL=http://mm-controller:5001
+      # Must match mm-controller's INTERNAL_API_SECRET: every proxied
+      # /api/mm-controller/* call carries it as X-Internal-Secret.
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - UNIFIED_API_URL=http://unified-api:5010
       - TOR_PROXY_ADDR=tor:9050
       - BISQ_GRPC_HOST=bisq:9998
@@ -416,6 +427,9 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - DEXMM_TELEGRAM_WEBHOOK_URL=${DEXMM_TELEGRAM_WEBHOOK_URL:-}
+      # Registered as secret_token on setWebhook; inbound /telegram-webhook
+      # posts are rejected unless they echo it back (fail-closed when unset).
+      - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
       # Alternative to xprv/tprv:
       # - LND_SEED_MNEMONIC_FILE=/run/secrets/lnd_seed_mnemonic
       # - LND_AEZEED_PASSPHRASE_FILE=/run/secrets/lnd_aezeed_passphrase
@@ -561,6 +575,7 @@ services:
   #     - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
   #     - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
   #     - PUSHPUSH_TELEGRAM_WEBHOOK_URL=${PUSHPUSH_TELEGRAM_WEBHOOK_URL:-}
+  #     - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
   #   deploy:
   #     resources:
   #       limits:
