@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Trial-run bootstrap for a self-hosted Gitea instance (reached over Tailscale).
-# Idempotent: connects to Gitea, ensures the 6 repos exist (creates + pushes if
+# Idempotent: connects to Gitea, ensures the manifest repos exist (creates + pushes if
 # missing), runs the secrets transfer, enables Actions per repo, and prepares a
 # runner registration token. Does NOT touch origin / .gitmodules / GitHub.
 #
@@ -27,8 +27,10 @@ log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 # ---------------------------------------------------------------------------
 ENV_GITEA="$SCRIPT_DIR/.env.gitea"
 [[ -f "$ENV_GITEA" ]] || die "missing $ENV_GITEA — copy .env.gitea.example and fill it in"
+set -a
 # shellcheck disable=SC1090
-set -a; . "$ENV_GITEA"; set +a
+. "$ENV_GITEA"
+set +a
 
 # Shared repo list + ROOT_REPO (single source of truth; see the file's header).
 # shellcheck source=../manifest.sh
@@ -51,8 +53,8 @@ API="$GITEA_URL/api/v1"
 : "${GITEA_INTERNAL_URL:=$GITEA_URL}"
 GITEA_INTERNAL_URL="${GITEA_INTERNAL_URL%/}"
 
-for tool in curl jq git sed; do
-  command -v "$tool" >/dev/null 2>&1 || die "missing required tool: $tool (install all with: sudo apt install -y curl jq git)"
+for tool in curl jq git sed ssh scp; do
+  command -v "$tool" >/dev/null 2>&1 || die "missing required tool: $tool (install all with: sudo apt install -y curl jq git openssh-client)"
 done
 
 # curl helpers ---------------------------------------------------------------
@@ -190,6 +192,7 @@ echo "  wrote $SCRIPT_DIR/daemon.json (insecure-registries: $REGISTRY_HOST)"
 log "Fetching runner registration token"
 reg_path="/repos/$GITEA_OWNER/$ROOT_REPO/actions/runners/registration-token"
 [[ "$OWNER_TYPE" == "org" ]] && reg_path="/orgs/$GITEA_OWNER/actions/runners/registration-token"
+runner_base="${reg_path%/registration-token}"
 
 # Endpoint is GET on current Gitea; older builds used POST. Try GET then POST.
 REG_JSON="$(curl -fsS "${AUTH[@]}" "$API$reg_path" 2>/dev/null || true)"
@@ -220,20 +223,77 @@ SSH_TARGET="$HOMESERVER_SSH_USER@$HOMESERVER_SSH_HOST"
 
 echo "  target: $SSH_TARGET:$HOMESERVER_RUNNER_DIR"
 
+# HOMESERVER_RUNNER_DIR comes from the trusted, local .env.gitea file.
+# shellcheck disable=SC2029
 ssh "$SSH_TARGET" "mkdir -p $HOMESERVER_RUNNER_DIR"
+ssh "$SSH_TARGET" '
+  docker info >/dev/null
+  loginctl show-user "$USER" -p Linger --value | grep -qx yes
+' || die "runner host is not provisioned; run deploy/provision/gitea/provision-runner-user.sh first"
 
 scp \
   "$SCRIPT_DIR/act-runner-compose.yml" \
   "$SCRIPT_DIR/runner-config.yaml" \
+  "$SCRIPT_DIR/runner-reconcile.sh" \
+  "$SCRIPT_DIR/install-runner-service.sh" \
+  "$SCRIPT_DIR/gitea-runner-reconcile.service" \
+  "$SCRIPT_DIR/gitea-runner-reconcile.timer" \
   "$SCRIPT_DIR/act-runner.env" \
   "$SCRIPT_DIR/daemon.json" \
   "$SCRIPT_DIR/teardown.sh" \
   "$REPO_ROOT/deploy/provision/manifest.sh" \
   "$SSH_TARGET:$HOMESERVER_RUNNER_DIR/"
 
-ssh "$SSH_TARGET" "cd $HOMESERVER_RUNNER_DIR && docker compose -f act-runner-compose.yml up -d"
+# shellcheck disable=SC2029
+ssh "$SSH_TARGET" "cd $HOMESERVER_RUNNER_DIR && chmod 700 install-runner-service.sh runner-reconcile.sh teardown.sh && ./install-runner-service.sh && rm -f .reconcile-disabled && ./runner-reconcile.sh && systemctl --user is-active --quiet gitea-runner-reconcile.timer"
 
-echo "  runner started on $HOMESERVER_SSH_HOST"
+log "Waiting for Gitea to report runner '$RUNNER_NAME' online"
+online_runner_id=""
+runner_json=""
+for _ in $(seq 1 60); do
+  runner_json="$(api_get "$runner_base" 2>/dev/null || true)"
+  online_ids="$(printf '%s' "$runner_json" | jq -r --arg n "$RUNNER_NAME" '
+    .runners[]? | select(.name == $n and .status == "online" and .disabled == false) | .id
+  ' 2>/dev/null || true)"
+  if [[ "$(printf '%s\n' "$online_ids" | sed '/^$/d' | wc -l)" -eq 1 ]]; then
+    online_runner_id="$online_ids"
+    break
+  fi
+  sleep 2
+done
+
+if [[ -z "$online_runner_id" ]]; then
+  # shellcheck disable=SC2029
+  ssh "$SSH_TARGET" "cd $HOMESERVER_RUNNER_DIR && docker compose -f act-runner-compose.yml ps && docker logs gitea-act-runner --tail 120" || true
+  die "runner '$RUNNER_NAME' did not become uniquely online within 120 seconds"
+fi
+
+# Labels are the part before the first ':' in each configured mapping.
+IFS=',' read -r -a label_specs <<< "$RUNNER_LABELS"
+for spec in "${label_specs[@]}"; do
+  expected_label="${spec%%:*}"
+  if ! printf '%s' "$runner_json" | jq -e --argjson id "$online_runner_id" --arg label "$expected_label" '
+    any(.runners[]?; .id == $id and any(.labels[]?; .name == $label))
+  ' >/dev/null; then
+    die "runner '$RUNNER_NAME' is online but missing label '$expected_label'"
+  fi
+done
+
+# Preserve the one online registration and remove only idle, offline duplicates
+# with the same name. This cleans up registrations left by an old teardown
+# without risking an active runner.
+duplicate_ids="$(printf '%s' "$runner_json" | jq -r --arg n "$RUNNER_NAME" --argjson keep "$online_runner_id" '
+  .runners[]?
+  | select(.name == $n and .id != $keep and .status == "offline" and .busy == false)
+  | .id
+')"
+for id in $duplicate_ids; do
+  rc="$(api_code DELETE "$runner_base/$id")"
+  [[ "$rc" == "204" ]] && echo "  removed stale runner registration: $id" \
+    || echo "  WARN: could not remove stale runner registration $id (HTTP $rc)"
+done
+
+echo "  runner online on $HOMESERVER_SSH_HOST (id=$online_runner_id)"
 
 # ---------------------------------------------------------------------------
 # Done
@@ -247,5 +307,5 @@ Trigger the trial:
 The runner should appear online in Gitea → $ROOT_REPO → Settings → Actions → Runners.
 
 Tear everything down later (no artifacts left):
-  ssh $SSH_TARGET "cd $HOMESERVER_RUNNER_DIR && bash teardown.sh"
+  bash deploy/provision/gitea/teardown-gitea.sh
 EOF

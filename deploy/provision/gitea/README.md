@@ -36,10 +36,11 @@ unchanged; you can switch back at any time.
 
 ## Local tooling
 
-`setup-gitea.sh` needs `curl`, `jq`, and `git` on the machine you run it from:
+`setup-gitea.sh` needs `curl`, `jq`, `git`, and the OpenSSH client on the machine
+you run it from:
 
 ```
-sudo apt install -y curl jq git
+sudo apt install -y curl jq git openssh-client
 ```
 
 ## What you provide
@@ -80,7 +81,9 @@ Over a single sudo SSH session as `HOMESERVER_ADMIN_SSH_USER` (e.g. `umbrel`) it
 1. creates the `gitea-runner` user (no password — key-only, like the admin account);
 2. adds it to the `docker` group so it can run `docker compose` for the runner;
 3. authorizes the **same** SSH key(s) the admin account uses (copies the admin's
-   `authorized_keys`) — no separate keypair to manage for a homelab trial.
+   `authorized_keys`) — no separate keypair to manage for a homelab trial;
+4. enables systemd lingering so the runner user's reconciliation timer remains
+   active after SSH logout and across homeserver reboots.
 
 It's idempotent (safe to re-run) and forces correct home-dir ownership so sshd's `StrictModes`
 still accepts key auth on a re-run over a stale home dir. Verify it worked (should not prompt
@@ -135,7 +138,7 @@ After the push it sets the root repo's default branch to `develop` so that the G
 
 ### Step 4 — enable Actions on each repo
 
-Sends `PATCH /repos/{owner}/{name}` with `{"has_actions": true}` for all 6 repos. Without
+Sends `PATCH /repos/{owner}/{name}` with `{"has_actions": true}` for every manifest repo. Without
 this, the Gitea Actions tab does not appear and workflows do not run.
 
 ### Step 5 — transfer secrets + write daemon.json
@@ -167,12 +170,15 @@ This file is what the runner container reads on first boot to register itself wi
 ### Step 7 — deploy and start the runner on the homeserver
 
 SSHes into `HOMESERVER_SSH_USER@HOMESERVER_SSH_HOST`, creates `HOMESERVER_RUNNER_DIR`, SCPs
-the runner files (`act-runner-compose.yml`, `runner-config.yaml`, `act-runner.env`,
-`daemon.json`), then runs `docker compose -f act-runner-compose.yml up -d` remotely.
+the runner files and user-systemd units, installs/enables the reconciliation timer,
+then invokes the same reconciler used by that timer.
+Setup waits up to 120 seconds for Gitea to report exactly one online runner with every
+configured label. It fails with remote status/log output otherwise and removes only idle,
+offline registrations left behind under the same runner name.
 
-It runs Docker-in-Docker, so every job image/layer/cache lives in a throwaway volume.
-In Gitea → repo Settings → Actions → Runners the runner shows `online` with the
-`ubuntu-latest` label after a few seconds.
+It runs Docker-in-Docker, so every job image/layer/cache lives in a named disposable
+volume. DinD and act-runner use pinned image digests and health checks; act-runner is not
+started until the Docker daemon is ready.
 
 **How jobs get Docker (for `docker buildx`):** the DinD daemon runs on plain TCP 2375 on
 the internal compose network (no TLS — never published to the host/LAN). `runner-config.yaml`
@@ -180,6 +186,37 @@ sets `container.options` to bind-mount the DinD daemon's own `/var/run/docker.so
 job container, so build steps talk to DinD (not the host) — builds stay inside DinD and are
 wiped by teardown. That file also carries the runner log level and is deployed alongside the
 compose.
+
+## Automatic recovery
+
+The runner is permanent homeserver infrastructure. Docker's `unless-stopped` policy
+restarts existing containers, while `gitea-runner-reconcile.timer` also recreates
+containers that have been removed. The timer runs 30 seconds after boot and then every
+two minutes after each reconciliation finishes. It is a lingering user-systemd timer,
+so the user's manager starts at boot even when nobody logs in.
+
+The reconciler serializes itself with setup and teardown, waits for Compose health checks,
+and writes state transitions to journald. Inspect it with:
+
+```bash
+ssh gitea-runner@100.x.y.z 'systemctl --user status gitea-runner-reconcile.timer'
+ssh gitea-runner@100.x.y.z 'journalctl --user -u gitea-runner-reconcile.service'
+```
+
+It records a disk warning at 90% usage and a critical message at 95%, but never prunes
+Docker data automatically. A normal `docker compose restart` is safe. To keep the runner
+stopped for maintenance, suppress reconciliation first, then restore it afterwards:
+
+```bash
+touch .reconcile-disabled
+docker compose -f act-runner-compose.yml stop
+# ...maintenance...
+rm .reconcile-disabled
+./runner-reconcile.sh
+```
+
+Do not use `down` or delete runner volumes manually; use the guarded teardown below when
+you intend to remove the runner and its cached data.
 
 ## Trigger the trial
 
@@ -191,27 +228,29 @@ The `ci` workflow runs `test-go` + `test-frontend`, then builds and pushes all 1
 images to the Gitea registry. Browse them in Gitea under the owner's **Packages** tab
 (`<gitea-host>/<owner>/-/packages`). GitHub is unaffected (a push to `origin` still
 triggers the normal GitHub pipeline). First run is cold (no build cache) — the heavy
-tor/bisq/bisq2 images take a while and use real disk in the DinD volume; `teardown.sh`
-reclaims it all.
+tor/bisq/bisq2 images take a while and use real disk in the DinD volume; the guarded
+teardown command below reclaims it all.
 
-## Tear down — leaves no artifacts
+## Intentional teardown
 
-SSH into the homeserver and run teardown from the runner directory:
+Run teardown from the provisioning checkout, where the Gitea PAT is already available:
 
 ```bash
-ssh user@100.x.y.z "cd ~/gitea-runner && bash teardown.sh"
+bash deploy/provision/gitea/teardown-gitea.sh
 ```
 
-This unregisters the runner from Gitea, runs `docker compose down -v` (removing the
-runner, the DinD storage with all pulled job images/cache, and the registration volume),
-removes the two runner images, and deletes `act-runner.env`. Verify:
+The command creates `.reconcile-disabled` before taking the reconciliation lock, so the
+systemd timer cannot recreate containers during teardown. It then removes the runner,
+DinD cache, registration volume, runner images, and `act-runner.env`, and unregisters
+matching runner records through the Gitea API without copying the PAT to the homeserver.
+Verify:
 
 ```bash
 docker ps -a | grep gitea-      # empty
 docker volume ls | grep gitea   # empty
 ```
 
-The homeserver is back to its prior state (Docker itself aside). The images you pushed
-live in Gitea's registry (not on the homeserver) — delete them from the owner's
-**Packages** tab if you want them gone. To fully undo the trial, you can also delete the
-6 repos in the Gitea UI; GitHub was never touched.
+The reconciliation timer remains installed but suppressed by the marker. Running
+`setup-gitea.sh` removes the marker and restores the permanent runner. Images pushed to
+Gitea's registry are independent; delete those from the owner's **Packages** tab only
+when they are no longer required.

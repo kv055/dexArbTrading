@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically reconcile the Gitea Actions runner stack
+
+[Timer]
+OnStartupSec=30s
+OnUnitInactiveSec=2min
+AccuracySec=15s
+Unit=gitea-runner-reconcile.service
+
+[Install]
+WantedBy=timers.target

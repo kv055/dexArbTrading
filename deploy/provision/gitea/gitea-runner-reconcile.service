@@ -1,0 +1,11 @@
+[Unit]
+Description=Reconcile the Gitea Actions runner stack
+
+[Service]
+Type=oneshot
+WorkingDirectory=@RUNNER_DIR@
+ExecStart=/bin/sh -c 'if [ -x ./runner-reconcile.sh ]; then exec ./runner-reconcile.sh; fi'
+TimeoutStartSec=180
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gitea-runner-reconcile

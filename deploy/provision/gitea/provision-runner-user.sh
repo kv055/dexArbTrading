@@ -28,8 +28,10 @@ log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 # ---------------------------------------------------------------------------
 ENV_GITEA="$SCRIPT_DIR/.env.gitea"
 [[ -f "$ENV_GITEA" ]] || die "missing $ENV_GITEA — copy .env.gitea.example and fill it in"
+set -a
 # shellcheck disable=SC1090
-set -a; . "$ENV_GITEA"; set +a
+. "$ENV_GITEA"
+set +a
 
 : "${HOMESERVER_SSH_HOST:?HOMESERVER_SSH_HOST not set in .env.gitea}"
 : "${HOMESERVER_SSH_USER:=gitea-runner}"          # the user we're creating
@@ -51,6 +53,9 @@ log "Provisioning runner user '$RUNNER_USER' on $ADMIN@$HOST"
 # interpolated by the local shell into the quoted heredoc body.
 REMOTE_TMP="/tmp/provision-runner-user.$$.sh"
 
+# The temp path is generated locally and intentionally expanded into the
+# trusted remote command.
+# shellcheck disable=SC2029
 ssh "$ADMIN@$HOST" "cat > '$REMOTE_TMP' && chmod +x '$REMOTE_TMP'" <<'REMOTE'
 set -Eeuo pipefail
 RUNNER_USER="$1"
@@ -102,12 +107,24 @@ ADMIN_KEYS="$ADMIN_HOME/.ssh/authorized_keys"
 install -d -m 700 -o "$RUNNER_USER" -g "$RUNNER_USER" "$RUNNER_HOME/.ssh"
 install -m 600 -o "$RUNNER_USER" -g "$RUNNER_USER" "$ADMIN_KEYS" "$RUNNER_HOME/.ssh/authorized_keys"
 echo "  authorized $(wc -l < "$RUNNER_HOME/.ssh/authorized_keys") key(s) from $ADMIN for $RUNNER_USER"
+
+# 4. Keep the runner's systemd user manager alive after SSH sessions end and
+# across reboots. setup-gitea.sh installs/enables the user-owned timer itself.
+loginctl enable-linger "$RUNNER_USER"
+echo "  enabled systemd lingering for $RUNNER_USER"
 REMOTE
 
 # Run it under sudo with a TTY (-t) so the password prompt has somewhere to go,
 # then clean up the temp file regardless of outcome.
 log "Running provisioning as root (sudo may prompt for $ADMIN's password)"
 ssh -t "$ADMIN@$HOST" "sudo bash '$REMOTE_TMP' '$RUNNER_USER' '$ADMIN'; rc=\$?; rm -f '$REMOTE_TMP'; exit \$rc"
+
+log "Verifying runner account and persistent user manager"
+ssh "$RUNNER_USER@$HOST" '
+  id -nG | tr " " "\n" | grep -qx docker
+  docker info >/dev/null
+  loginctl show-user "$USER" -p Linger --value | grep -qx yes
+'
 
 log "Done"
 cat <<EOF
