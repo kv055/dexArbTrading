@@ -390,6 +390,8 @@ services:
     env_file:
       - ./dexMmController/.env
     depends_on:
+      postgres:
+        condition: service_healthy
       lnd:
         condition: service_healthy
       unified-api:
@@ -462,11 +464,11 @@ services:
       # - ./dexMmController/secrets/lnd_seed_mnemonic:/run/secrets/lnd_seed_mnemonic:ro
       # - ./dexMmController/secrets/lnd_aezeed_passphrase:/run/secrets/lnd_aezeed_passphrase:ro
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5001/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5001/readyz"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 5m
     deploy:
       resources:
         limits:
