@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Script counting the lines of code in the parent repository and its submodules, excluding binary files.
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 grand_total=0
 
