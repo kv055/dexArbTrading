@@ -826,6 +826,12 @@ func computeCapitalRequirement(btcAmount, refPriceEUR float64, dexExchange strin
 	return cap
 }
 
+// CapitalRequirementForTrade reports the capital required for a trade using a
+// persisted per-offer security deposit when one is available.
+func CapitalRequirementForTrade(btcAmount, refPriceEUR float64, dexExchange string, isBid bool, hedgePosition *HedgePositionDetail, realDepositPct *float64) CapitalRequirement {
+	return computeCapitalRequirement(btcAmount, refPriceEUR, dexExchange, isBid, hedgePosition, realDepositPct)
+}
+
 func AbortCostFromBreakdown(bd CostBreakdown) AbortCostBreakdown {
 	if bd.BTCAmount <= 0 {
 		return AbortCostBreakdown{}
