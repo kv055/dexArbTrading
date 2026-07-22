@@ -232,7 +232,9 @@ services:
       - PRICE_PROVIDER=bisq_tor
       - SNAPSHOT_INTERVAL_MIN=1
       - CLOSED_OFFER_ANALYSIS_GRACE_CYCLES=3
-      - SNAPSHOT_HEALTH_MAX_AGE_SEC=180
+      # A full eight-currency pass can exceed three minutes while Tor-backed
+      # sources time out. Keep the worker healthy throughout a valid pass.
+      - SNAPSHOT_HEALTH_MAX_AGE_SEC=900
       - SERVER_INTERNAL_URL=http://unified-api:5010
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY:-}
