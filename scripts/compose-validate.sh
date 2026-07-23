@@ -62,6 +62,10 @@ for f in "${ENV_FILES[@]:-}"; do
 done
 
 CONFIG="$(docker compose -f "$COMPOSE_FILE" config 2>/dev/null)"
+# Mail is intentionally opt-in because its live deployment requires external
+# DNS/TLS material and an IMAP credential. Validate its topology separately
+# while keeping the normal render free of unprovisioned mail services.
+MAIL_CONFIG="$(COMPOSE_PROFILES=mail MADDY_HOSTNAME=mx.example.test MADDY_DOMAIN=example.test MADDY_RECIPIENT=payments@example.test MADDY_IMAP_PASSWORD=validation-password docker compose -f "$COMPOSE_FILE" config 2>/dev/null)"
 
 fail=0
 assert_contains() {
@@ -125,11 +129,42 @@ assert_absent "no host.docker.internal in dexmonitor"     "host.docker.internal:
 
 # Maddy is receive-only: SMTP 25 is public, while IMAP is only exposed to the
 # bridge network and no submission ports exist.
-assert_contains "Maddy image is pinned" "image: foxcpp/maddy:0.9.5"
-assert_contains "Maddy publishes SMTP 25" 'published: "25"'
-assert_absent "Maddy does not publish IMAP 993" 'published: "993"'
-assert_absent "no SMTP submission port 465" "target: 465"
-assert_absent "no SMTP submission port 587" "target: 587"
+if printf '%s\n' "$CONFIG" | grep -qE '^  maddy(-bootstrap|-backup)?:$'; then
+	echo "✖ Maddy is unexpectedly enabled without the mail profile" >&2
+	fail=1
+else
+	echo "✓ Maddy is disabled without the mail profile"
+fi
+if printf '%s\n' "$MAIL_CONFIG" | grep -qF -- "image: foxcpp/maddy:0.9.5"; then
+	echo "✓ Maddy image is pinned"
+else
+	echo "✖ Maddy image is pinned (missing: image: foxcpp/maddy:0.9.5)" >&2
+	fail=1
+fi
+if printf '%s\n' "$MAIL_CONFIG" | grep -qF -- 'published: "25"'; then
+	echo "✓ Maddy publishes SMTP 25"
+else
+	echo "✖ Maddy publishes SMTP 25 (missing published port)" >&2
+	fail=1
+fi
+if printf '%s\n' "$MAIL_CONFIG" | grep -qF -- 'published: "993"'; then
+	echo "✖ Maddy does not publish IMAP 993 (forbidden but present)" >&2
+	fail=1
+else
+	echo "✓ Maddy does not publish IMAP 993"
+fi
+if printf '%s\n' "$MAIL_CONFIG" | grep -qF -- "target: 465"; then
+	echo "✖ no SMTP submission port 465 (forbidden but present)" >&2
+	fail=1
+else
+	echo "✓ no SMTP submission port 465"
+fi
+if printf '%s\n' "$MAIL_CONFIG" | grep -qF -- "target: 587"; then
+	echo "✖ no SMTP submission port 587 (forbidden but present)" >&2
+	fail=1
+else
+	echo "✓ no SMTP submission port 587"
+fi
 assert_in_service "fiat-controller uses dedicated payment IMAP settings" "fiat-controller" "PAYMENT_EMAIL_IMAP_HOST: maddy"
 
 if [ "$fail" -ne 0 ]; then

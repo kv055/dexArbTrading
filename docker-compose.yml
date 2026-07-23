@@ -526,6 +526,10 @@ services:
   # Receive-only payment mailbox. SMTP 25 is the sole public port; TLS IMAP is
   # available only to services on the Compose network.
   maddy-bootstrap:
+    # Mail transport is deliberately opt-in.  It requires externally supplied
+    # DNS/TLS material and an IMAP password, so a normal stack deploy must not
+    # try to start it with the example defaults.
+    profiles: ["mail"]
     image: foxcpp/maddy:0.9.5
     entrypoint: ["/bin/sh", "/bootstrap.sh"]
     environment:
@@ -541,6 +545,7 @@ services:
     restart: "no"
 
   maddy:
+    profiles: ["mail"]
     logging: *default-logging
     image: foxcpp/maddy:0.9.5
     depends_on:
@@ -574,6 +579,7 @@ services:
   # Daily local snapshots make mailbox state recoverable independently of the
   # live Maddy volume. Operators should copy maddy-backups off-host.
   maddy-backup:
+    profiles: ["mail"]
     image: alpine:3.20
     depends_on:
       maddy:
@@ -632,6 +638,11 @@ services:
       totp-api:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      # Unified API owns schema migrations and is the only application role
+      # allowed to create objects in public.  Do not let this service race its
+      # payment-event schema initialization on a freshly upgraded database.
+      unified-api:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]

@@ -314,6 +314,9 @@ Before starting the service:
    `deploy/maddy/tls/privkey.pem`; restrict the private key to the deploy operator.
 4. Set `MADDY_HOSTNAME`, `MADDY_DOMAIN`, `MADDY_RECIPIENT`, and a long random
    `MADDY_IMAP_PASSWORD` in the encrypted root environment.
+   Set `COMPOSE_PROFILES=mail` there as well. Without that explicit opt-in,
+   Compose omits the mail services so an ordinary deploy cannot start SMTP with
+   example settings or an empty IMAP password.
 5. Confirm the provider and hosting account permit inbound TCP 25. From a machine
    outside the VPS network run `nc -vz mx.example.com 25`; then run
    `openssl s_client -starttls smtp -connect mx.example.com:25
