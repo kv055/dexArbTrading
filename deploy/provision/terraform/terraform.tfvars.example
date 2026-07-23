@@ -7,6 +7,7 @@ ssh_public_key = "ssh-ed25519 AAAA... your-comment"
 # Optional overrides (defaults are fine for most cases):
 # server_name   = "dexarbtrading"
 # location      = "hel1"
+# public_hostname = "dexmonitor.live"
 
 # Uncomment and add your IP to open Postgres/Grafana/Prometheus:
 # trusted_cidrs = ["1.2.3.4/32"]

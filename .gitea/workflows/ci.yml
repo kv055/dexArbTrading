@@ -775,7 +775,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' CERT_CN='$SSH_HOST' bash -s" <<'REMOTE'
+            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' CERT_CN='dexmonitor.live' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
           cd "$REPO_DIR"
@@ -807,6 +807,9 @@ jobs:
             fi
             IMAGE_TAG="$1" docker compose pull
             IMAGE_TAG="$1" docker compose up -d --remove-orphans --wait --wait-timeout 300
+            if [ -x deploy/nginx/letsencrypt.sh ] && grep -q '^LETSENCRYPT_EMAIL=.' .env; then
+              bash deploy/nginx/letsencrypt.sh issue
+            fi
             # shellcheck disable=SC2086
             IMAGE_TAG="$1" docker compose up -d --force-recreate --no-deps \
               --wait --wait-timeout 120 $RECREATE_SERVICES
@@ -814,16 +817,16 @@ jobs:
 
           edge_up() {
             local code
-            code=$(curl -kso /dev/null -w '%{http_code}' --max-time 10 https://127.0.0.1:5443/ 2>/dev/null) || code=000
-            [ "$code" = 200 ] || [ "$code" = 401 ] || curl -fsSL --max-time 10 http://127.0.0.1:5000/ >/dev/null
+            code=$(curl -kso /dev/null -w '%{http_code}' --max-time 10 https://127.0.0.1/ 2>/dev/null) || code=000
+            [ "$code" = 200 ] || [ "$code" = 401 ] || curl -fsSL --max-time 10 http://127.0.0.1/ >/dev/null
           }
           app_get() {
             local code
             code=$(docker compose exec -T dexmonitor curl -so /dev/null -w '%{http_code}' --max-time 30 "http://localhost:5000$1" 2>/dev/null) || code=000
             { [ "$code" = 200 ] || [ "$code" = 401 ]; } && return 0
-            code=$(curl -sko /dev/null -w '%{http_code}' --max-time 30 "https://127.0.0.1:5443$1" 2>/dev/null) || code=000
+            code=$(curl -sko /dev/null -w '%{http_code}' --max-time 30 "https://127.0.0.1$1" 2>/dev/null) || code=000
             { [ "$code" = 200 ] || [ "$code" = 401 ]; } && return 0
-            code=$(curl -so /dev/null -w '%{http_code}' --max-time 30 "http://127.0.0.1:5000$1" 2>/dev/null) || code=000
+            code=$(curl -so /dev/null -w '%{http_code}' --max-time 30 "http://127.0.0.1$1" 2>/dev/null) || code=000
             [ "$code" = 200 ] || [ "$code" = 401 ]
           }
           smoke() {

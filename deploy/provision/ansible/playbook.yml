@@ -6,6 +6,8 @@
   vars:
     app_dir: /opt/dexArbTrading
     deploy_user: deploy
+    public_hostname: dexmonitor.live
+    godaddy_pat: ""
 
   tasks:
 
@@ -22,6 +24,7 @@
           - curl
           - gnupg
           - git
+          - jq
         state: present
 
     - name: Create /etc/apt/keyrings
@@ -109,6 +112,58 @@
       environment:
         GIT_TERMINAL_PROMPT: "0"
       become_user: "{{ deploy_user }}"
+
+    - name: Point public GoDaddy DNS at this VPS
+      ansible.builtin.script: files/godaddy-dns-upsert.sh
+      environment:
+        GODADDY_PAT: "{{ godaddy_pat }}"
+        GODADDY_DOMAIN: "{{ public_hostname }}"
+        GODADDY_IP: "{{ ansible_host }}"
+      no_log: true
+      changed_when: false
+      when: godaddy_pat | default('') | length > 0
+      tags: [dns]
+
+    - name: Wait for public DNS propagation
+      ansible.builtin.command: getent ahostsv4 {{ public_hostname }}
+      register: public_dns
+      changed_when: false
+      until: ansible_host in public_dns.stdout
+      retries: 30
+      delay: 10
+      when: godaddy_pat | default('') | length > 0
+      tags: [dns]
+
+    - name: Create nginx ACME and certificate directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: "0750"
+      loop:
+        - "{{ app_dir }}/deploy/nginx/acme-webroot"
+        - "{{ app_dir }}/deploy/nginx/letsencrypt"
+        - "{{ app_dir }}/deploy/nginx/certs"
+
+    - name: Install certificate renewal service
+      ansible.builtin.template:
+        src: dexarb-certbot.service.j2
+        dest: /etc/systemd/system/dexarb-certbot.service
+        mode: "0644"
+
+    - name: Install certificate renewal timer
+      ansible.builtin.template:
+        src: dexarb-certbot.timer.j2
+        dest: /etc/systemd/system/dexarb-certbot.timer
+        mode: "0644"
+
+    - name: Enable certificate renewal timer
+      ansible.builtin.systemd:
+        name: dexarb-certbot.timer
+        enabled: true
+        state: started
+        daemon_reload: true
 
     - name: Print next steps
       ansible.builtin.debug:

@@ -361,11 +361,10 @@ services:
       # TLS material (gitignored, never committed). The CI deploy guard auto-creates/
       # renews it on the VPS before `up`; locally run deploy/nginx/gen-self-signed-cert.sh.
       - ./deploy/nginx/certs:/etc/nginx/certs:ro
+      - ./deploy/nginx/acme-webroot:/var/www/certbot:ro
     ports:
-      # 5000 -> 80 keeps the existing plaintext entrypoint (now a 301 to HTTPS);
-      # 5443 -> 443 is the TLS entrypoint agents and browsers actually use.
-      - "5000:80"
-      - "5443:443"
+      - "80:80"
+      - "443:443"
     depends_on:
       dexmonitor:
         condition: service_healthy
@@ -379,6 +378,15 @@ services:
           memory: 32M
           cpus: '0.1'
     restart: unless-stopped
+
+  # Run on demand for certificate issuance and from the host renewal timer.
+  # nginx serves the shared webroot while Certbot writes ACME challenges to it.
+  certbot:
+    image: certbot/certbot:latest
+    profiles: ["certbot"]
+    volumes:
+      - ./deploy/nginx/acme-webroot:/var/www/certbot
+      - ./deploy/nginx/letsencrypt:/etc/letsencrypt
 
   mm-controller:
     logging: *default-logging

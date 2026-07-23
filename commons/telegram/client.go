@@ -21,6 +21,78 @@ type Client struct {
 	client *http.Client
 }
 
+// BotInfo is the public subset returned by Telegram's getMe endpoint.
+type BotInfo struct {
+	Username string `json:"username"`
+}
+
+// GetBotInfo validates token and returns the bot's public username. It does not
+// require a destination chat, so it is safe to use while pairing a new bot.
+func GetBotInfo(ctx context.Context, token string, client *http.Client) (BotInfo, error) {
+	raw, status, err := postWithToken(ctx, token, "getMe", map[string]any{}, client)
+	if err != nil {
+		return BotInfo{}, err
+	}
+	var response struct {
+		OK     bool    `json:"ok"`
+		Result BotInfo `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return BotInfo{}, fmt.Errorf("decode Telegram getMe response: %w", err)
+	}
+	if status != http.StatusOK || !response.OK || strings.TrimSpace(response.Result.Username) == "" {
+		return BotInfo{}, fmt.Errorf("telegram getMe error: %s", raw)
+	}
+	return response.Result, nil
+}
+
+// SetWebhookWithToken registers a webhook before a destination chat has been
+// paired. The normal Client method remains the preferred path after pairing.
+func SetWebhookWithToken(ctx context.Context, token, url string, client *http.Client) error {
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return fmt.Errorf("telegram webhook URL is empty")
+	}
+	body := map[string]any{"url": url}
+	if secret := WebhookSecret(); secret != "" {
+		body["secret_token"] = secret
+	}
+	raw, status, err := postWithToken(ctx, token, "setWebhook", body, client)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("telegram setWebhook error: %s", raw)
+	}
+	return nil
+}
+
+func postWithToken(ctx context.Context, token, method string, body map[string]any, client *http.Client) ([]byte, int, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, 0, fmt.Errorf("telegram: bot token not configured")
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return nil, 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://api.telegram.org/bot%s/%s", token, method), bytes.NewReader(b))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	return raw, resp.StatusCode, nil
+}
+
 // NewClient creates a Telegram client. Returns nil when token or chatID is empty.
 func NewClient(token, chatID string, client *http.Client) *Client {
 	token = strings.TrimSpace(token)

@@ -26,3 +26,9 @@ variable "trusted_cidrs" {
   type        = list(string)
   default     = []
 }
+
+variable "public_hostname" {
+  description = "Public DNS name served by the nginx edge and used for the Telegram webhook."
+  type        = string
+  default     = "dexmonitor.live"
+}

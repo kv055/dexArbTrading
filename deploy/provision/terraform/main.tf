@@ -35,19 +35,19 @@ resource "hcloud_firewall" "main" {
     source_ips = ["0.0.0.0/0", "::/0"]
   }
 
+  # Public HTTP is used only for the ACME HTTP-01 challenge and redirects to HTTPS.
   rule {
     direction  = "in"
     protocol   = "tcp"
-    port       = "5000"
+    port       = "80"
     source_ips = ["0.0.0.0/0", "::/0"]
   }
 
-  # TLS edge (nginx :443, published as 5443). Open to all like 5000: access is
-  # gated by TLS + a read-only Grafana token, and scraping agents have dynamic IPs.
+  # Public TLS edge for the dashboard and Telegram webhook.
   rule {
     direction  = "in"
     protocol   = "tcp"
-    port       = "5443"
+    port       = "443"
     source_ips = ["0.0.0.0/0", "::/0"]
   }
 
@@ -110,7 +110,8 @@ resource "hcloud_server" "main" {
   EOF
 
   labels = {
-    project = "dexarbtrading"
-    managed = "terraform"
+    project  = "dexarbtrading"
+    hostname = var.public_hostname
+    managed  = "terraform"
   }
 }

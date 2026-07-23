@@ -7,10 +7,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/id_ed25519}"
+DNS_ONLY=false
 
 usage() {
   cat <<EOF
-Usage: $0 [--key <path-to-ssh-private-key>]
+Usage: $0 [--key <path-to-ssh-private-key>] [--dns-only]
 
 Runs Terraform (provision VPS), Ansible (configure VPS), and writes
 GitHub repository secrets via deploy/provision/secrets/setup-github-secrets.sh.
@@ -19,6 +20,8 @@ Options:
   --key <path>   Path to the SSH private key whose public half is in
                  deploy/provision/terraform/terraform.tfvars. Default: ~/.ssh/id_ed25519
                  Can also be set via SSH_PRIVATE_KEY env var.
+  --dns-only     Reconcile only the GoDaddy apex A record with the existing
+                 Terraform-managed VPS address; does not apply Terraform or deploy apps.
   -h, --help     Show this help.
 EOF
 }
@@ -26,6 +29,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --key) SSH_PRIVATE_KEY="$2"; shift 2 ;;
+    --dns-only) DNS_ONLY=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -49,8 +53,11 @@ TFVARS="$SCRIPT_DIR/terraform/terraform.tfvars"
 [[ -f "$SSH_PRIVATE_KEY" ]]      || die "SSH private key not found: $SSH_PRIVATE_KEY"
 [[ -f "${SSH_PRIVATE_KEY}.pub" ]] || die "matching public key not found: ${SSH_PRIVATE_KEY}.pub"
 
-[[ -f "$REPO_ROOT/.env" ]] || die "missing $REPO_ROOT/.env (GH_PAT required for secrets step)"
-grep -q '^GH_PAT=' "$REPO_ROOT/.env" || die "GH_PAT not set in $REPO_ROOT/.env"
+[[ -f "$REPO_ROOT/.env" ]] || die "missing $REPO_ROOT/.env"
+grep -q '^GODADDY_PAT=' "$REPO_ROOT/.env" || die "GODADDY_PAT not set in $REPO_ROOT/.env"
+if ! "$DNS_ONLY"; then
+  grep -q '^GH_PAT=' "$REPO_ROOT/.env" || die "GH_PAT not set in $REPO_ROOT/.env"
+fi
 
 echo "  terraform.tfvars : $TFVARS"
 echo "  ssh private key  : $SSH_PRIVATE_KEY"
@@ -61,7 +68,9 @@ echo "  ssh private key  : $SSH_PRIVATE_KEY"
 log "Step 1/3: Terraform (Hetzner provisioning)"
 cd "$SCRIPT_DIR/terraform"
 terraform init -input=false
-terraform apply -auto-approve -input=false
+if ! "$DNS_ONLY"; then
+  terraform apply -auto-approve -input=false
+fi
 SERVER_IP="$(terraform output -raw server_ip)"
 [[ -n "$SERVER_IP" ]] || die "terraform did not produce a server_ip output"
 echo "  server_ip = $SERVER_IP"
@@ -88,11 +97,25 @@ for i in {1..30}; do
   sleep 2
 done
 
-GH_PAT_VALUE="$(grep '^GH_PAT=' "$REPO_ROOT/.env" | cut -d= -f2-)"
-ANSIBLE_HOST_KEY_CHECKING=False \
-  ansible-playbook -i "$INVENTORY" playbook.yml \
-    --private-key "$SSH_PRIVATE_KEY" \
-    --extra-vars "gh_pat=$GH_PAT_VALUE"
+GH_PAT_VALUE="$(grep '^GH_PAT=' "$REPO_ROOT/.env" | cut -d= -f2- || true)"
+GODADDY_PAT_VALUE="$(grep '^GODADDY_PAT=' "$REPO_ROOT/.env" | cut -d= -f2-)"
+PUBLIC_HOSTNAME_VALUE="$(grep '^PUBLIC_HOSTNAME=' "$REPO_ROOT/.env" | cut -d= -f2-)"
+PUBLIC_HOSTNAME_VALUE="${PUBLIC_HOSTNAME_VALUE:-dexmonitor.live}"
+[[ -n "$GODADDY_PAT_VALUE" ]] || die "GODADDY_PAT not set in $REPO_ROOT/.env"
+ANSIBLE_ARGS=(
+  -i "$INVENTORY" playbook.yml
+  --private-key "$SSH_PRIVATE_KEY"
+  --extra-vars "gh_pat=$GH_PAT_VALUE godaddy_pat=$GODADDY_PAT_VALUE public_hostname=$PUBLIC_HOSTNAME_VALUE"
+)
+if "$DNS_ONLY"; then
+  ANSIBLE_ARGS+=(--tags dns)
+fi
+ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook "${ANSIBLE_ARGS[@]}"
+
+if "$DNS_ONLY"; then
+  log "DNS reconciliation complete"
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # Step 3: GitHub secrets
