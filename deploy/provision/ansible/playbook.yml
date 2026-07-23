@@ -8,8 +8,15 @@
     deploy_user: deploy
     public_hostname: dexmonitor.live
     godaddy_pat: ""
+    edge_mode: production
 
   tasks:
+
+    - name: Validate edge mode
+      ansible.builtin.assert:
+        that: edge_mode in ['production', 'development']
+        fail_msg: edge_mode must be production or development
+
 
     - name: Update apt cache and upgrade packages
       ansible.builtin.apt:
@@ -113,6 +120,14 @@
         GIT_TERMINAL_PROMPT: "0"
       become_user: "{{ deploy_user }}"
 
+    - name: Persist edge mode for deploy automation
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/.dexarb-edge-mode"
+        content: "{{ edge_mode }}\n"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: "0644"
+
     - name: Install jq for DNS reconciliation
       ansible.builtin.apt:
         name: jq
@@ -128,7 +143,9 @@
         GODADDY_IP: "{{ ansible_host }}"
       no_log: true
       changed_when: false
-      when: godaddy_pat | default('') | length > 0
+      when:
+        - edge_mode == 'production'
+        - godaddy_pat | default('') | length > 0
       tags: [dns]
 
     - name: Wait for public DNS propagation
@@ -138,7 +155,9 @@
       until: ansible_host in public_dns.stdout
       retries: 30
       delay: 10
-      when: godaddy_pat | default('') | length > 0
+      when:
+        - edge_mode == 'production'
+        - godaddy_pat | default('') | length > 0
       tags: [dns]
 
     - name: Create nginx ACME and certificate directories
@@ -152,18 +171,21 @@
         - "{{ app_dir }}/deploy/nginx/acme-webroot"
         - "{{ app_dir }}/deploy/nginx/letsencrypt"
         - "{{ app_dir }}/deploy/nginx/certs"
+      when: edge_mode == 'production'
 
     - name: Install certificate renewal service
       ansible.builtin.template:
         src: dexarb-certbot.service.j2
         dest: /etc/systemd/system/dexarb-certbot.service
         mode: "0644"
+      when: edge_mode == 'production'
 
     - name: Install certificate renewal timer
       ansible.builtin.template:
         src: dexarb-certbot.timer.j2
         dest: /etc/systemd/system/dexarb-certbot.timer
         mode: "0644"
+      when: edge_mode == 'production'
 
     - name: Enable certificate renewal timer
       ansible.builtin.systemd:
@@ -171,6 +193,7 @@
         enabled: true
         state: started
         daemon_reload: true
+      when: edge_mode == 'production'
 
     - name: Print next steps
       ansible.builtin.debug:

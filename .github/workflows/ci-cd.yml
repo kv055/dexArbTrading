@@ -740,7 +740,8 @@ jobs:
             fi
             IMAGE_TAG="$1" docker compose pull
             IMAGE_TAG="$1" docker compose up -d --remove-orphans --wait --wait-timeout 300
-            if [ -x deploy/nginx/letsencrypt.sh ] && grep -q '^LETSENCRYPT_EMAIL=.' .env; then
+            edge_mode="$(cat .dexarb-edge-mode 2>/dev/null || printf 'production')"
+            if [ "$edge_mode" = production ] && [ -x deploy/nginx/letsencrypt.sh ] && grep -q '^LETSENCRYPT_EMAIL=.' .env; then
               bash deploy/nginx/letsencrypt.sh issue
             fi
             # shellcheck disable=SC2086

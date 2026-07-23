@@ -20,13 +20,70 @@ A single script runs all three steps (Terraform, Ansible, GitHub secrets) inside
 cp deploy/provision/terraform/terraform.tfvars.example deploy/provision/terraform/terraform.tfvars
 $EDITOR deploy/provision/terraform/terraform.tfvars
 
-# Run — defaults to ~/.ssh/id_ed25519; override with --key <path>
-deploy/provision/run.sh [--key ~/.ssh/your_key]
+# Production is the default. Use --edge-mode development to skip GoDaddy DNS
+# and Let's Encrypt while retaining the self-signed TLS path.
+deploy/provision/run.sh [--key ~/.ssh/your_key] [--edge-mode production|development]
 ```
 
 This creates a **cx33** server (4 vCPU, 8 GB RAM, 80 GB disk, Debian 12) in `hel1` (Helsinki), configures it with Docker CE and the `deploy` user, clones the repo to `/opt/dexArbTrading`, and writes all 11 GitHub repository secrets. The next push to `main` deploys the full compose stack automatically — including auto-generating nginx's self-signed TLS cert on the VPS (no manual cert step; see [monitoring/README.md](monitoring/README.md#access)).
 
 The script is idempotent — safe to re-run if it fails partway through.
+
+### Production DNS and HTTPS (GoDaddy)
+
+This production flow is additive: the existing IP/self-signed TLS setup remains
+available for development servers. Choose the desired mode when provisioning:
+
+```bash
+# Default: GoDaddy DNS, public hostname, and Let's Encrypt renewal.
+deploy/provision/run.sh --edge-mode production
+
+# No GoDaddy DNS or Let's Encrypt; use the VPS IP with the self-signed cert.
+deploy/provision/run.sh --edge-mode development
+```
+
+Production uses the `PUBLIC_HOSTNAME` apex record, public ports 80/443, and a
+Let's Encrypt HTTP-01 certificate. Development does not require `GODADDY_PAT`,
+does not create GoDaddy records, and does not install the certificate-renewal
+timer. Both modes retain the self-signed certificate generated during deploy so
+nginx can start before a trusted certificate exists.
+
+Set these root `.env` values locally before provisioning. `.env` is ignored;
+the encrypted `.env.enc` is committed by the post-commit hook.
+
+```dotenv
+GODADDY_PAT=<PAT with domains.dns:update>
+PUBLIC_HOSTNAME=dexmonitor.live
+LETSENCRYPT_EMAIL=info@dexmonitor.live
+```
+
+In production mode, the provisioning job reads the Terraform-managed VPS
+address, passes the hostname and PAT to Ansible over SSH, and reconciles the
+GoDaddy apex (`@`) A record. It then waits until the VPS resolves that hostname
+to its own address. Terraform exposes 80 for the ACME HTTP-01 challenge and
+HTTP-to-HTTPS redirect, and 443 for the public dashboard and Telegram webhook.
+The initial CI rollout issues the certificate; Ansible also installs a daily
+renewal timer.
+
+To reconcile DNS later without creating or modifying Terraform resources,
+deploying the application, or writing GitHub secrets, run this command from a
+machine with Docker and the provisioning SSH key:
+
+```bash
+deploy/provision/run.sh --dns-only
+```
+
+The command still reads Terraform state to obtain the existing VPS IP, then
+connects to the VPS itself; there is no need to log in manually. It requires
+`GODADDY_PAT`, `PUBLIC_HOSTNAME`, Terraform state, and the same SSH key as the
+full provisioning job. It updates only the apex A record, with a 600-second
+TTL. `--dns-only` is intentionally unavailable in development mode.
+
+> **GoDaddy Website Builder.** A protected `WebsiteBuilder Site` parking record
+> cannot be deleted through the DNS API. Detach or remove that Website Builder
+> site in the GoDaddy dashboard first, then rerun `--dns-only`. Do not create a
+> second apex A record while the parking record remains: requests could be
+> served by either destination.
 
 ### Teardown
 
@@ -60,7 +117,7 @@ terraform init
 terraform apply
 ```
 
-This creates a **cx33** server (4 vCPU, 8 GB RAM, Debian 12) in `hel1` (Helsinki, cheapest region), a firewall (opens 22, receive-only SMTP 25, 5000 and the TLS port 5443 to all; Postgres/Grafana/Prometheus only to `trusted_cidrs`), and uploads your SSH key. Takes ~30 seconds.
+This creates a **cx33** server (4 vCPU, 8 GB RAM, Debian 12) in `hel1` (Helsinki, cheapest region), a firewall (opens 22, receive-only SMTP 25, and public 80/443; Postgres/Grafana/Prometheus only to `trusted_cidrs`), and uploads your SSH key. Takes ~30 seconds.
 
 ```bash
 # Capture the IP for the next step
