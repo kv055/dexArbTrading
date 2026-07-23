@@ -449,8 +449,26 @@ jobs:
             | xargs -r docker volume rm || true
 
       - name: Create buildx builder (Gitea-registry aware)
-        if: steps.check.outputs.build == 'true' && needs.detect-changes.outputs.deploy_main != 'true'
-        run: docker buildx use ci-builder 2>/dev/null || docker buildx create --name ci-builder --use --driver docker-container --config /tmp/buildkitd.toml
+        if: steps.check.outputs.build == 'true'
+        env:
+          URL: ${{ secrets.REGISTRY_URL }}
+          REF: ${{ github.ref }}
+        run: |
+          # Gitea act executes each step in a fresh job container. Build the
+          # registry config here, immediately before Buildx consumes it; a
+          # /tmp file created by the preceding metadata step does not persist.
+          docker buildx use ci-builder 2>/dev/null && exit 0
+          if [ "$REF" = "refs/heads/main" ]; then
+            docker buildx create --name ci-builder --use --driver docker-container
+          else
+            gitea_host="${URL#*://}"; scheme="${URL%%://*}"
+            if [ "$scheme" = "http" ]; then
+              printf '[registry."%s"]\n  http = true\n  insecure = true\n' "$gitea_host" > /tmp/buildkitd.toml
+            else
+              printf '[registry."%s"]\n  insecure = true\n' "$gitea_host" > /tmp/buildkitd.toml
+            fi
+            docker buildx create --name ci-builder --use --driver docker-container --config /tmp/buildkitd.toml
+          fi
 
       - name: Login to Gitea registry
         if: steps.check.outputs.build == 'true' && needs.detect-changes.outputs.deploy_main != 'true'
