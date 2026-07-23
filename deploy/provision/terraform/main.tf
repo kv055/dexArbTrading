@@ -27,6 +27,14 @@ resource "hcloud_firewall" "main" {
     source_ips = ["0.0.0.0/0", "::/0"]
   }
 
+  # Receive-only Maddy SMTP. IMAP 993 remains private on the Compose network.
+  rule {
+    direction  = "in"
+    protocol   = "tcp"
+    port       = "25"
+    source_ips = ["0.0.0.0/0", "::/0"]
+  }
+
   rule {
     direction  = "in"
     protocol   = "tcp"

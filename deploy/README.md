@@ -60,7 +60,7 @@ terraform init
 terraform apply
 ```
 
-This creates a **cx33** server (4 vCPU, 8 GB RAM, Debian 12) in `hel1` (Helsinki, cheapest region), a firewall (opens 22, 5000 and the TLS port 5443 to all; Postgres/Grafana/Prometheus only to `trusted_cidrs`), and uploads your SSH key. Takes ~30 seconds.
+This creates a **cx33** server (4 vCPU, 8 GB RAM, Debian 12) in `hel1` (Helsinki, cheapest region), a firewall (opens 22, receive-only SMTP 25, 5000 and the TLS port 5443 to all; Postgres/Grafana/Prometheus only to `trusted_cidrs`), and uploads your SSH key. Takes ~30 seconds.
 
 ```bash
 # Capture the IP for the next step
@@ -295,6 +295,54 @@ ssh deploy@<vps-host> "chmod 600 /opt/dexArbTrading/.env /opt/dexArbTrading/{dex
 ```
 
 ## One-time VPS Setup
+
+### Receive-only payment mail
+
+Maddy is pinned to `foxcpp/maddy:0.9.5`. Compose publishes SMTP 25 and keeps TLS
+IMAP 993 private. The configuration has no submission endpoint, outbound queue, relay,
+alias catch-all, or remote delivery target. Only `MADDY_RECIPIENT` is accepted. SPF,
+DKIM, and DMARC checks run on ingress and failures use Maddy's quarantine action.
+
+Before starting the service:
+
+1. Assign the VPS a static public address. Create `A` (and `AAAA` only when IPv6 is
+   actually routed) for `MADDY_HOSTNAME`, for example `mx.example.com`.
+2. Create an MX record for `MADDY_DOMAIN`: `example.com. MX 10 mx.example.com.` Set the
+   address PTR/rDNS to the same Maddy hostname.
+3. Obtain a certificate whose SAN contains `MADDY_HOSTNAME`. Install it as
+   `deploy/maddy/tls/fullchain.pem` and its key as
+   `deploy/maddy/tls/privkey.pem`; restrict the private key to the deploy operator.
+4. Set `MADDY_HOSTNAME`, `MADDY_DOMAIN`, `MADDY_RECIPIENT`, and a long random
+   `MADDY_IMAP_PASSWORD` in the encrypted root environment.
+5. Confirm the provider and hosting account permit inbound TCP 25. From a machine
+   outside the VPS network run `nc -vz mx.example.com 25`; then run
+   `openssl s_client -starttls smtp -connect mx.example.com:25
+   -servername mx.example.com` and verify the certificate.
+6. Start `maddy-bootstrap` once (Compose does this automatically). It idempotently
+   creates the exact mailbox and updates its IMAP credential. Confirm with
+   `docker compose run --rm maddy-bootstrap`.
+
+The `maddy-data` volume contains the durable mailbox. `maddy-backup` writes daily,
+14-day snapshots to `maddy-backups`; copy those archives to the normal off-host backup
+target. A restart must retain the mailbox before rollout continues.
+
+Configure server-side automatic redirects from Wise and PayPal so the original MIME and
+DKIM signature are preserved. Begin with `PAYMENT_EMAIL_MODE=capture`, commit only
+sanitized captures as test fixtures, add reviewed exact templates/signing domains, then
+use `shadow`. Do not select `active` until shadow results are verified. Activation
+requires both the current highest mailbox UID and an RFC3339 time in
+`PAYMENT_EMAIL_ACTIVATION_UID`/`PAYMENT_EMAIL_ACTIVATION_TIME`; older messages are
+permanently ineligible. If DKIM fails after forwarding, activation remains blocked.
+
+After deployment, query the Fiat Controller with its shared secret:
+
+```bash
+curl -H "X-Webhook-Secret: $PUSHPUSH_HEARTBEAT_SECRET" \
+  "https://<fiat-controller>/notification-health?payment_method=Wise"
+```
+
+All channels selected on the resolved payment account must be healthy. An account with
+no selected channel fails pre-trade.
 
 ```bash
 # As root on the VPS

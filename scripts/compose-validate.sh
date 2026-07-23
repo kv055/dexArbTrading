@@ -123,6 +123,15 @@ assert_contains "lnd TLS cert includes lnd SAN" "--tlsextradomain=lnd"
 assert_contains "dexmonitor reaches mm-controller by DNS" "MM_CONTROLLER_API_URL: http://mm-controller:5001"
 assert_absent "no host.docker.internal in dexmonitor"     "host.docker.internal:5001"
 
+# Maddy is receive-only: SMTP 25 is public, while IMAP is only exposed to the
+# bridge network and no submission ports exist.
+assert_contains "Maddy image is pinned" "image: foxcpp/maddy:0.9.5"
+assert_contains "Maddy publishes SMTP 25" 'published: "25"'
+assert_absent "Maddy does not publish IMAP 993" 'published: "993"'
+assert_absent "no SMTP submission port 465" "target: 465"
+assert_absent "no SMTP submission port 587" "target: 587"
+assert_in_service "fiat-controller uses dedicated payment IMAP settings" "fiat-controller" "PAYMENT_EMAIL_IMAP_HOST: maddy"
+
 if [ "$fail" -ne 0 ]; then
 	echo >&2
 	echo "✖ compose topology validation FAILED" >&2

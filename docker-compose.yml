@@ -446,6 +446,10 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - DEXMM_TELEGRAM_WEBHOOK_URL=${DEXMM_TELEGRAM_WEBHOOK_URL:-}
+      # Bid-side pre-trade checks fail closed unless the fiat controller is
+      # reachable and the MacroDroid phone heartbeat is fresh.
+      - FIAT_CONTROLLER_URL=${FIAT_CONTROLLER_URL:-http://fiat-controller:8080}
+      - FIAT_CONTROLLER_HEARTBEAT_SECRET=${PUSHPUSH_HEARTBEAT_SECRET:-}
       # Registered as secret_token on setWebhook; inbound /telegram-webhook
       # posts are rejected unless they echo it back (fail-closed when unset).
       - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
@@ -519,88 +523,175 @@ services:
           cpus: '0.5'
     restart: unless-stopped
 
-  # totp-api:
-  #   logging: *default-logging
-  #   image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-totp-api:${IMAGE_TAG:-latest}
-  #   build:
-  #     context: ./dexFiatController/services/totp-api
-  #     dockerfile: Dockerfile
-  #   environment:
-  #     - PORT=8080
-  #     - API_KEY=${TOTP_API_KEY:-}
-  #   healthcheck:
-  #     test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 5s
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         memory: 64M
-  #         cpus: '0.25'
-  #   restart: unless-stopped
+  # Receive-only payment mailbox. SMTP 25 is the sole public port; TLS IMAP is
+  # available only to services on the Compose network.
+  maddy-bootstrap:
+    image: foxcpp/maddy:0.9.5
+    entrypoint: ["/bin/sh", "/bootstrap.sh"]
+    environment:
+      - MADDY_HOSTNAME=${MADDY_HOSTNAME:-mx.example.invalid}
+      - MADDY_DOMAIN=${MADDY_DOMAIN:-example.invalid}
+      - MADDY_RECIPIENT=${MADDY_RECIPIENT:-payments@example.invalid}
+      - MADDY_IMAP_PASSWORD=${MADDY_IMAP_PASSWORD:-}
+    volumes:
+      - maddy-data:/data
+      - ./deploy/maddy/maddy.conf:/data/maddy.conf:ro
+      - ./deploy/maddy/bootstrap.sh:/bootstrap.sh:ro
+      - ${MADDY_TLS_DIR:-./deploy/maddy/tls}:/data/tls:ro
+    restart: "no"
 
-  # fiat-controller:
-  #   logging: *default-logging
-  #   image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-fiat-controller:${IMAGE_TAG:-latest}
-  #   build:
-  #     context: ./dexFiatController
-  #     dockerfile: Dockerfile
-  #   env_file:
-  #     - ./dexFiatController/.env
-  #   ports:
-  #     - "${FIAT_CONTROLLER_PORT:-8080}:8080"
-  #   volumes:
-  #     - fiat-controller-data:/data
-  #   depends_on:
-  #     totp-api:
-  #       condition: service_healthy
-  #     postgres:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 5s
-  #   environment:
-  #     - DATABASE_URL=postgres://dex_fiat_controller:${POSTGRES_FIAT_CONTROLLER_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
-  #     - HEADLESS=true
-  #     - CHROME_PATH=/usr/bin/chromium-browser
-  #     - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-  #     - TOTP_API_URL=http://totp-api:8080
-  #     - TOTP_API_KEY=${TOTP_API_KEY:-}
-  #     - SMS_PROVIDER=${SMS_PROVIDER:-}
-  #     - SMS_ACCOUNT_SID=${SMS_ACCOUNT_SID:-}
-  #     - SMS_AUTH_TOKEN=${SMS_AUTH_TOKEN:-}
-  #     - SMS_PHONE_NUMBER=${SMS_PHONE_NUMBER:-}
-  #     - EMAIL_PROVIDER=${EMAIL_PROVIDER:-}
-  #     - EMAIL_IMAP_HOST=${EMAIL_IMAP_HOST:-}
-  #     - EMAIL_IMAP_USER=${EMAIL_IMAP_USER:-}
-  #     - EMAIL_IMAP_PASS=${EMAIL_IMAP_PASS:-}
-  #     - POLL_INTERVAL=${POLL_INTERVAL:-30s}
-  #     - PAYMENT_NOTIFICATIONS_API_URL=${PAYMENT_NOTIFICATIONS_API_URL:-http://unified-api:5010/internal/payment_notifications}
-  #     - PAYMENT_NOTIFICATIONS_SHARED_SECRET=${PAYMENT_NOTIFICATIONS_SHARED_SECRET:-}
-  #     - PAYMENT_NOTIFICATIONS_DEX=${PAYMENT_NOTIFICATIONS_DEX:-}
-  #     # pushpush (primary fiat-arrival path)
-  #     - SCRAPING_ENABLED=${SCRAPING_ENABLED:-false}
-  #     - PUSHPUSH_ADDR=:8080
-  #     - PUSHPUSH_NOTIFY_SECRET=${PUSHPUSH_NOTIFY_SECRET:-}
-  #     - PUSHPUSH_DATA_DIR=/data
-  #     - PUSHPUSH_DEX_RELEASE_URL=${PUSHPUSH_DEX_RELEASE_URL:-http://dexmmcontroller:8080/api/webhooks/dex-release}
-  #     - PUSHPUSH_DEX_RELEASE_TOKEN=${PUSHPUSH_DEX_RELEASE_TOKEN:-}
-  #     - PUSHPUSH_RELEASE_TIMEOUT=${PUSHPUSH_RELEASE_TIMEOUT:-10s}
-  #     - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-  #     - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-  #     - PUSHPUSH_TELEGRAM_WEBHOOK_URL=${PUSHPUSH_TELEGRAM_WEBHOOK_URL:-}
-  #     - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
-  #   deploy:
-  #     resources:
-  #       limits:
-  #         memory: 1024M
-  #         cpus: '1.0'
-  #   restart: unless-stopped
+  maddy:
+    logging: *default-logging
+    image: foxcpp/maddy:0.9.5
+    depends_on:
+      maddy-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      - MADDY_HOSTNAME=${MADDY_HOSTNAME:-mx.example.invalid}
+      - MADDY_DOMAIN=${MADDY_DOMAIN:-example.invalid}
+      - MADDY_RECIPIENT=${MADDY_RECIPIENT:-payments@example.invalid}
+    ports:
+      - "${MADDY_SMTP_PORT:-25}:25"
+    expose:
+      - "993"
+    volumes:
+      - maddy-data:/data
+      - ./deploy/maddy/maddy.conf:/data/maddy.conf:ro
+      - ${MADDY_TLS_DIR:-./deploy/maddy/tls}:/data/tls:ro
+    healthcheck:
+      test: ["CMD-SHELL", "kill -0 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+    restart: unless-stopped
+
+  # Daily local snapshots make mailbox state recoverable independently of the
+  # live Maddy volume. Operators should copy maddy-backups off-host.
+  maddy-backup:
+    image: alpine:3.20
+    depends_on:
+      maddy:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        while true; do
+          stamp="$$(date -u +%Y%m%dT%H%M%SZ)"
+          tar -czf "/backups/maddy-$${stamp}.tgz" -C /data .
+          find /backups -type f -name 'maddy-*.tgz' -mtime +14 -delete
+          sleep 86400
+        done
+    volumes:
+      - maddy-data:/data:ro
+      - maddy-backups:/backups
+    restart: unless-stopped
+
+  totp-api:
+    logging: *default-logging
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-totp-api:${IMAGE_TAG:-latest}
+    build:
+      context: ./dexFiatController/services/totp-api
+      dockerfile: Dockerfile
+    environment:
+      - PORT=8080
+      - API_KEY=${TOTP_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.25'
+    restart: unless-stopped
+
+  fiat-controller:
+    logging: *default-logging
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-fiat-controller:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: dexFiatController/Dockerfile
+    env_file:
+      - ./dexFiatController/.env
+    ports:
+      - "${FIAT_CONTROLLER_PORT:-8081}:8080"
+    volumes:
+      - fiat-controller-data:/data
+      - ${MADDY_TLS_DIR:-./deploy/maddy/tls}:/maddy-tls:ro
+    depends_on:
+      totp-api:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    environment:
+      - DATABASE_URL=postgres://dex_fiat_controller:${POSTGRES_FIAT_CONTROLLER_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - HEADLESS=true
+      - CHROME_PATH=/usr/bin/chromium-browser
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - TOTP_API_URL=http://totp-api:8080
+      - TOTP_API_KEY=${TOTP_API_KEY:-}
+      - SMS_PROVIDER=${SMS_PROVIDER:-}
+      - SMS_ACCOUNT_SID=${SMS_ACCOUNT_SID:-}
+      - SMS_AUTH_TOKEN=${SMS_AUTH_TOKEN:-}
+      - SMS_PHONE_NUMBER=${SMS_PHONE_NUMBER:-}
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-}
+      - EMAIL_IMAP_HOST=${EMAIL_IMAP_HOST:-}
+      - EMAIL_IMAP_USER=${EMAIL_IMAP_USER:-}
+      - EMAIL_IMAP_PASS=${EMAIL_IMAP_PASS:-}
+      - POLL_INTERVAL=${POLL_INTERVAL:-30s}
+      - PAYMENT_NOTIFICATIONS_API_URL=${PAYMENT_NOTIFICATIONS_API_URL:-http://unified-api:5010/internal/payment_notifications}
+      - PAYMENT_NOTIFICATIONS_SHARED_SECRET=${PAYMENT_NOTIFICATIONS_SHARED_SECRET:-}
+      - PAYMENT_NOTIFICATIONS_DEX=${PAYMENT_NOTIFICATIONS_DEX:-}
+      # pushpush (primary fiat-arrival path)
+      - SCRAPING_ENABLED=${SCRAPING_ENABLED:-false}
+      - PUSHPUSH_ADDR=:8080
+      - PUSHPUSH_NOTIFY_SECRET=${PUSHPUSH_NOTIFY_SECRET:-}
+      - PUSHPUSH_HEARTBEAT_SECRET=${PUSHPUSH_HEARTBEAT_SECRET:-}
+      - PUSHPUSH_HEARTBEAT_MAX_AGE=${PUSHPUSH_HEARTBEAT_MAX_AGE:-15m}
+      # Payment-ingestion IMAP settings are intentionally separate from
+      # EMAIL_IMAP_* used by the scraping connector for email 2FA.
+      - PAYMENT_EMAIL_MODE=${PAYMENT_EMAIL_MODE:-capture}
+      - PAYMENT_EMAIL_IMAP_HOST=${PAYMENT_EMAIL_IMAP_HOST:-maddy}
+      - PAYMENT_EMAIL_IMAP_PORT=993
+      - PAYMENT_EMAIL_IMAP_USER=${MADDY_RECIPIENT:-payments@example.invalid}
+      - PAYMENT_EMAIL_IMAP_PASS=${MADDY_IMAP_PASSWORD:-}
+      - PAYMENT_EMAIL_IMAP_MAILBOX=INBOX
+      - PAYMENT_EMAIL_TLS_SERVER_NAME=${MADDY_HOSTNAME:-mx.example.invalid}
+      - PAYMENT_EMAIL_TLS_CA_FILE=${PAYMENT_EMAIL_TLS_CA_FILE:-/maddy-tls/fullchain.pem}
+      - PAYMENT_EMAIL_POLL_INTERVAL=${PAYMENT_EMAIL_POLL_INTERVAL:-5m}
+      - PAYMENT_EMAIL_HEALTH_MAX_AGE=${PAYMENT_EMAIL_HEALTH_MAX_AGE:-15m}
+      - PAYMENT_EMAIL_ACTIVATION_UID=${PAYMENT_EMAIL_ACTIVATION_UID:-0}
+      - PAYMENT_EMAIL_ACTIVATION_TIME=${PAYMENT_EMAIL_ACTIVATION_TIME:-}
+      - PUSHPUSH_DATA_DIR=/data
+      - PUSHPUSH_DEX_RELEASE_URL=${PUSHPUSH_DEX_RELEASE_URL:-http://dexmmcontroller:8080/api/webhooks/dex-release}
+      - PUSHPUSH_DEX_RELEASE_TOKEN=${PUSHPUSH_DEX_RELEASE_TOKEN:-}
+      - PUSHPUSH_RELEASE_TIMEOUT=${PUSHPUSH_RELEASE_TIMEOUT:-10s}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - PUSHPUSH_TELEGRAM_WEBHOOK_URL=${PUSHPUSH_TELEGRAM_WEBHOOK_URL:-}
+      - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: '1.0'
+    restart: unless-stopped
 
   prometheus:
     logging: *default-logging
@@ -775,7 +866,9 @@ volumes:
   bisq-data:
   bisq2-data:
   # mm-controller-data:
-  # fiat-controller-data:
+  fiat-controller-data:
+  maddy-data:
+  maddy-backups:
   lnd-data:
   prometheus-data:
   grafana-data:
