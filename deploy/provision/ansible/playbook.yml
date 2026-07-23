@@ -113,6 +113,13 @@
         GIT_TERMINAL_PROMPT: "0"
       become_user: "{{ deploy_user }}"
 
+    - name: Install jq for DNS reconciliation
+      ansible.builtin.apt:
+        name: jq
+        state: present
+        update_cache: true
+      tags: [dns]
+
     - name: Point public GoDaddy DNS at this VPS
       ansible.builtin.script: files/godaddy-dns-upsert.sh
       environment:
