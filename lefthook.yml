@@ -3,6 +3,11 @@
 # (server-side GitHub branch protection needs Pro or a public repo). They are
 # bypassable with --no-verify, so treat them as a guardrail, not a hard wall.
 
+pre-commit:
+  scripts:
+    "protect-secrets.sh":
+      runner: bash
+
 pre-push:
   # use_stdin forwards git's pre-push ref list (<local ref> <local sha> <remote ref>
   # <remote sha>) to the script's `while read`; without it lefthook drops stdin (it uses

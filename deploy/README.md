@@ -190,19 +190,32 @@ The `pre-deploy` and `deploy` jobs in [`.github/workflows/ci-cd.yml`](../.github
 
 Plaintext `.env` files are gitignored everywhere. Instead, each repo carries an encrypted `.env.enc` that is committed and safe to push. The private decryption keys live only in your local `.env.keys` files and in GitHub repository secrets. The CI/CD pipeline decrypts at deploy time and uploads the plaintext only to the VPS over SSH.
 
-### Local setup — lefthook + dotenvx
+### Local setup — Lefthook, dotenvx, and Gitleaks
 
-Every developer machine that commits to this monorepo (or any submodule) needs two CLI tools installed and the git hooks wired up.
+Every developer machine that commits to this monorepo (or any submodule) needs
+three CLI tools installed and the Git hooks wired up. Gitleaks is pinned to
+`8.30.1`, matching CI.
 
 **Install tools** (one-time per machine):
 
 ```bash
+mkdir -p "$HOME/.local/bin"
+
 # dotenvx — encrypts/decrypts .env files
 curl -sfS "https://dotenvx.sh?directory=$HOME/.local/bin" | sh
 
 # lefthook — git hook manager
 curl -sL "https://github.com/evilmartians/lefthook/releases/latest/download/lefthook_Linux_x86_64" \
   -o "$HOME/.local/bin/lefthook" && chmod +x "$HOME/.local/bin/lefthook"
+
+# Gitleaks 8.30.1 — scans staged content for recognizable secrets (Linux x64)
+curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz" \
+  -o /tmp/gitleaks_8.30.1_linux_x64.tar.gz
+printf '%s  %s\n' \
+  '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb' \
+  '/tmp/gitleaks_8.30.1_linux_x64.tar.gz' | sha256sum -c -
+tar -xzf /tmp/gitleaks_8.30.1_linux_x64.tar.gz -C "$HOME/.local/bin" gitleaks
+chmod +x "$HOME/.local/bin/gitleaks"
 ```
 
 **Install hooks** — run once in each repo after cloning:
@@ -212,12 +225,30 @@ curl -sL "https://github.com/evilmartians/lefthook/releases/latest/download/left
 lefthook install
 
 # Each submodule
-for repo in dexFiatController dexMmController dexMonitor dexUnifiedApi dexMmTradingLogicHummingBot; do
+for repo in dexFiatController dexMmController dexMonitor dexUnifiedApi; do
   (cd "$repo" && lefthook install)
 done
 ```
 
-**What the hook does on every commit:**
+**Secret protection before every commit:**
+
+Each repository's `pre-commit` hook inspects added, modified, and renamed staged
+paths. It rejects plaintext dotenv names (`.env` and every `.env.*` variant)
+unless the filename ends in `.enc` or `.example`. For example, `.env.enc`,
+`.env.example`, `.env.production.enc`, and `.env.vps.example` are allowed;
+`.env`, `.env.local`, and `.env.production` are rejected.
+
+After the filename check, the hook runs
+`gitleaks git --pre-commit --staged --redact` with that repository's
+`.gitleaks.toml`. Recognizable secrets in any other staged file block the
+commit, and values are redacted from output. Encrypted dotenv files and dotenv
+templates are excluded from content scanning. The hook fails closed with an
+installation command if `gitleaks` is missing.
+
+To remediate a rejected dotenv file, remove it from the index, keep the
+plaintext file local, and commit its encrypted `.env.enc` counterpart.
+
+**Encryption after every commit:**
 
 The `post-commit` hook defined in each repo's [`lefthook.yml`](../lefthook.yml) runs `.lefthook/post-commit/encrypt-env.sh` automatically after every commit. It:
 
@@ -235,7 +266,18 @@ The same [`lefthook.yml`](../lefthook.yml) wires two guards that keep production
 - `pre-push` → `.lefthook/pre-push/protect-main.sh` rejects any push whose target ref is `refs/heads/main`.
 - `pre-merge-commit` → `.lefthook/pre-merge-commit/protect-main.sh` rejects a local merge made while on `main`.
 
-These are convenience guards (bypassable with `--no-verify`). On this Free private repo they are the protection for `main`; non-bypassable server-side GitHub branch protection (PR + green checks) would require GitHub Pro or making the repo public. All work flows `feature/* → develop → main`; `develop` is the default branch and only a reviewed `develop → main` PR updates production. See the README's *Branching & environments* section.
+Local hooks can be bypassed with `--no-verify`. Both GitHub and Gitea CI
+therefore run an early security job over the checked-out root and recursive
+submodules: the job repeats the strict dotenv filename check and scans the
+complete current snapshot with Gitleaks in redacted directory mode. Downstream
+CI jobs wait for this backstop to pass.
+
+The branch guards are convenience guards. On this Free private repo they are
+the protection for `main`; non-bypassable server-side GitHub branch protection
+(PR + green checks) would require GitHub Pro or making the repo public. All work
+flows `feature/* → develop → main`; `develop` is the default branch and only a
+reviewed `develop → main` PR updates production. See the README's *Branching &
+environments* section.
 
 Merged branches are cleaned up automatically: `delete_branch_on_merge` removes a PR's head branch on merge, the weekly [`branch-cleanup.yml`](../.github/workflows/branch-cleanup.yml) workflow sweeps any branch already merged into `develop`/`main` (keeping `main`/`develop` and open-PR branches; run it via *Actions → Branch cleanup* with `dry_run` to preview), and `make prune` clears locally-merged branches.
 
