@@ -61,7 +61,14 @@ In production mode, the provisioning job reads the Terraform-managed VPS
 address, passes the hostname and PAT to Ansible over SSH, and reconciles the
 GoDaddy apex (`@`) A record. It then waits until the VPS resolves that hostname
 to its own address. Terraform exposes 80 for the ACME HTTP-01 challenge and
-HTTP-to-HTTPS redirect, and 443 for the public dashboard and Telegram webhook.
+HTTP-to-HTTPS redirect, and 443 for the public dashboard, Telegram webhook, and the two
+protected phone-payment callback paths: `/pushpush/notify` and
+`/pushpush/phone-heartbeat`. nginx does not expose any other Fiat Controller route.
+Set `PUSHPUSH_NOTIFY_SECRET` in the deployment secret environment before enabling a
+phone; public callbacks reject all requests when it is absent. An optional
+`PUSHPUSH_HEARTBEAT_SECRET` overrides the notification secret for heartbeat requests.
+The authenticated Communication Hub reveals these deployment-managed values only on a
+deliberate request and its QR codes never include them.
 The initial CI rollout issues the certificate; Ansible also installs a daily
 renewal timer.
 
