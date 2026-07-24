@@ -309,6 +309,13 @@ services:
       # /api/mm-controller/* call carries it as X-Internal-Secret.
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - UNIFIED_API_URL=http://unified-api:5010
+      # Private controller access is used only to show authenticated operators
+      # phone setup health and reveal deployment-managed setup credentials.
+      - FIAT_CONTROLLER_URL=http://fiat-controller:8080
+      - PUSHPUSH_NOTIFY_SECRET=${PUSHPUSH_NOTIFY_SECRET:-}
+      - PUSHPUSH_HEARTBEAT_SECRET=${PUSHPUSH_HEARTBEAT_SECRET:-}
+      - PUSHPUSH_HEARTBEAT_MAX_AGE=${PUSHPUSH_HEARTBEAT_MAX_AGE:-15m}
+      - PUSHPUSH_PUBLIC_BASE_URL=https://${PUBLIC_HOSTNAME:-dexmonitor.live}
       - APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY:-}
       - TOR_PROXY_ADDR=tor:9050
       - BISQ_GRPC_HOST=bisq:9998
@@ -531,103 +538,99 @@ services:
           cpus: '0.5'
     restart: unless-stopped
 
-  # Receive-only payment mailbox. SMTP 25 is the sole public port; TLS IMAP is
-  # available only to services on the Compose network.
-  maddy-bootstrap:
-    # Mail transport is deliberately opt-in.  It requires externally supplied
-    # DNS/TLS material and an IMAP password, so a normal stack deploy must not
-    # try to start it with the example defaults.
-    profiles: ["mail"]
-    image: foxcpp/maddy:0.9.5
-    entrypoint: ["/bin/sh", "/bootstrap.sh"]
-    environment:
-      - MADDY_HOSTNAME=${MADDY_HOSTNAME:-mx.example.invalid}
-      - MADDY_DOMAIN=${MADDY_DOMAIN:-example.invalid}
-      - MADDY_RECIPIENT=${MADDY_RECIPIENT:-payments@example.invalid}
-      - MADDY_IMAP_PASSWORD=${MADDY_IMAP_PASSWORD:-}
-    volumes:
-      - maddy-data:/data
-      - ./deploy/maddy/maddy.conf:/data/maddy.conf:ro
-      - ./deploy/maddy/bootstrap.sh:/bootstrap.sh:ro
-      - ${MADDY_TLS_DIR:-./deploy/maddy/tls}:/data/tls:ro
-    restart: "no"
+  # Maddy mail services are disabled for now. Keep this configuration here so
+  # it can be restored when receive-only payment-mail ingestion is enabled.
+  # maddy-bootstrap:
+  #   profiles: ["mail"]
+  #   image: foxcpp/maddy:0.9.5
+  #   entrypoint: ["/bin/sh", "/bootstrap.sh"]
+  #   environment:
+  #     - MADDY_HOSTNAME=${MADDY_HOSTNAME:-mx.example.invalid}
+  #     - MADDY_DOMAIN=${MADDY_DOMAIN:-example.invalid}
+  #     - MADDY_RECIPIENT=${MADDY_RECIPIENT:-payments@example.invalid}
+  #     - MADDY_IMAP_PASSWORD=${MADDY_IMAP_PASSWORD:-}
+  #   volumes:
+  #     - maddy-data:/data
+  #     - ./deploy/maddy/maddy.conf:/data/maddy.conf:ro
+  #     - ./deploy/maddy/bootstrap.sh:/bootstrap.sh:ro
+  #     - ${MADDY_TLS_DIR:-./deploy/maddy/tls}:/data/tls:ro
+  #   restart: "no"
 
-  maddy:
-    profiles: ["mail"]
-    logging: *default-logging
-    image: foxcpp/maddy:0.9.5
-    depends_on:
-      maddy-bootstrap:
-        condition: service_completed_successfully
-    environment:
-      - MADDY_HOSTNAME=${MADDY_HOSTNAME:-mx.example.invalid}
-      - MADDY_DOMAIN=${MADDY_DOMAIN:-example.invalid}
-      - MADDY_RECIPIENT=${MADDY_RECIPIENT:-payments@example.invalid}
-    ports:
-      - "${MADDY_SMTP_PORT:-25}:25"
-    expose:
-      - "993"
-    volumes:
-      - maddy-data:/data
-      - ./deploy/maddy/maddy.conf:/data/maddy.conf:ro
-      - ${MADDY_TLS_DIR:-./deploy/maddy/tls}:/data/tls:ro
-    healthcheck:
-      test: ["CMD-SHELL", "kill -0 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-          cpus: '0.5'
-    restart: unless-stopped
+  # maddy:
+  #   profiles: ["mail"]
+  #   logging: *default-logging
+  #   image: foxcpp/maddy:0.9.5
+  #   depends_on:
+  #     maddy-bootstrap:
+  #       condition: service_completed_successfully
+  #   environment:
+  #     - MADDY_HOSTNAME=${MADDY_HOSTNAME:-mx.example.invalid}
+  #     - MADDY_DOMAIN=${MADDY_DOMAIN:-example.invalid}
+  #     - MADDY_RECIPIENT=${MADDY_RECIPIENT:-payments@example.invalid}
+  #   ports:
+  #     - "${MADDY_SMTP_PORT:-25}:25"
+  #   expose:
+  #     - "993"
+  #   volumes:
+  #     - maddy-data:/data
+  #     - ./deploy/maddy/maddy.conf:/data/maddy.conf:ro
+  #     - ${MADDY_TLS_DIR:-./deploy/maddy/tls}:/data/tls:ro
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "kill -0 1"]
+  #     interval: 15s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 10s
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 256M
+  #         cpus: '0.5'
+  #   restart: unless-stopped
 
-  # Daily local snapshots make mailbox state recoverable independently of the
-  # live Maddy volume. Operators should copy maddy-backups off-host.
-  maddy-backup:
-    profiles: ["mail"]
-    image: alpine:3.20
-    depends_on:
-      maddy:
-        condition: service_healthy
-    command:
-      - /bin/sh
-      - -ec
-      - |
-        while true; do
-          stamp="$$(date -u +%Y%m%dT%H%M%SZ)"
-          tar -czf "/backups/maddy-$${stamp}.tgz" -C /data .
-          find /backups -type f -name 'maddy-*.tgz' -mtime +14 -delete
-          sleep 86400
-        done
-    volumes:
-      - maddy-data:/data:ro
-      - maddy-backups:/backups
-    restart: unless-stopped
+  # maddy-backup:
+  #   profiles: ["mail"]
+  #   image: alpine:3.20
+  #   depends_on:
+  #     maddy:
+  #       condition: service_healthy
+  #   command:
+  #     - /bin/sh
+  #     - -ec
+  #     - |
+  #       while true; do
+  #         stamp="$$(date -u +%Y%m%dT%H%M%SZ)"
+  #         tar -czf "/backups/maddy-$${stamp}.tgz" -C /data .
+  #         find /backups -type f -name 'maddy-*.tgz' -mtime +14 -delete
+  #         sleep 86400
+  #       done
+  #   volumes:
+  #     - maddy-data:/data:ro
+  #     - maddy-backups:/backups
+  #   restart: unless-stopped
 
-  totp-api:
-    logging: *default-logging
-    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-totp-api:${IMAGE_TAG:-latest}
-    build:
-      context: ./dexFiatController/services/totp-api
-      dockerfile: Dockerfile
-    environment:
-      - PORT=8080
-      - API_KEY=${TOTP_API_KEY:-}
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
-    deploy:
-      resources:
-        limits:
-          memory: 64M
-          cpus: '0.25'
-    restart: unless-stopped
+  # TOTP API is disabled for now.
+  # totp-api:
+  #   logging: *default-logging
+  #   image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-totp-api:${IMAGE_TAG:-latest}
+  #   build:
+  #     context: ./dexFiatController/services/totp-api
+  #     dockerfile: Dockerfile
+  #   environment:
+  #     - PORT=8080
+  #     - API_KEY=${TOTP_API_KEY:-}
+  #   healthcheck:
+  #     test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 5s
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 64M
+  #         cpus: '0.25'
+  #   restart: unless-stopped
 
   fiat-controller:
     logging: *default-logging
@@ -637,14 +640,15 @@ services:
       dockerfile: dexFiatController/Dockerfile
     env_file:
       - ./dexFiatController/.env
-    ports:
-      - "${FIAT_CONTROLLER_PORT:-8081}:8080"
+    # The controller is private. nginx is the only public path and exposes
+    # only the exact /pushpush/notify and /pushpush/phone-heartbeat callbacks.
+    expose:
+      - "8080"
     volumes:
       - fiat-controller-data:/data
       - ${MADDY_TLS_DIR:-./deploy/maddy/tls}:/maddy-tls:ro
     depends_on:
-      totp-api:
-        condition: service_healthy
+      # totp-api is disabled above.
       postgres:
         condition: service_healthy
       # Unified API owns schema migrations and is the only application role
