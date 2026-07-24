@@ -6,15 +6,15 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
 	"testing"
 	"time"
+
+	"commons/exchangecredentials"
 )
 
 func TestFetchKrakenPerpInputs(t *testing.T) {
 	secret := base64.StdEncoding.EncodeToString([]byte("supersecret"))
-	t.Setenv("KRAKEN_FUTURES_API_KEY", "kraken-key")
-	t.Setenv("KRAKEN_FUTURES_API_SECRET", secret)
+	credentials := exchangecredentials.Credentials{APIKey: "kraken-key", APISecret: secret}
 
 	prevBase := krakenFuturesAPIBase
 	prevClient := hedgeHTTPClient
@@ -61,7 +61,7 @@ func TestFetchKrakenPerpInputs(t *testing.T) {
 		hedgeHTTPClient = prevClient
 	})
 
-	got, err := FetchKrakenPerpInputs("PI_XBTUSD")
+	got, err := FetchKrakenPerpInputs("PI_XBTUSD", credentials)
 	if err != nil {
 		t.Fatalf("FetchKrakenPerpInputs returned error: %v", err)
 	}
@@ -76,9 +76,11 @@ func TestFetchKrakenPerpInputs(t *testing.T) {
 
 func TestFetchCoinbaseFuturesInputs(t *testing.T) {
 	secret := base64.StdEncoding.EncodeToString([]byte("coinbase-secret"))
-	t.Setenv("COINBASE_FUTURES_API_KEY", "cb-key")
-	t.Setenv("COINBASE_FUTURES_API_SECRET", secret)
-	t.Setenv("COINBASE_FUTURES_API_PASSPHRASE", "cb-pass")
+	credentials := exchangecredentials.Credentials{
+		APIKey:     "cb-key",
+		APISecret:  secret,
+		Passphrase: "cb-pass",
+	}
 
 	prevBase := coinbaseINTXAPIBase
 	prevClient := hedgeHTTPClient
@@ -111,7 +113,7 @@ func TestFetchCoinbaseFuturesInputs(t *testing.T) {
 		hedgeHTTPClient = prevClient
 	})
 
-	got, err := FetchCoinbaseFuturesInputs("BTC-PERP")
+	got, err := FetchCoinbaseFuturesInputs("BTC-PERP", credentials)
 	if err != nil {
 		t.Fatalf("FetchCoinbaseFuturesInputs returned error: %v", err)
 	}
@@ -125,12 +127,11 @@ func TestFetchCoinbaseFuturesInputs(t *testing.T) {
 }
 
 func TestFetchCoinbaseFuturesInputsRequiresPassphrase(t *testing.T) {
-	t.Setenv("COINBASE_FUTURES_API_KEY", "cb-key")
-	t.Setenv("COINBASE_FUTURES_API_SECRET", base64.StdEncoding.EncodeToString([]byte("secret")))
-	_ = os.Unsetenv("COINBASE_FUTURES_API_PASSPHRASE")
-	_ = os.Unsetenv("COINBASE_API_PASSPHRASE")
-
-	if _, err := FetchCoinbaseFuturesInputs("BTC-PERP"); err == nil {
+	credentials := exchangecredentials.Credentials{
+		APIKey:    "cb-key",
+		APISecret: base64.StdEncoding.EncodeToString([]byte("secret")),
+	}
+	if _, err := FetchCoinbaseFuturesInputs("BTC-PERP", credentials); err == nil {
 		t.Fatal("expected missing-credentials error")
 	}
 }

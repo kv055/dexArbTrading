@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"commons/bitcoin"
+	"commons/exchangecredentials"
 )
 
 // EstimateTransferMinutes uses the existing bitcoin predictor to estimate the
@@ -57,13 +58,13 @@ func ApplyLivePerpInputs(cfg Config, inputs LivePerpInputs) Config {
 // PrepareConfigForVenue applies hardcoded venue defaults and live perp inputs to
 // the optimizer config. The caller remains responsible for supplying TotalEUR,
 // BTCPriceEUR, TransferMinutes, stress assumptions, and hedge-ratio policy.
-func PrepareConfigForVenue(cfg Config, venue Venue) (Config, LivePerpInputs, error) {
+func PrepareConfigForVenue(cfg Config, venue Venue, credentials exchangecredentials.Credentials) (Config, LivePerpInputs, error) {
 	profile, err := DefaultVenueProfile(venue)
 	if err != nil {
 		return Config{}, LivePerpInputs{}, err
 	}
 
-	inputs, err := FetchDefaultVenueInputs(venue)
+	inputs, err := FetchDefaultVenueInputs(venue, credentials)
 	if err != nil {
 		return Config{}, LivePerpInputs{}, err
 	}

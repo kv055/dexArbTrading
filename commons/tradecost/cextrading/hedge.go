@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"commons/exchangecredentials"
 	"commons/hedge"
 )
 
@@ -23,14 +24,16 @@ type cachedHedgeInput struct {
 	fetched  map[hedge.Venue]time.Time
 	inflight map[hedge.Venue]chan struct{}
 	ttl      time.Duration
+	provider exchangecredentials.Provider
 }
 
-func newCachedHedgeInput(ttl time.Duration) *cachedHedgeInput {
+func newCachedHedgeInput(ttl time.Duration, provider exchangecredentials.Provider) *cachedHedgeInput {
 	return &cachedHedgeInput{
 		values:   map[hedge.Venue]hedge.LivePerpInputs{},
 		fetched:  map[hedge.Venue]time.Time{},
 		inflight: map[hedge.Venue]chan struct{}{},
 		ttl:      ttl,
+		provider: provider,
 	}
 }
 
@@ -56,7 +59,20 @@ func (c *cachedHedgeInput) get(venue hedge.Venue) (hedge.LivePerpInputs, error) 
 	c.inflight[venue] = ch
 	c.mu.Unlock()
 
-	inputs, err := hedge.FetchDefaultVenueInputs(venue)
+	var (
+		inputs hedge.LivePerpInputs
+		err    error
+	)
+	if c.provider == nil {
+		err = fmt.Errorf("database credential provider is not configured")
+	} else {
+		credentials, credentialsErr := c.provider(exchangeForHedgeVenue(venue))
+		if credentialsErr != nil {
+			err = credentialsErr
+		} else {
+			inputs, err = hedge.FetchDefaultVenueInputs(venue, credentials)
+		}
+	}
 	if err != nil {
 		inputs, err = hedge.FallbackVenueInputs(venue)
 	}
@@ -72,7 +88,25 @@ func (c *cachedHedgeInput) get(venue hedge.Venue) (hedge.LivePerpInputs, error) 
 	return inputs, err
 }
 
-var hedgeInputCache = newCachedHedgeInput(feeTTL)
+func exchangeForHedgeVenue(venue hedge.Venue) string {
+	switch venue {
+	case hedge.VenueKrakenFutures:
+		return "Kraken"
+	case hedge.VenueCoinbaseFutures:
+		return "Coinbase"
+	case hedge.VenueBinanceFutures:
+		return "Binance"
+	default:
+		return string(venue)
+	}
+}
+
+func newHedgeCostEstimator(provider exchangecredentials.Provider) func(string, float64, float64, float64, bool, string) hedgeCostDetails {
+	cache := newCachedHedgeInput(feeTTL, provider)
+	return func(cex string, btcAmount, refPriceEUR, transferMinutes float64, coupledHedge bool, side string) hedgeCostDetails {
+		return estimateBestHedgeCost(cache, cex, btcAmount, refPriceEUR, transferMinutes, coupledHedge, side)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Hedge cost model
@@ -127,7 +161,7 @@ var cexToHedgeVenue = map[string]hedge.Venue{
 // exists (kraken→krakenFutures, coinbase→coinbaseFutures); otherwise — and for CEXes
 // with no paired perp (binance/bitstamp) — all venues are evaluated and the cheapest
 // is chosen.
-func estimateBestHedgeCost(cex string, btcAmount float64, refPriceEUR float64, transferMinutes float64, coupledHedge bool, side string) hedgeCostDetails {
+func estimateBestHedgeCost(cache *cachedHedgeInput, cex string, btcAmount float64, refPriceEUR float64, transferMinutes float64, coupledHedge bool, side string) hedgeCostDetails {
 	if btcAmount <= 0 {
 		return hedgeCostDetails{}
 	}
@@ -148,7 +182,7 @@ func estimateBestHedgeCost(cex string, btcAmount float64, refPriceEUR float64, t
 			continue
 		}
 
-		inputs, err := hedgeInputCache.get(venue)
+		inputs, err := cache.get(venue)
 		if err != nil {
 			continue
 		}

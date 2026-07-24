@@ -166,7 +166,6 @@ services:
       # name); it is harmless there because loopback is not externally reachable.
       - "127.0.0.1:5010:5010"
     environment:
-      - DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - POSTGRES_HOST=postgres
       - LISTEN_ADDR=:5010
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
@@ -223,7 +222,6 @@ services:
     env_file:
       - ./dexUnifiedApi/.env
     environment:
-      - DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - POSTGRES_HOST=postgres
       - BISQ_GRPC_HOST=bisq:9998
       - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
@@ -663,7 +661,9 @@ services:
       retries: 5
       start_period: 5s
     environment:
-      - DATABASE_URL=postgres://dex_fiat_controller:${POSTGRES_FIAT_CONTROLLER_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      # DATABASE_URL comes from dexFiatController/.env. Compose expands
+      # ${...} before loading env_file, so constructing it here would replace
+      # that valid value with empty root-level credentials.
       - HEADLESS=true
       - CHROME_PATH=/usr/bin/chromium-browser
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}

@@ -17,11 +17,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"commons/exchangecredentials"
 
 	"github.com/google/uuid"
 )
@@ -65,12 +66,6 @@ func TakerFeeFallback(exchange string) float64 {
 // WithdrawalFallback returns the static on-chain withdrawal fee (BTC) for an exchange.
 func WithdrawalFallback(exchange string) float64 {
 	return withdrawalFallbacks[exchange]
-}
-
-// loadCredentials reads {EXCHANGE}_API_KEY and {EXCHANGE}_API_SECRET from env.
-func loadCredentials(exchange string) (key, secret string) {
-	prefix := strings.ToUpper(exchange)
-	return os.Getenv(prefix + "_API_KEY"), os.Getenv(prefix + "_API_SECRET")
 }
 
 // httpClient is shared across all clearnet CEX fetchers.
@@ -161,16 +156,15 @@ type withdrawalFeeFetcher struct {
 	exchange  string
 	apiKey    string
 	apiSecret string
+	provider  exchangecredentials.Provider
 	cache     *cachedFee
 }
 
-func newWithdrawalFeeFetcher(exchange string) *withdrawalFeeFetcher {
-	key, secret := loadCredentials(exchange)
+func newWithdrawalFeeFetcher(exchange string, provider exchangecredentials.Provider) *withdrawalFeeFetcher {
 	return &withdrawalFeeFetcher{
-		exchange:  exchange,
-		apiKey:    key,
-		apiSecret: secret,
-		cache:     newCachedFee(feeTTL),
+		exchange: exchange,
+		provider: provider,
+		cache:    newCachedFee(feeTTL),
 	}
 }
 
@@ -186,8 +180,8 @@ func (f *withdrawalFeeFetcher) get() float64 {
 }
 
 func (f *withdrawalFeeFetcher) fetchLive() (float64, error) {
-	if f.apiKey == "" || f.apiSecret == "" {
-		return 0, fmt.Errorf("no API credentials for %s", f.exchange)
+	if err := f.refreshCredentials(); err != nil {
+		return 0, err
 	}
 	switch f.exchange {
 	case "kraken":
@@ -201,6 +195,22 @@ func (f *withdrawalFeeFetcher) fetchLive() (float64, error) {
 	default:
 		return 0, fmt.Errorf("unsupported exchange: %s", f.exchange)
 	}
+}
+
+func (f *withdrawalFeeFetcher) refreshCredentials() error {
+	if f.provider == nil {
+		return fmt.Errorf("no database credential provider for %s", f.exchange)
+	}
+	credentials, err := f.provider(f.exchange)
+	if err != nil {
+		return err
+	}
+	f.apiKey = credentials.APIKey
+	f.apiSecret = credentials.APISecret
+	if f.apiKey == "" || f.apiSecret == "" {
+		return fmt.Errorf("no active API credentials for %s", f.exchange)
+	}
+	return nil
 }
 
 func (f *withdrawalFeeFetcher) fetchKraken() (float64, error) {
@@ -358,16 +368,15 @@ type takerFeeFetcher struct {
 	exchange  string
 	apiKey    string
 	apiSecret string
+	provider  exchangecredentials.Provider
 	cache     *cachedFee
 }
 
-func newTakerFeeFetcher(exchange string) *takerFeeFetcher {
-	key, secret := loadCredentials(exchange)
+func newTakerFeeFetcher(exchange string, provider exchangecredentials.Provider) *takerFeeFetcher {
 	return &takerFeeFetcher{
-		exchange:  exchange,
-		apiKey:    key,
-		apiSecret: secret,
-		cache:     newCachedFee(feeTTL),
+		exchange: exchange,
+		provider: provider,
+		cache:    newCachedFee(feeTTL),
 	}
 }
 
@@ -378,8 +387,8 @@ func (f *takerFeeFetcher) get() float64 {
 }
 
 func (f *takerFeeFetcher) fetchLive() (float64, error) {
-	if f.apiKey == "" || f.apiSecret == "" {
-		return 0, fmt.Errorf("no API credentials for %s", f.exchange)
+	if err := f.refreshCredentials(); err != nil {
+		return 0, err
 	}
 	switch f.exchange {
 	case "kraken":
@@ -394,6 +403,22 @@ func (f *takerFeeFetcher) fetchLive() (float64, error) {
 	default:
 		return 0, fmt.Errorf("unsupported exchange: %s", f.exchange)
 	}
+}
+
+func (f *takerFeeFetcher) refreshCredentials() error {
+	if f.provider == nil {
+		return fmt.Errorf("no database credential provider for %s", f.exchange)
+	}
+	credentials, err := f.provider(f.exchange)
+	if err != nil {
+		return err
+	}
+	f.apiKey = credentials.APIKey
+	f.apiSecret = credentials.APISecret
+	if f.apiKey == "" || f.apiSecret == "" {
+		return fmt.Errorf("no active API credentials for %s", f.exchange)
+	}
+	return nil
 }
 
 // fetchKraken fetches the user's current taker fee via POST /0/private/TradeVolume.

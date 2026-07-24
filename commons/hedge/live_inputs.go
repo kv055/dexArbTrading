@@ -10,10 +10,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"commons/exchangecredentials"
 )
 
 var (
@@ -37,13 +38,13 @@ type LivePerpInputs struct {
 
 // FetchKrakenPerpInputs fetches live taker fee data from Kraken Futures fee schedules
 // and the latest funding rate for the supplied perpetual symbol, such as PI_XBTUSD.
-func FetchKrakenPerpInputs(symbol string) (LivePerpInputs, error) {
+func FetchKrakenPerpInputs(symbol string, credentials exchangecredentials.Credentials) (LivePerpInputs, error) {
 	if strings.TrimSpace(symbol) == "" {
 		return LivePerpInputs{}, fmt.Errorf("symbol is required")
 	}
 
-	apiKey := firstEnv("KRAKEN_FUTURES_API_KEY", "KRAKEN_API_KEY")
-	apiSecret := firstEnv("KRAKEN_FUTURES_API_SECRET", "KRAKEN_API_SECRET")
+	apiKey := credentials.APIKey
+	apiSecret := credentials.APISecret
 	if apiKey == "" || apiSecret == "" {
 		return LivePerpInputs{}, fmt.Errorf("kraken futures API credentials not configured")
 	}
@@ -80,14 +81,14 @@ func FetchKrakenPerpInputs(symbol string) (LivePerpInputs, error) {
 // FetchCoinbaseFuturesInputs fetches live taker fee data from Coinbase INTX portfolio
 // fee rates and the current predicted funding for the supplied perpetual instrument,
 // such as BTC-PERP.
-func FetchCoinbaseFuturesInputs(instrument string) (LivePerpInputs, error) {
+func FetchCoinbaseFuturesInputs(instrument string, credentials exchangecredentials.Credentials) (LivePerpInputs, error) {
 	if strings.TrimSpace(instrument) == "" {
 		return LivePerpInputs{}, fmt.Errorf("instrument is required")
 	}
 
-	apiKey := firstEnv("COINBASE_FUTURES_API_KEY", "COINBASE_API_KEY")
-	apiSecret := firstEnv("COINBASE_FUTURES_API_SECRET", "COINBASE_API_SECRET")
-	passphrase := firstEnv("COINBASE_FUTURES_API_PASSPHRASE", "COINBASE_API_PASSPHRASE")
+	apiKey := credentials.APIKey
+	apiSecret := credentials.APISecret
+	passphrase := credentials.Passphrase
 	if apiKey == "" || apiSecret == "" || passphrase == "" {
 		return LivePerpInputs{}, fmt.Errorf("coinbase futures API credentials not configured")
 	}
@@ -114,7 +115,7 @@ func FetchCoinbaseFuturesInputs(instrument string) (LivePerpInputs, error) {
 
 // FetchDefaultVenueInputs fetches live derivatives inputs for the venue's hardcoded
 // standard BTC perpetual instrument.
-func FetchDefaultVenueInputs(venue Venue) (LivePerpInputs, error) {
+func FetchDefaultVenueInputs(venue Venue, credentials exchangecredentials.Credentials) (LivePerpInputs, error) {
 	profile, err := DefaultVenueProfile(venue)
 	if err != nil {
 		return LivePerpInputs{}, err
@@ -122,11 +123,11 @@ func FetchDefaultVenueInputs(venue Venue) (LivePerpInputs, error) {
 
 	switch venue {
 	case VenueKrakenFutures:
-		return FetchKrakenPerpInputs(profile.Instrument)
+		return FetchKrakenPerpInputs(profile.Instrument, credentials)
 	case VenueCoinbaseFutures:
-		return FetchCoinbaseFuturesInputs(profile.Instrument)
+		return FetchCoinbaseFuturesInputs(profile.Instrument, credentials)
 	case VenueBinanceFutures:
-		return FetchBinanceFuturesInputs(profile.Instrument)
+		return FetchBinanceFuturesInputs(profile.Instrument, credentials)
 	default:
 		return LivePerpInputs{}, fmt.Errorf("unsupported hedge venue %q", venue)
 	}
@@ -393,13 +394,13 @@ func doJSON(req *http.Request, target any) error {
 
 // FetchBinanceFuturesInputs fetches live taker fee and funding data from Binance USDⓈ-M
 // Futures for the supplied symbol (e.g. BTCUSDT).
-func FetchBinanceFuturesInputs(symbol string) (LivePerpInputs, error) {
+func FetchBinanceFuturesInputs(symbol string, credentials exchangecredentials.Credentials) (LivePerpInputs, error) {
 	if strings.TrimSpace(symbol) == "" {
 		return LivePerpInputs{}, fmt.Errorf("symbol is required")
 	}
 
-	apiKey := firstEnv("BINANCE_FUTURES_API_KEY", "BINANCE_API_KEY")
-	apiSecret := firstEnv("BINANCE_FUTURES_API_SECRET", "BINANCE_API_SECRET")
+	apiKey := credentials.APIKey
+	apiSecret := credentials.APISecret
 	if apiKey == "" || apiSecret == "" {
 		return LivePerpInputs{}, fmt.Errorf("binance futures API credentials not configured")
 	}
@@ -490,13 +491,4 @@ func signBinanceFuturesRequest(req *http.Request, apiKey, apiSecret, existingQue
 	query += "&signature=" + fmt.Sprintf("%x", mac.Sum(nil))
 	req.Header.Set("X-MBX-APIKEY", apiKey)
 	return query
-}
-
-func firstEnv(keys ...string) string {
-	for _, key := range keys {
-		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-			return value
-		}
-	}
-	return ""
 }

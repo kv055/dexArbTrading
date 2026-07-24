@@ -1,6 +1,10 @@
 package cextrading
 
-import "strings"
+import (
+	"strings"
+
+	"commons/exchangecredentials"
+)
 
 // Input carries everything the CEX-combo optimizer needs to price and rank the
 // active exchanges for one offer.
@@ -41,13 +45,20 @@ type cexFees struct {
 	withdrawal *withdrawalFeeFetcher
 }
 
-// NewEngine builds an Engine backed by the live CEX fee fetchers (with static
-// fallbacks) and the perp hedge estimator.
-func NewEngine() *Engine {
+// NewEngine builds an Engine backed by database-credentialed live CEX fee
+// fetchers (with static fallbacks) and the perp hedge estimator.
+func NewEngine(providers ...exchangecredentials.Provider) *Engine {
+	var provider exchangecredentials.Provider
+	if len(providers) > 0 {
+		provider = providers[0]
+	}
 	cexes := SupportedCEXes()
 	fetchers := make(map[string]*cexFees, len(cexes))
 	for _, c := range cexes {
-		fetchers[c] = &cexFees{taker: newTakerFeeFetcher(c), withdrawal: newWithdrawalFeeFetcher(c)}
+		fetchers[c] = &cexFees{
+			taker:      newTakerFeeFetcher(c, provider),
+			withdrawal: newWithdrawalFeeFetcher(c, provider),
+		}
 	}
 	return &Engine{
 		cexes: cexes,
@@ -63,7 +74,7 @@ func NewEngine() *Engine {
 			}
 			return withdrawalFallbacks[cex]
 		},
-		hedgeCost: estimateBestHedgeCost,
+		hedgeCost: newHedgeCostEstimator(provider),
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"golang.org/x/net/proxy"
 
 	"commons/bitcoin"
+	"commons/exchangecredentials"
 	"commons/tradecost/cextrading"
 	routing "commons/tradecost/txrouting"
 )
@@ -245,6 +246,12 @@ type TradeCostEstimator struct {
 }
 
 func NewTradeCostEstimator() *TradeCostEstimator {
+	return NewTradeCostEstimatorWithCredentials(nil)
+}
+
+// NewTradeCostEstimatorWithCredentials builds an estimator whose authenticated
+// exchange fee lookups resolve credentials from the supplied database provider.
+func NewTradeCostEstimatorWithCredentials(provider exchangecredentials.Provider) *TradeCostEstimator {
 	torClient, err := newTorHTTPClient()
 	if err != nil {
 		fmt.Printf("[TradeCost] Tor client unavailable, bitcoin fee fetcher will use direct HTTP: %v\n", err)
@@ -265,7 +272,7 @@ func NewTradeCostEstimator() *TradeCostEstimator {
 		btcPredictor:      predictor,
 		withdrawalTxShape: defaultCexProfile.txShape(),
 		txEngine:          routing.NewEngine(predictor),
-		cexEngine:         cextrading.NewEngine(),
+		cexEngine:         cextrading.NewEngine(provider),
 	}
 }
 
