@@ -8,8 +8,9 @@ type Update struct {
 
 // CallbackQuery is an inline-keyboard button press.
 type CallbackQuery struct {
-	ID   string `json:"id"`
-	Data string `json:"data"`
+	ID      string           `json:"id"`
+	Data    string           `json:"data"`
+	Message *IncomingMessage `json:"message"`
 }
 
 // IncomingMessage is an operator text message (including replies).

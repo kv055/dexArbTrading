@@ -21,6 +21,12 @@ type Client struct {
 	client *http.Client
 }
 
+// SentMessage identifies a Telegram message created by SendInteractiveMessage.
+type SentMessage struct {
+	MessageID int64
+	ChatID    string
+}
+
 // BotInfo is the public subset returned by Telegram's getMe endpoint.
 type BotInfo struct {
 	Username string `json:"username"`
@@ -141,8 +147,42 @@ func (c *Client) post(ctx context.Context, method string, body map[string]any) (
 
 // SendMessage posts text to the configured chat. keyboard is optional.
 func (c *Client) SendMessage(ctx context.Context, text string, keyboard *InlineKeyboard) error {
+	_, err := c.sendMessage(ctx, text, keyboard)
+	return err
+}
+
+// SendInteractiveMessage posts text and returns the created message identity so
+// callers can persist it and later replace the inline keyboard with a result.
+func (c *Client) SendInteractiveMessage(ctx context.Context, text string, keyboard *InlineKeyboard) (SentMessage, error) {
+	raw, err := c.sendMessage(ctx, text, keyboard)
+	if err != nil {
+		return SentMessage{}, err
+	}
+	var response struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			MessageID int64 `json:"message_id"`
+			Chat      struct {
+				ID json.Number `json:"id"`
+			} `json:"chat"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return SentMessage{}, fmt.Errorf("decode Telegram sendMessage response: %w", err)
+	}
+	if !response.OK || response.Result.MessageID == 0 {
+		return SentMessage{}, fmt.Errorf("telegram sendMessage returned no message identity")
+	}
+	chatID := response.Result.Chat.ID.String()
+	if chatID == "" {
+		chatID = c.chatID
+	}
+	return SentMessage{MessageID: response.Result.MessageID, ChatID: chatID}, nil
+}
+
+func (c *Client) sendMessage(ctx context.Context, text string, keyboard *InlineKeyboard) ([]byte, error) {
 	if c == nil {
-		return fmt.Errorf("telegram: client not configured")
+		return nil, fmt.Errorf("telegram: client not configured")
 	}
 	body := map[string]any{
 		"chat_id": c.chatID,
@@ -153,17 +193,50 @@ func (c *Client) SendMessage(ctx context.Context, text string, keyboard *InlineK
 	}
 	raw, status, err := c.post(ctx, "sendMessage", body)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if status != http.StatusOK {
-		return fmt.Errorf("telegram sendMessage error: %s", raw)
+		return nil, fmt.Errorf("telegram sendMessage error: %s", raw)
 	}
-	return nil
+	return raw, nil
 }
 
 // Notify sends a one-way alert without inline buttons.
 func (c *Client) Notify(ctx context.Context, text string) error {
 	return c.SendMessage(ctx, text, nil)
+}
+
+// EditMessage replaces an existing message and its inline keyboard. Passing a
+// nil keyboard removes all buttons.
+func (c *Client) EditMessage(ctx context.Context, chatID string, messageID int64, text string, keyboard *InlineKeyboard) error {
+	if c == nil {
+		return fmt.Errorf("telegram: client not configured")
+	}
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		chatID = c.chatID
+	}
+	if messageID == 0 {
+		return fmt.Errorf("telegram: message id is required")
+	}
+	body := map[string]any{
+		"chat_id":    chatID,
+		"message_id": messageID,
+		"text":       text,
+	}
+	if keyboard == nil {
+		body["reply_markup"] = map[string]any{"inline_keyboard": []any{}}
+	} else {
+		body["reply_markup"] = keyboard.Marshal()
+	}
+	raw, status, err := c.post(ctx, "editMessageText", body)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("telegram editMessageText error: %s", raw)
+	}
+	return nil
 }
 
 // AnswerCallback acknowledges a callback query with a short toast text.
