@@ -538,7 +538,12 @@ jobs:
   pre-deploy:
     name: Pre-deploy checks
     needs: [build-and-push, retag-images]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped') &&
+      (needs.retag-images.result == 'success' || needs.retag-images.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
