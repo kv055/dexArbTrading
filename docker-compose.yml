@@ -363,8 +363,8 @@ services:
     # cookie, validated by dexMonitor and unified-api). Stock entrypoint runs nginx.
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      # TLS material (gitignored, never committed). The CI deploy guard auto-creates/
-      # renews it on the VPS before `up`; locally run deploy/nginx/gen-self-signed-cert.sh.
+      # TLS material (gitignored, never committed). Provisioning installs a
+      # Let's Encrypt certificate; CI keeps a self-signed recovery guard.
       - ./deploy/nginx/certs:/etc/nginx/certs:ro
       - ./deploy/nginx/acme-webroot:/var/www/certbot:ro
     ports:
@@ -387,7 +387,7 @@ services:
   # Run on demand for certificate issuance and from the host renewal timer.
   # nginx serves the shared webroot while Certbot writes ACME challenges to it.
   certbot:
-    image: certbot/certbot:latest
+    image: certbot/certbot:v5.6.0
     profiles: ["certbot"]
     volumes:
       - ./deploy/nginx/acme-webroot:/var/www/certbot

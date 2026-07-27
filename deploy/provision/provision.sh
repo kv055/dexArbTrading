@@ -8,11 +8,12 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-$HOME/.ssh/id_ed25519}"
 DNS_ONLY=false
+EDGE_ONLY=false
 EDGE_MODE=production
 
 usage() {
   cat <<EOF
-Usage: $0 [--key <path-to-ssh-private-key>] [--edge-mode <production|development>] [--dns-only]
+Usage: $0 [--key <path-to-ssh-private-key>] [--edge-mode <production|development>] [--dns-only|--edge-only]
 
 Runs Terraform (provision VPS), Ansible (configure VPS), and writes
 GitHub repository secrets via deploy/provision/secrets/setup-github-secrets.sh.
@@ -26,6 +27,8 @@ Options:
                  Default: production.
   --dns-only     Reconcile only the GoDaddy apex A record with the existing
                  Terraform-managed VPS address; does not apply Terraform or deploy apps.
+  --edge-only    Reconcile DNS, TLS, and certificate renewal for an existing VPS.
+                 Does not apply Terraform, bootstrap the host, or write GitHub secrets.
   -h, --help     Show this help.
 EOF
 }
@@ -35,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --key) SSH_PRIVATE_KEY="$2"; shift 2 ;;
     --edge-mode) EDGE_MODE="$2"; shift 2 ;;
     --dns-only) DNS_ONLY=true; shift ;;
+    --edge-only) EDGE_ONLY=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -46,6 +50,10 @@ case "$EDGE_MODE" in
 esac
 if "$DNS_ONLY" && [[ "$EDGE_MODE" != "production" ]]; then
   echo "ERROR: --dns-only is available only with --edge-mode production" >&2
+  exit 2
+fi
+if "$DNS_ONLY" && "$EDGE_ONLY"; then
+  echo "ERROR: --dns-only and --edge-only cannot be used together" >&2
   exit 2
 fi
 
@@ -68,8 +76,11 @@ TFVARS="$SCRIPT_DIR/terraform/terraform.tfvars"
 [[ -f "${SSH_PRIVATE_KEY}.pub" ]] || die "matching public key not found: ${SSH_PRIVATE_KEY}.pub"
 
 [[ -f "$REPO_ROOT/.env" ]] || die "missing $REPO_ROOT/.env"
-if ! "$DNS_ONLY"; then
+if ! "$DNS_ONLY" && ! "$EDGE_ONLY"; then
   grep -q '^GH_PAT=' "$REPO_ROOT/.env" || die "GH_PAT not set in $REPO_ROOT/.env"
+fi
+if ! "$DNS_ONLY"; then
+  grep -q '^LETSENCRYPT_EMAIL=.' "$REPO_ROOT/.env" || die "LETSENCRYPT_EMAIL not set in $REPO_ROOT/.env"
 fi
 if [[ "$EDGE_MODE" == "production" ]]; then
   grep -q '^GODADDY_PAT=' "$REPO_ROOT/.env" || die "GODADDY_PAT not set in $REPO_ROOT/.env"
@@ -85,7 +96,7 @@ echo "  edge mode        : $EDGE_MODE"
 log "Step 1/3: Terraform (Hetzner provisioning)"
 cd "$SCRIPT_DIR/terraform"
 terraform init -input=false
-if ! "$DNS_ONLY"; then
+if ! "$DNS_ONLY" && ! "$EDGE_ONLY"; then
   terraform apply -auto-approve -input=false
 fi
 SERVER_IP="$(terraform output -raw server_ip)"
@@ -117,19 +128,27 @@ done
 GH_PAT_VALUE="$(grep '^GH_PAT=' "$REPO_ROOT/.env" | cut -d= -f2- || true)"
 GODADDY_PAT_VALUE="$(grep '^GODADDY_PAT=' "$REPO_ROOT/.env" | cut -d= -f2- || true)"
 PUBLIC_HOSTNAME_VALUE="$(grep '^PUBLIC_HOSTNAME=' "$REPO_ROOT/.env" | cut -d= -f2- || true)"
+LETSENCRYPT_EMAIL_VALUE="$(grep '^LETSENCRYPT_EMAIL=' "$REPO_ROOT/.env" | cut -d= -f2- || true)"
 PUBLIC_HOSTNAME_VALUE="${PUBLIC_HOSTNAME_VALUE:-dexmonitor.live}"
 ANSIBLE_ARGS=(
   -i "$INVENTORY" playbook.yml
   --private-key "$SSH_PRIVATE_KEY"
-  --extra-vars "gh_pat=$GH_PAT_VALUE godaddy_pat=$GODADDY_PAT_VALUE public_hostname=$PUBLIC_HOSTNAME_VALUE edge_mode=$EDGE_MODE"
+  --extra-vars "gh_pat=$GH_PAT_VALUE godaddy_pat=$GODADDY_PAT_VALUE public_hostname=$PUBLIC_HOSTNAME_VALUE letsencrypt_email=$LETSENCRYPT_EMAIL_VALUE edge_mode=$EDGE_MODE"
 )
 if "$DNS_ONLY"; then
   ANSIBLE_ARGS+=(--tags dns)
+fi
+if "$EDGE_ONLY"; then
+  ANSIBLE_ARGS+=(--tags edge)
 fi
 ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook "${ANSIBLE_ARGS[@]}"
 
 if "$DNS_ONLY"; then
   log "DNS reconciliation complete"
+  exit 0
+fi
+if "$EDGE_ONLY"; then
+  log "Edge reconciliation complete"
   exit 0
 fi
 

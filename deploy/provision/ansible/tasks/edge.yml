@@ -1,0 +1,118 @@
+---
+- name: Validate edge configuration
+  ansible.builtin.assert:
+    that:
+      - edge_mode in ['production', 'development']
+      - letsencrypt_email | default('') | length > 0
+      - edge_mode != 'production' or godaddy_pat | default('') | length > 0
+    fail_msg: >-
+      edge mode requires LETSENCRYPT_EMAIL and production additionally requires GODADDY_PAT
+  tags: [edge]
+
+- name: Install jq for DNS reconciliation
+  ansible.builtin.apt:
+    name: jq
+    state: present
+    update_cache: true
+  tags: [edge, dns]
+
+- name: Create edge configuration directory
+  ansible.builtin.file:
+    path: /etc/dexarb
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [edge]
+
+- name: Persist edge certificate configuration
+  ansible.builtin.template:
+    src: edge.env.j2
+    dest: /etc/dexarb/edge.env
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [edge]
+
+- name: Create edge helper directory
+  ansible.builtin.file:
+    path: /usr/local/lib/dexarb
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [edge]
+
+- name: Install edge certificate helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../nginx/letsencrypt.sh"
+    dest: /usr/local/lib/dexarb/letsencrypt.sh
+    owner: root
+    group: root
+    mode: "0755"
+  tags: [edge]
+
+- name: Point public GoDaddy DNS at this VPS
+  ansible.builtin.script: files/godaddy-dns-upsert.sh
+  environment:
+    GODADDY_PAT: "{{ godaddy_pat }}"
+    GODADDY_DOMAIN: "{{ public_hostname }}"
+    GODADDY_IP: "{{ ansible_host }}"
+  no_log: true
+  changed_when: false
+  when: edge_mode == 'production'
+  tags: [edge, dns]
+
+- name: Wait for public DNS propagation
+  ansible.builtin.command: getent ahostsv4 {{ public_hostname }}
+  register: public_dns
+  changed_when: false
+  until: ansible_host in public_dns.stdout
+  retries: 30
+  delay: 10
+  when: edge_mode == 'production'
+  tags: [edge, dns]
+
+- name: Create nginx ACME and certificate directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0750"
+  loop:
+    - "{{ app_dir }}/deploy/nginx/acme-webroot"
+    - "{{ app_dir }}/deploy/nginx/letsencrypt"
+    - "{{ app_dir }}/deploy/nginx/certs"
+  tags: [edge]
+
+- name: Install certificate renewal service
+  ansible.builtin.template:
+    src: dexarb-certbot.service.j2
+    dest: /etc/systemd/system/dexarb-certbot.service
+    mode: "0644"
+  tags: [edge]
+
+- name: Install certificate renewal timer
+  ansible.builtin.template:
+    src: dexarb-certbot.timer.j2
+    dest: /etc/systemd/system/dexarb-certbot.timer
+    mode: "0644"
+  tags: [edge]
+
+- name: Enable certificate renewal timer
+  ansible.builtin.systemd:
+    name: dexarb-certbot.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  tags: [edge]
+
+- name: Issue or refresh the edge certificate
+  ansible.builtin.command: /usr/local/lib/dexarb/letsencrypt.sh issue
+  args:
+    chdir: "{{ app_dir }}"
+  become_user: "{{ deploy_user }}"
+  register: certificate_issue
+  changed_when: "'certificate unchanged' not in certificate_issue.stdout"
+  tags: [edge]
