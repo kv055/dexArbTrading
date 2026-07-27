@@ -149,16 +149,39 @@ ensure_trusted_certificate() {
     echo "no provisioned edge configuration or dotenv certificate contact is available" >&2
     return 1
   fi
-  if ! bash deploy/nginx/letsencrypt.sh verify; then
+  if bash deploy/nginx/letsencrypt.sh verify; then
+    # A valid Certbot lineage is not necessarily the certificate currently
+    # mounted by nginx. Always synchronize it into certs/server.{crt,key}.
+    bash deploy/nginx/letsencrypt.sh install
+  else
     bash deploy/nginx/letsencrypt.sh issue
   fi
 }
 
 edge_up() {
-  local code
-  code="$(curl -kso /dev/null -w '%{http_code}' --max-time 10 https://127.0.0.1/ 2>/dev/null)" || code=000
-  [[ "$code" == 200 || "$code" == 401 ]] ||
-    curl -fsSL --max-time 10 http://127.0.0.1/ >/dev/null
+  local code identifier=""
+  if [[ -r /etc/dexarb/edge.env ]]; then
+    local EDGE_CERT_IDENTIFIER=""
+    # Root-owned Ansible output containing only quoted scalar values.
+    # shellcheck disable=SC1091
+    source /etc/dexarb/edge.env
+    identifier="$EDGE_CERT_IDENTIFIER"
+  fi
+  if [[ -z "$identifier" ]]; then
+    identifier="$(sed -n 's/^PUBLIC_HOSTNAME=//p' .env | tail -n 1 | tr -d '\r')"
+    identifier="${identifier#\"}"
+    identifier="${identifier%\"}"
+    identifier="${identifier#\'}"
+    identifier="${identifier%\'}"
+  fi
+  [[ -n "$identifier" ]] || return 1
+
+  # Route the configured public identity to local nginx while retaining normal
+  # hostname/SAN and CA verification. This rejects a stale self-signed cert.
+  code="$(curl --resolve "$identifier:443:127.0.0.1" -so /dev/null \
+    -w '%{http_code}' --max-time 10 "https://$identifier/" 2>/dev/null)" ||
+    code=000
+  [[ "$code" == 200 || "$code" == 401 ]]
 }
 
 app_get() {

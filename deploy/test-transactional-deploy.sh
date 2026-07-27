@@ -17,7 +17,8 @@ git -C "$fake_repo" config user.name "deploy-test"
 git -C "$fake_repo" config user.email "deploy-test@example.invalid"
 mkdir -p "$fake_repo/deploy/nginx"
 touch "$fake_repo/docker-compose.yml"
-printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_repo/deploy/nginx/letsencrypt.sh"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$1" >>"${MOCK_CERT_LOG:?}"\n' \
+  >"$fake_repo/deploy/nginx/letsencrypt.sh"
 chmod +x "$fake_repo/deploy/nginx/letsencrypt.sh"
 git -C "$fake_repo" add docker-compose.yml deploy/nginx/letsencrypt.sh
 git -C "$fake_repo" commit -qm "previous"
@@ -86,6 +87,7 @@ make_stage() {
 
 export PATH="$fake_bin:$PATH"
 export MOCK_LOG="$fixture/docker.log"
+export MOCK_CERT_LOG="$fixture/certificate.log"
 
 stage="$(make_stage "$candidate_sha" candidate)"
 "$deployer" \
@@ -95,6 +97,8 @@ stage="$(make_stage "$candidate_sha" candidate)"
 
 [[ "$(cat "$fake_repo/.deployed_sha")" == "$candidate_sha" ]]
 grep -q '^APP_ENCRYPTION_KEY=candidate-' "$fake_repo/.env"
+[[ "$(sed -n '1p' "$MOCK_CERT_LOG")" == verify ]]
+[[ "$(sed -n '2p' "$MOCK_CERT_LOG")" == install ]]
 
 printf 'failing\n' >"$fake_repo/release-marker"
 git -C "$fake_repo" add release-marker
