@@ -57,6 +57,9 @@ jobs:
           submodules: recursive
           token: ${{ secrets.GH_PAT }}
 
+      - name: Validate encrypted environment contract
+        run: bash scripts/validate-env-contract.sh keys
+
       - name: Install Gitleaks
         run: |
           set -Eeuo pipefail
@@ -668,12 +671,13 @@ jobs:
           printf '%b\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Decrypt env files and upload to VPS
+      - name: Validate and stage encrypted environment bundle
         timeout-minutes: 3
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
           SSH_USER: ${{ secrets.VPS_SSH_USER }}
           REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
+          NEW_SHA: ${{ github.sha }}
           KEY_ROOT:            ${{ secrets.DOTENV_PRIVATE_KEY_ROOT }}
           KEY_UNIFIED_API:     ${{ secrets.DOTENV_PRIVATE_KEY_UNIFIED_API }}
           KEY_MONITOR:         ${{ secrets.DOTENV_PRIVATE_KEY_MONITOR }}
@@ -681,44 +685,10 @@ jobs:
           KEY_FIAT_CONTROLLER: ${{ secrets.DOTENV_PRIVATE_KEY_FIAT_CONTROLLER }}
         run: |
           set -Eeuo pipefail
-          for f in .env.enc dexUnifiedApi/.env.enc dexMonitor/.env.enc dexMmController/.env.enc dexFiatController/.env.enc; do
-            test -f "$f" || { echo "Missing $f — run: cp .env .env.enc && dotenvx encrypt -f .env.enc in each directory, then commit"; exit 1; }
-          done
           curl -sfS https://dotenvx.sh | sh
-          # Decrypt each .env.enc in place (file becomes plain text after this).
-          # Fail fast with a clear diagnostic if the committed pubkey doesn't match the
-          # CI secret — usual cause is the post-commit encrypt-env.sh hook rotating the
-          # keypair (cp .env .env.enc strips the pubkey). See project_dotenvx_hook_rekey.
-          decrypt_or_die () {
-            local f="$1" key="$2" secret="$3"
-            if ! DOTENV_PRIVATE_KEY_ENC="$key" dotenvx decrypt -f "$f" >/dev/null 2>&1; then
-              local pub; pub=$(grep -oE 'DOTENV_PUBLIC_KEY_ENC="[0-9a-f]+"' "$f" | head -1 || true)
-              echo "::error::Cannot decrypt $f with secret $secret."
-              echo "  Committed ${pub:-<no pubkey>} does not match that key. Likely the post-commit"
-              echo "  encrypt-env.sh hook rotated the keypair (new privkey only lands in gitignored .env.keys)."
-              echo "  Fix: re-encrypt $f pinned to the pubkey matching $secret, or rotate that secret."
-              exit 1
-            fi
-          }
-          decrypt_or_die .env.enc                   "$KEY_ROOT"            DOTENV_PRIVATE_KEY_ROOT
-          decrypt_or_die dexUnifiedApi/.env.enc     "$KEY_UNIFIED_API"     DOTENV_PRIVATE_KEY_UNIFIED_API
-          decrypt_or_die dexMonitor/.env.enc        "$KEY_MONITOR"         DOTENV_PRIVATE_KEY_MONITOR
-          decrypt_or_die dexMmController/.env.enc   "$KEY_MM_CONTROLLER"   DOTENV_PRIVATE_KEY_MM_CONTROLLER
-          decrypt_or_die dexFiatController/.env.enc "$KEY_FIAT_CONTROLLER" DOTENV_PRIVATE_KEY_FIAT_CONTROLLER
-          # Upload decrypted files to VPS as .env
-          scp -i ~/.ssh/id_ed25519 .env.enc                  "$SSH_USER@$SSH_HOST:$REPO_DIR/.env"
-          scp -i ~/.ssh/id_ed25519 dexUnifiedApi/.env.enc    "$SSH_USER@$SSH_HOST:$REPO_DIR/dexUnifiedApi/.env"
-          scp -i ~/.ssh/id_ed25519 dexMonitor/.env.enc       "$SSH_USER@$SSH_HOST:$REPO_DIR/dexMonitor/.env"
-          scp -i ~/.ssh/id_ed25519 dexMmController/.env.enc  "$SSH_USER@$SSH_HOST:$REPO_DIR/dexMmController/.env"
-          scp -i ~/.ssh/id_ed25519 dexFiatController/.env.enc "$SSH_USER@$SSH_HOST:$REPO_DIR/dexFiatController/.env"
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "chmod 600 \
-            '$REPO_DIR/.env' \
-            '$REPO_DIR/dexUnifiedApi/.env' \
-            '$REPO_DIR/dexMonitor/.env' \
-            '$REPO_DIR/dexMmController/.env' \
-            '$REPO_DIR/dexFiatController/.env'"
+          bash deploy/ci-stage-env.sh "$NEW_SHA"
 
-      - name: Sync VPS repo to commit, restart stack & verify (auto-rollback on failure)
+      - name: Activate staged release transactionally
         timeout-minutes: 10
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
@@ -727,133 +697,32 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GH_PAT }}
           GHCR_USER: ${{ github.actor }}
           NEW_SHA: ${{ github.sha }}
-        # The VPS is a git clone (origin + a token URL-rewrite for auth are configured by
-        # deploy/provision/ansible/playbook.yml), so we deliver the WHOLE repo tree at the
-        # exact built commit via `git checkout` instead of scp-ing a hand-maintained subset.
-        # That is what makes every config file (compose, nginx, deploy/monitoring, …) reach
-        # prod automatically — no more "the new file wasn't in the copy list" deploys — and
-        # makes rollback atomic across all of them (a single `git checkout <prev>`). The
-        # decrypted .env files were uploaded by the previous step; the root one is gitignored
-        # and the per-module ones live inside submodules, and we never recurse submodules, so
-        # the checkout never touches them.
+        # The staged helper fetches the exact commit, activates the complete env bundle,
+        # and restores both code and env files if health checks fail.
         run: |
           set -Eeuo pipefail
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
             "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-          cd "$REPO_DIR"
+          exec "$REPO_DIR/.deploy/staging/$NEW_SHA/transactional-deploy.sh" \
+            --repo-dir "$REPO_DIR" \
+            --sha "$NEW_SHA" \
+            --env-bundle "$REPO_DIR/.deploy/staging/$NEW_SHA/env" \
+            --fetch-origin
 
-          # Last good deploy, recorded only after a verified-healthy rollout below.
-          PREV_SHA=$(cat .deployed_sha 2>/dev/null || true)
-
-          # Fixed-image services with bind-mounted config aren't recreated by `up -d`, so they
-          # keep serving the config they read at create time. Force-recreate them after the
-          # rollout so the freshly-checked-out config (dashboards, prometheus/alert rules,
-          # nginx upstreams) actually takes effect.
-          RECREATE_SERVICES="grafana prometheus loki tempo alloy nginx"
-
-          # Transition/robustness guard: a previous (scp-era) failed deploy could leave files
-          # under the bind-mount config paths that Docker auto-created as root, which the
-          # non-root deploy user can't overwrite — `git checkout` would then fail. Normalize
-          # ownership once from a throwaway root container (deploy user is in the docker group).
-          # Harmless once everything is already deploy-user-owned; .env files live elsewhere.
-          docker run --rm -v "$REPO_DIR:/d" busybox:1.37 \
-            chown -R "$(id -u):$(id -g)" /d/deploy /d/nginx 2>/dev/null || true
-
-          # Pin the working tree to an exact commit. --force discards the dirty state the old
-          # scp/tar deploys left behind; --detach avoids moving the local branch ref. We do
-          # NOT recurse submodules: prod runs prebuilt GHCR images and only needs superproject
-          # config, and skipping recursion leaves the submodule .env files untouched.
-          sync_tree() {  # $1 = commit sha
-            git fetch --no-tags origin "$1" || git fetch --no-tags origin main
-            git checkout --force --detach "$1"
-          }
-
-          # --wait blocks until every service is healthy and returns non-zero otherwise,
-          # which is what arms the rollback below.
-          deploy() {  # $1 = commit sha (also the image tag; compose reads ${IMAGE_TAG:-latest})
-            sync_tree "$1"
-            # New VPSs receive a trusted certificate during Ansible edge provisioning. Keep a
-            # self-signed pair only as a recovery guard: nginx needs some certificate to start
-            # so a missing/invalid Let's Encrypt lineage can be repaired through webroot HTTP-01.
-            if [ ! -s deploy/nginx/certs/server.crt ] || [ ! -s deploy/nginx/certs/server.key ]; then
-              if [ -f deploy/nginx/gen-self-signed-cert.sh ]; then
-                ENSURE=1 bash deploy/nginx/gen-self-signed-cert.sh localhost
-              fi
-            fi
-            IMAGE_TAG="$1" docker compose pull
-            IMAGE_TAG="$1" docker compose up -d --remove-orphans --wait --wait-timeout 300
-            # The systemd timer owns regular renewal. CI only repairs an absent, expired, or
-            # mismatched certificate and supports both IP (development) and hostname (production)
-            # identities through /etc/dexarb/edge.env.
-            if [ -x deploy/nginx/letsencrypt.sh ] && { [ -r /etc/dexarb/edge.env ] || grep -q '^LETSENCRYPT_EMAIL=.' .env; }; then
-              if ! bash deploy/nginx/letsencrypt.sh verify; then
-                bash deploy/nginx/letsencrypt.sh issue
-              fi
-            fi
-            # shellcheck disable=SC2086
-            IMAGE_TAG="$1" docker compose up -d --force-recreate --no-deps \
-              --wait --wait-timeout 120 $RECREATE_SERVICES
-          }
-
-          # Each probe is a shell snippet tolerant of topology + auth changes. The
-          # current stack serves the SPA at the edge (200, the login page); pre-auth
-          # rollback targets gated the edge with basic auth (401). Either proves nginx
-          # is up, so accept both. -k because the edge cert is self-signed — this is a
-          # localhost reachability check, not cert validation.
-          edge_up() {
-            local code
-            code=$(curl -kso /dev/null -w '%{http_code}' --max-time 10 https://127.0.0.1/ 2>/dev/null) || code=000
-            [ "$code" = 200 ] || [ "$code" = 401 ] || curl -fsSL --max-time 10 http://127.0.0.1/ >/dev/null
-          }
-          # $1 = path. Data-path routes are now session-gated, so an unauthenticated
-          # probe returns 401 — which still proves nginx routed it and the app + gate
-          # are up. Pre-gate rollback targets return 200. Accept either; probe inside
-          # the dexmonitor container (curl guaranteed by its healthcheck), falling back
-          # to the edge for rollback targets that predate the dexmonitor rename.
-          app_get() {
-            local code
-            code=$(docker compose exec -T dexmonitor curl -so /dev/null -w '%{http_code}' --max-time 30 "http://localhost:5000$1" 2>/dev/null) || code=000
-            { [ "$code" = 200 ] || [ "$code" = 401 ]; } && return 0
-            code=$(curl -sko /dev/null -w '%{http_code}' --max-time 30 "https://127.0.0.1$1" 2>/dev/null) || code=000
-            { [ "$code" = 200 ] || [ "$code" = 401 ]; } && return 0
-            code=$(curl -so /dev/null -w '%{http_code}' --max-time 30 "http://127.0.0.1$1" 2>/dev/null) || code=000
-            [ "$code" = 200 ] || [ "$code" = 401 ]
-          }
-          smoke() {
-            local name probe ok attempt
-            for entry in \
-              "unified-api /health::curl -fsSL --max-time 10 http://127.0.0.1:5010/health" \
-              "web edge::edge_up" \
-              "general_stats overview::app_get '/api/general_stats/overview?hours=24&cex=kraken'" \
-              "ohlc::app_get '/api/ohlc?hours=24&cex=kraken'"; do
-              name="${entry%%::*}"; probe="${entry#*::}"
-              ok=""
-              for attempt in 1 2 3; do
-                if eval "$probe" >/dev/null 2>&1; then ok=1; break; fi
-                echo "smoke attempt $attempt failed for $name"
-                [ "$attempt" -lt 3 ] && sleep 5 || true
-              done
-              [ -n "$ok" ] || { echo "smoke test failed: $name"; return 1; }
-              echo "ok $name"
-            done
-          }
-
-          if deploy "$NEW_SHA" && smoke; then
-            echo "$NEW_SHA" > .deployed_sha
-            echo "deploy of $NEW_SHA healthy"
-          else
-            echo "::error::deploy of $NEW_SHA failed — rolling back to ${PREV_SHA:-<none>}"
-            if [ -n "${PREV_SHA:-}" ]; then
-              if deploy "$PREV_SHA" && smoke; then
-                echo "::warning::rolled back to last-good $PREV_SHA"
-              else
-                echo "::error::ROLLBACK to $PREV_SHA FAILED — manual intervention required"
-              fi
-            else
-              echo "::error::no previous SHA recorded — cannot auto-roll back"
-            fi
-            exit 1
-          fi
           REMOTE
+
+      - name: Remove staged plaintext environment
+        if: always()
+        continue-on-error: true
+        env:
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_USER: ${{ secrets.VPS_SSH_USER }}
+          REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
+          NEW_SHA: ${{ github.sha }}
+        run: |
+          [[ "$NEW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$REPO_DIR" == /* && "$REPO_DIR" != "/" ]]
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
+            "rm -rf '$REPO_DIR/.deploy/staging/$NEW_SHA'"

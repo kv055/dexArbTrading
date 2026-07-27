@@ -46,6 +46,9 @@ jobs:
           REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
           OWNER: ${{ github.repository_owner }}
 
+      - name: Validate encrypted environment contract
+        run: bash scripts/validate-env-contract.sh keys
+
       - name: Install Gitleaks
         run: |
           set -Eeuo pipefail
@@ -753,12 +756,13 @@ jobs:
           printf '%b\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Decrypt env files and upload to VPS
+      - name: Validate and stage encrypted environment bundle
         timeout-minutes: 3
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
           SSH_USER: ${{ secrets.VPS_SSH_USER }}
           REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
+          NEW_SHA: ${{ github.sha }}
           KEY_ROOT:            ${{ secrets.DOTENV_PRIVATE_KEY_ROOT }}
           KEY_UNIFIED_API:     ${{ secrets.DOTENV_PRIVATE_KEY_UNIFIED_API }}
           KEY_MONITOR:         ${{ secrets.DOTENV_PRIVATE_KEY_MONITOR }}
@@ -766,40 +770,8 @@ jobs:
           KEY_FIAT_CONTROLLER: ${{ secrets.DOTENV_PRIVATE_KEY_FIAT_CONTROLLER }}
         run: |
           set -Eeuo pipefail
-          for f in .env.enc dexUnifiedApi/.env.enc dexMonitor/.env.enc dexMmController/.env.enc dexFiatController/.env.enc; do
-            test -f "$f" || { echo "Missing $f — run: cp .env .env.enc && dotenvx encrypt -f .env.enc in each directory, then commit"; exit 1; }
-          done
           curl -sfS https://dotenvx.sh | sh
-          # Decrypt each .env.enc in place; fail fast with a clear diagnostic if the
-          # committed pubkey doesn't match the CI secret — usual cause is the post-commit
-          # encrypt-env.sh hook rotating the keypair. See project_dotenvx_hook_rekey.
-          decrypt_or_die () {
-            local f="$1" key="$2" secret="$3"
-            if ! DOTENV_PRIVATE_KEY_ENC="$key" dotenvx decrypt -f "$f" >/dev/null 2>&1; then
-              local pub; pub=$(grep -oE 'DOTENV_PUBLIC_KEY_ENC="[0-9a-f]+"' "$f" | head -1 || true)
-              echo "::error::Cannot decrypt $f with secret $secret."
-              echo "  Committed ${pub:-<no pubkey>} does not match that key. Likely the post-commit"
-              echo "  encrypt-env.sh hook rotated the keypair (new privkey only lands in gitignored .env.keys)."
-              echo "  Fix: re-encrypt $f pinned to the pubkey matching $secret, or rotate that secret."
-              exit 1
-            fi
-          }
-          decrypt_or_die .env.enc                   "$KEY_ROOT"            DOTENV_PRIVATE_KEY_ROOT
-          decrypt_or_die dexUnifiedApi/.env.enc     "$KEY_UNIFIED_API"     DOTENV_PRIVATE_KEY_UNIFIED_API
-          decrypt_or_die dexMonitor/.env.enc        "$KEY_MONITOR"         DOTENV_PRIVATE_KEY_MONITOR
-          decrypt_or_die dexMmController/.env.enc   "$KEY_MM_CONTROLLER"   DOTENV_PRIVATE_KEY_MM_CONTROLLER
-          decrypt_or_die dexFiatController/.env.enc "$KEY_FIAT_CONTROLLER" DOTENV_PRIVATE_KEY_FIAT_CONTROLLER
-          scp -i ~/.ssh/id_ed25519 .env.enc                  "$SSH_USER@$SSH_HOST:$REPO_DIR/.env"
-          scp -i ~/.ssh/id_ed25519 dexUnifiedApi/.env.enc    "$SSH_USER@$SSH_HOST:$REPO_DIR/dexUnifiedApi/.env"
-          scp -i ~/.ssh/id_ed25519 dexMonitor/.env.enc       "$SSH_USER@$SSH_HOST:$REPO_DIR/dexMonitor/.env"
-          scp -i ~/.ssh/id_ed25519 dexMmController/.env.enc  "$SSH_USER@$SSH_HOST:$REPO_DIR/dexMmController/.env"
-          scp -i ~/.ssh/id_ed25519 dexFiatController/.env.enc "$SSH_USER@$SSH_HOST:$REPO_DIR/dexFiatController/.env"
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "chmod 600 \
-            '$REPO_DIR/.env' \
-            '$REPO_DIR/dexUnifiedApi/.env' \
-            '$REPO_DIR/dexMonitor/.env' \
-            '$REPO_DIR/dexMmController/.env' \
-            '$REPO_DIR/dexFiatController/.env'"
+          bash deploy/ci-stage-env.sh "$NEW_SHA"
 
       - name: Push deploy commit into the VPS repo
         env:
@@ -819,7 +791,7 @@ jobs:
           GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_ed25519" \
             git push --force "ssh://$SSH_USER@$SSH_HOST$REPO_DIR" "HEAD:refs/deploy/$NEW_SHA"
 
-      - name: Sync VPS repo to commit, restart stack & verify (auto-rollback on failure)
+      - name: Activate staged release transactionally
         timeout-minutes: 10
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
@@ -831,105 +803,26 @@ jobs:
         run: |
           set -Eeuo pipefail
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' CERT_CN='dexmonitor.live' bash -s" <<'REMOTE'
+            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-          cd "$REPO_DIR"
+          exec "$REPO_DIR/.deploy/staging/$NEW_SHA/transactional-deploy.sh" \
+            --repo-dir "$REPO_DIR" \
+            --sha "$NEW_SHA" \
+            --env-bundle "$REPO_DIR/.deploy/staging/$NEW_SHA/env"
 
-          PREV_SHA=$(cat .deployed_sha 2>/dev/null || true)
-
-          RECREATE_SERVICES="grafana prometheus loki tempo alloy nginx"
-
-          docker run --rm -v "$REPO_DIR:/d" busybox:1.37 \
-            chown -R "$(id -u):$(id -g)" /d/deploy /d/nginx 2>/dev/null || true
-
-          # The deploy commit is delivered into this repo by the runner's "Push deploy
-          # commit into the VPS repo" step (refs/deploy/<sha>); the previous deploy's
-          # commit is still present for rollback. So just check it out — no remote fetch.
-          sync_tree() {
-            git checkout --force --detach "$1"
-          }
-
-          deploy() {
-            sync_tree "$1" || { echo "::error::commit $1 not present in VPS repo — tree delivery failed"; return 1; }
-            if [ -f deploy/nginx/gen-self-signed-cert.sh ]; then
-              ENSURE=1 CERT_CN="${CERT_CN:-localhost}" bash deploy/nginx/gen-self-signed-cert.sh "${CERT_CN:-localhost}"
-            fi
-            if grep -q EDGE_AUTH_HTPASSWD docker-compose.yml 2>/dev/null; then
-              if ! grep -Eq '^EDGE_AUTH_HTPASSWD=..*' .env 2>/dev/null; then
-                echo "::error::EDGE_AUTH_HTPASSWD not in the deployed .env"
-                return 1
-              fi
-            fi
-            IMAGE_TAG="$1" docker compose pull
-            IMAGE_TAG="$1" docker compose up -d --remove-orphans --wait --wait-timeout 300
-            if [ -x deploy/nginx/letsencrypt.sh ] && grep -q '^LETSENCRYPT_EMAIL=.' .env; then
-              bash deploy/nginx/letsencrypt.sh issue
-            fi
-            # shellcheck disable=SC2086
-            IMAGE_TAG="$1" docker compose up -d --force-recreate --no-deps \
-              --wait --wait-timeout 120 $RECREATE_SERVICES
-          }
-
-          edge_up() {
-            local code
-            code=$(curl -kso /dev/null -w '%{http_code}' --max-time 10 https://127.0.0.1/ 2>/dev/null) || code=000
-            [ "$code" = 200 ] || [ "$code" = 401 ] || curl -fsSL --max-time 10 http://127.0.0.1/ >/dev/null
-          }
-          app_get() {
-            local code
-            code=$(docker compose exec -T dexmonitor curl -so /dev/null -w '%{http_code}' --max-time 30 "http://localhost:5000$1" 2>/dev/null) || code=000
-            { [ "$code" = 200 ] || [ "$code" = 401 ]; } && return 0
-            code=$(curl -sko /dev/null -w '%{http_code}' --max-time 30 "https://127.0.0.1$1" 2>/dev/null) || code=000
-            { [ "$code" = 200 ] || [ "$code" = 401 ]; } && return 0
-            code=$(curl -so /dev/null -w '%{http_code}' --max-time 30 "http://127.0.0.1$1" 2>/dev/null) || code=000
-            [ "$code" = 200 ] || [ "$code" = 401 ]
-          }
-          smoke() {
-            local name probe ok attempt
-            for entry in \
-              "unified-api /health::curl -fsSL --max-time 10 http://127.0.0.1:5010/health" \
-              "web edge::edge_up" \
-              "general_stats overview::app_get '/api/general_stats/overview?hours=24&cex=kraken'" \
-              "ohlc::app_get '/api/ohlc?hours=24&cex=kraken'"; do
-              name="${entry%%::*}"; probe="${entry#*::}"
-              ok=""
-              for attempt in 1 2 3; do
-                if eval "$probe" >/dev/null 2>&1; then ok=1; break; fi
-                echo "smoke attempt $attempt failed for $name"
-                [ "$attempt" -lt 3 ] && sleep 5 || true
-              done
-              [ -n "$ok" ] || { echo "smoke test failed: $name"; return 1; }
-              echo "ok $name"
-            done
-          }
-
-          dump_failing_logs() {
-            echo "--- container logs for failing services ---"
-            for svc in $(IMAGE_TAG="$1" docker compose ps --format '{{.Name}} {{.State}}' 2>/dev/null \
-                         | awk '$2 != "running" {print $1}'); do
-              echo "=== $svc ==="
-              docker logs --tail 80 "$svc" 2>&1 || true
-            done
-            echo "--- all container states ---"
-            IMAGE_TAG="$1" docker compose ps 2>/dev/null || true
-          }
-
-          if deploy "$NEW_SHA" && smoke; then
-            echo "$NEW_SHA" > .deployed_sha
-            echo "deploy of $NEW_SHA healthy"
-          else
-            dump_failing_logs "$NEW_SHA"
-            echo "::error::deploy of $NEW_SHA failed — rolling back to ${PREV_SHA:-<none>}"
-            if [ -n "${PREV_SHA:-}" ]; then
-              if deploy "$PREV_SHA" && smoke; then
-                echo "::warning::rolled back to last-good $PREV_SHA"
-              else
-                echo "::error::ROLLBACK to $PREV_SHA FAILED — manual intervention required"
-              fi
-            else
-              echo "::error::no previous SHA recorded — cannot auto-roll back"
-            fi
-            exit 1
-          fi
           REMOTE
+
+      - name: Remove staged plaintext environment
+        if: always()
+        continue-on-error: true
+        env:
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_USER: ${{ secrets.VPS_SSH_USER }}
+          REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
+          NEW_SHA: ${{ github.sha }}
+        run: |
+          [[ "$NEW_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$REPO_DIR" == /* && "$REPO_DIR" != "/" ]]
+          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
+            "rm -rf '$REPO_DIR/.deploy/staging/$NEW_SHA'"
