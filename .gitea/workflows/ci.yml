@@ -384,14 +384,29 @@ jobs:
       - name: Build (tsc + vite)
         run: npm run build
 
+  test-gate:
+    name: Test gate
+    needs: [detect-changes, test-go, test-frontend]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require successful or intentionally skipped tests
+        env:
+          DETECT_RESULT: ${{ needs.detect-changes.result }}
+          GO_RESULT: ${{ needs.test-go.result }}
+          FRONTEND_RESULT: ${{ needs.test-frontend.result }}
+        run: |
+          set -Eeuo pipefail
+          [ "$DETECT_RESULT" = success ]
+          case "$GO_RESULT" in success|skipped) ;; *) exit 1;; esac
+          case "$FRONTEND_RESULT" in success|skipped) ;; *) exit 1;; esac
+
   build-and-push:
     name: Build & push ${{ matrix.service }}
-    needs: [detect-changes, test-go, test-frontend]
+    needs: [detect-changes, test-gate]
     if: |
-      always() &&
       needs.detect-changes.result == 'success' &&
-      (needs.test-go.result == 'success' || needs.test-go.result == 'skipped') &&
-      (needs.test-frontend.result == 'success' || needs.test-frontend.result == 'skipped') &&
+      needs.test-gate.result == 'success' &&
       needs.detect-changes.outputs.changes != ''
     runs-on: ubuntu-latest
     env:
@@ -552,12 +567,11 @@ jobs:
 
   pre-deploy:
     name: Pre-deploy checks
-    needs: [detect-changes, test-go, test-frontend, build-and-push]
+    needs: [detect-changes, test-gate, build-and-push]
     if: |
       always() &&
       needs.detect-changes.outputs.deploy_main == 'true' &&
-      (needs.test-go.result == 'success' || needs.test-go.result == 'skipped') &&
-      (needs.test-frontend.result == 'success' || needs.test-frontend.result == 'skipped') &&
+      needs.test-gate.result == 'success' &&
       (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 10
