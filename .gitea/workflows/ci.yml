@@ -406,8 +406,7 @@ jobs:
     needs: [detect-changes, test-gate]
     if: |
       needs.detect-changes.result == 'success' &&
-      needs.test-gate.result == 'success' &&
-      needs.detect-changes.outputs.changes != ''
+      needs.test-gate.result == 'success'
     runs-on: ubuntu-latest
     env:
       DOCKER_BUILD_SUMMARY: "false"
