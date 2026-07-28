@@ -99,6 +99,8 @@ stage="$(make_stage "$candidate_sha" candidate)"
 grep -q '^APP_ENCRYPTION_KEY=candidate-' "$fake_repo/.env"
 [[ "$(sed -n '1p' "$MOCK_CERT_LOG")" == verify ]]
 [[ "$(sed -n '2p' "$MOCK_CERT_LOG")" == install ]]
+grep -q "tag=$candidate_sha .* all=compose up -d --remove-orphans --wait --wait-timeout 600" \
+  "$MOCK_LOG"
 
 printf 'failing\n' >"$fake_repo/release-marker"
 git -C "$fake_repo" add release-marker

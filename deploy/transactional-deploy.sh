@@ -229,8 +229,10 @@ start_release() {
     ensure_trusted_certificate || return 1
   fi
   IMAGE_TAG="$sha" docker compose pull || return 1
+  # Unified Snapshot's first cycle calls several external/Tor markets and can
+  # legitimately exceed five minutes before writing its success marker.
   IMAGE_TAG="$sha" docker compose up -d --remove-orphans \
-    --wait --wait-timeout 300 || return 1
+    --wait --wait-timeout 600 || return 1
   IMAGE_TAG="$sha" docker compose up -d --force-recreate --no-deps \
     --wait --wait-timeout 120 "${recreate_services[@]}" || return 1
   smoke || return 1
