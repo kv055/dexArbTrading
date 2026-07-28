@@ -1,23 +1,30 @@
 #!/usr/bin/env bash
-# Activate one staged release on the VPS. Code, image tag, and all plaintext
-# environment files move together; a failed rollout restores the previous
-# environment snapshot before restarting the previous SHA.
+# Activate one staged release on the VPS. Code, per-service image tags, and all
+# plaintext environment files move together; a failed rollout restores the
+# previous environment and image manifests before restarting the previous SHA.
 set -Eeuo pipefail
 
 usage() {
-  echo "usage: $0 --repo-dir <path> --sha <commit> --env-bundle <path> [--fetch-origin]" >&2
+  echo "usage: $0 --repo-dir <path> --sha <commit> --env-bundle <path> [--changed-services <csv>] [--fetch-origin]" >&2
   exit 2
 }
 
 repo_dir=""
 new_sha=""
 env_bundle=""
+changed_services_csv=""
+changed_services_supplied=false
 fetch_origin=false
 while (($#)); do
   case "$1" in
     --repo-dir) repo_dir="${2:-}"; shift 2 ;;
     --sha) new_sha="${2:-}"; shift 2 ;;
     --env-bundle) env_bundle="${2:-}"; shift 2 ;;
+    --changed-services)
+      changed_services_csv="${2:-}"
+      changed_services_supplied=true
+      shift 2
+      ;;
     --fetch-origin) fetch_origin=true; shift ;;
     *) usage ;;
   esac
@@ -47,6 +54,7 @@ state_root="$repo_dir/.deploy"
 release_root="$state_root/releases"
 mkdir -p "$release_root"
 chmod 700 "$state_root" "$release_root"
+candidate_manifest="$state_root/.images.${new_sha}.$$"
 
 exec 9>"$state_root/deploy.lock"
 if ! flock -n 9; then
@@ -55,6 +63,7 @@ if ! flock -n 9; then
 fi
 
 cleanup() {
+  rm -f "$candidate_manifest"
   rm -rf "$stage_dir"
 }
 trap cleanup EXIT
@@ -68,7 +77,81 @@ env_paths=(
   "dexMmController/.env"
   "dexFiatController/.env"
 )
-recreate_services=(grafana prometheus loki tempo alloy nginx)
+image_services=(
+  tor
+  bisq
+  bisq2
+  unified-api
+  unified-snapshot
+  postgres-backup
+  dexmonitor
+  mm-controller
+  totp-api
+  fiat-controller
+)
+image_vars=(
+  TOR_IMAGE_TAG
+  BISQ_IMAGE_TAG
+  BISQ2_IMAGE_TAG
+  UNIFIED_API_IMAGE_TAG
+  UNIFIED_SNAPSHOT_IMAGE_TAG
+  POSTGRES_BACKUP_IMAGE_TAG
+  DEXMONITOR_IMAGE_TAG
+  MM_CONTROLLER_IMAGE_TAG
+  TOTP_API_IMAGE_TAG
+  FIAT_CONTROLLER_IMAGE_TAG
+)
+config_services=(grafana prometheus loki tempo alloy nginx)
+changed_services=()
+
+image_var_for_service() {
+  local wanted="$1" index
+  for index in "${!image_services[@]}"; do
+    if [[ "${image_services[$index]}" == "$wanted" ]]; then
+      printf '%s\n' "${image_vars[$index]}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+parse_changed_services() {
+  local raw service
+  declare -A seen=()
+
+  if ! "$changed_services_supplied"; then
+    changed_services=("${image_services[@]}")
+    return 0
+  fi
+  case "$changed_services_csv" in
+    ,*|*,|*,,*)
+      echo "changed service list contains an empty entry" >&2
+      return 1
+      ;;
+  esac
+  [[ -n "$changed_services_csv" ]] || return 0
+
+  local IFS=','
+  read -ra changed_services <<<"$changed_services_csv"
+  for raw in "${changed_services[@]}"; do
+    service="${raw//$'\r'/}"
+    [[ "$service" == "$raw" && "$service" != *[[:space:]]* ]] || {
+      echo "invalid changed service: $raw" >&2
+      return 1
+    }
+    image_var_for_service "$service" >/dev/null || {
+      echo "unknown changed service: $service" >&2
+      return 1
+    }
+    [[ -z "${seen[$service]:-}" ]] || {
+      echo "duplicate changed service: $service" >&2
+      return 1
+    }
+    seen["$service"]=1
+  done
+}
+
+parse_changed_services || exit 2
 
 copy_bundle() {
   local source_root="$1" destination_root="$2" relative
@@ -113,6 +196,116 @@ snapshot_active_bundle() {
   mv "$temporary" "$release_root/$sha"
 }
 
+write_uniform_image_manifest() {
+  local destination="$1" sha="$2" variable
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  : >"$destination"
+  chmod 600 "$destination"
+  for variable in "${image_vars[@]}"; do
+    printf '%s=%s\n' "$variable" "$sha" >>"$destination"
+  done
+}
+
+validate_image_manifest() {
+  local manifest="$1" line variable value expected variable_name
+  declare -A seen=()
+
+  [[ -f "$manifest" ]] || {
+    echo "image manifest is missing: $manifest" >&2
+    return 1
+  }
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^([A-Z][A-Z0-9_]*)=([0-9a-f]{40})$ ]] || {
+      echo "invalid image manifest entry: $line" >&2
+      return 1
+    }
+    variable="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    expected=false
+    for variable_name in "${image_vars[@]}"; do
+      if [[ "$variable_name" == "$variable" ]]; then
+        expected=true
+        break
+      fi
+    done
+    "$expected" || {
+      echo "unknown image manifest variable: $variable" >&2
+      return 1
+    }
+    [[ -z "${seen[$variable]:-}" ]] || {
+      echo "duplicate image manifest variable: $variable" >&2
+      return 1
+    }
+    seen["$variable"]="$value"
+  done <"$manifest"
+
+  for variable in "${image_vars[@]}"; do
+    [[ -n "${seen[$variable]:-}" ]] || {
+      echo "image manifest is missing $variable" >&2
+      return 1
+    }
+  done
+  [[ "${#seen[@]}" -eq "${#image_vars[@]}" ]]
+}
+
+load_image_manifest() {
+  local manifest="$1" variable value
+  validate_image_manifest "$manifest" || return 1
+  while IFS='=' read -r variable value; do
+    export "$variable=$value"
+  done <"$manifest"
+}
+
+ensure_previous_image_manifest() {
+  local sha="$1" manifest
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 0
+  manifest="$release_root/$sha/images.env"
+  if [[ -f "$manifest" ]]; then
+    validate_image_manifest "$manifest"
+    return
+  fi
+
+  # Migration from the former global IMAGE_TAG scheme: every service was
+  # deliberately tagged with the release SHA, so that SHA is the exact active
+  # image version for every entry in the first per-service manifest.
+  echo "migrating release $sha from global to per-service image tags"
+  mkdir -p "$release_root/$sha"
+  write_uniform_image_manifest "$manifest.tmp" "$sha"
+  mv -f "$manifest.tmp" "$manifest"
+}
+
+build_candidate_image_manifest() {
+  local base_manifest="$1" destination="$2" service variable value
+  declare -A values=()
+
+  if [[ -n "$base_manifest" ]]; then
+    validate_image_manifest "$base_manifest" || return 1
+    while IFS='=' read -r variable value; do
+      values["$variable"]="$value"
+    done <"$base_manifest"
+  else
+    if [[ "${#changed_services[@]}" -ne "${#image_services[@]}" ]]; then
+      echo "the first deployment must publish every service image" >&2
+      return 1
+    fi
+    for variable in "${image_vars[@]}"; do
+      values["$variable"]="$new_sha"
+    done
+  fi
+
+  for service in "${changed_services[@]}"; do
+    variable="$(image_var_for_service "$service")"
+    values["$variable"]="$new_sha"
+  done
+
+  : >"$destination"
+  chmod 600 "$destination"
+  for variable in "${image_vars[@]}"; do
+    printf '%s=%s\n' "$variable" "${values[$variable]}" >>"$destination"
+  done
+  validate_image_manifest "$destination"
+}
+
 sync_tree() {
   local sha="$1"
   if ! git cat-file -e "$sha^{commit}" 2>/dev/null; then
@@ -129,7 +322,7 @@ sync_tree() {
 compose_preflight() {
   local output
   "$validator" values "$repo_dir"
-  if ! output="$(IMAGE_TAG="$1" docker compose config --quiet 2>&1)"; then
+  if ! output="$(docker compose config --quiet 2>&1)"; then
     echo "docker compose configuration validation failed" >&2
     return 1
   fi
@@ -156,6 +349,46 @@ ensure_trusted_certificate() {
   else
     bash deploy/nginx/letsencrypt.sh issue
   fi
+}
+
+certificate_bundle_checksum() {
+  local path
+  for path in deploy/nginx/certs/server.crt deploy/nginx/certs/server.key; do
+    if [[ -f "$path" ]]; then
+      sha256sum "$path"
+    else
+      printf 'missing  %s\n' "$path"
+    fi
+  done | sha256sum | awk '{print $1}'
+}
+
+config_services_to_recreate() {
+  local from_sha="$1" to_sha="$2" certificate_changed="$3" path service
+  declare -A wanted=()
+
+  if [[ "$from_sha" =~ ^[0-9a-f]{40}$ ]] &&
+     git cat-file -e "$from_sha^{commit}" 2>/dev/null &&
+     git cat-file -e "$to_sha^{commit}" 2>/dev/null; then
+    while IFS= read -r path; do
+      case "$path" in
+        nginx/*) wanted[nginx]=1 ;;
+        deploy/monitoring/prometheus.yml) wanted[prometheus]=1 ;;
+        deploy/monitoring/grafana/*) wanted[grafana]=1 ;;
+        deploy/monitoring/loki/*) wanted[loki]=1 ;;
+        deploy/monitoring/tempo/*) wanted[tempo]=1 ;;
+        deploy/monitoring/alloy/*) wanted[alloy]=1 ;;
+      esac
+    done < <(git diff --name-only "$from_sha" "$to_sha")
+  else
+    for service in "${config_services[@]}"; do
+      wanted["$service"]=1
+    done
+  fi
+  [[ "$certificate_changed" == true ]] && wanted[nginx]=1
+
+  for service in "${config_services[@]}"; do
+    [[ -n "${wanted[$service]:-}" ]] && printf '%s\n' "$service"
+  done
 }
 
 edge_up() {
@@ -220,43 +453,87 @@ smoke() {
   done
 }
 
+pull_changed_images() {
+  local service active
+  declare -A active_services=()
+  local pull_services=()
+
+  while IFS= read -r active; do
+    [[ -n "$active" ]] && active_services["$active"]=1
+  done < <(docker compose config --services)
+  for service in "${changed_services[@]}"; do
+    [[ -n "${active_services[$service]:-}" ]] && pull_services+=("$service")
+  done
+  if ((${#pull_services[@]})); then
+    docker compose pull "${pull_services[@]}"
+  else
+    echo "no active service image changed; skipping compose pull"
+  fi
+}
+
 start_release() {
-  local sha="$1" bundle="$2" issue_certificate="$3"
+  local sha="$1" bundle="$2" manifest="$3" issue_certificate="$4" from_sha="$5"
+  local certificate_before certificate_after certificate_changed=false
+  local restart_services=()
   sync_tree "$sha" || return 1
   activate_bundle "$bundle" || return 1
-  compose_preflight "$sha" || return 1
+  load_image_manifest "$manifest" || return 1
+  compose_preflight || return 1
   if [[ "$issue_certificate" == true ]]; then
+    certificate_before="$(certificate_bundle_checksum)"
     ensure_trusted_certificate || return 1
+    certificate_after="$(certificate_bundle_checksum)"
+    [[ "$certificate_before" != "$certificate_after" ]] &&
+      certificate_changed=true
   fi
-  IMAGE_TAG="$sha" docker compose pull || return 1
+  pull_changed_images || return 1
   # Unified Snapshot's first cycle calls several external/Tor markets and can
-  # legitimately exceed five minutes before writing its success marker.
-  IMAGE_TAG="$sha" docker compose up -d --remove-orphans \
+  # legitimately exceed five minutes before writing its success marker. With
+  # per-service tags, Compose keeps its existing container unless its image or
+  # service configuration actually changed.
+  docker compose up -d --remove-orphans \
     --wait --wait-timeout 600 || return 1
-  IMAGE_TAG="$sha" docker compose up -d --force-recreate --no-deps \
-    --wait --wait-timeout 120 "${recreate_services[@]}" || return 1
+  mapfile -t restart_services < <(
+    config_services_to_recreate "$from_sha" "$sha" "$certificate_changed"
+  )
+  if ((${#restart_services[@]})); then
+    docker compose up -d --force-recreate --no-deps \
+      --wait --wait-timeout 120 "${restart_services[@]}" || return 1
+  fi
   smoke || return 1
 }
 
 dump_failing_logs() {
-  local sha="$1" service
+  local manifest="$1" service
+  load_image_manifest "$manifest" || true
   echo "--- container logs for failing services ---"
   while IFS= read -r service; do
     [[ -n "$service" ]] || continue
     echo "=== $service ==="
     docker logs --tail 80 "$service" 2>&1 || true
   done < <(
-    IMAGE_TAG="$sha" docker compose ps --format '{{.Name}} {{.State}}' 2>/dev/null |
+    docker compose ps --format '{{.Name}} {{.State}}' 2>/dev/null |
       awk '$2 != "running" {print $1}'
   )
   echo "--- all container states ---"
-  IMAGE_TAG="$sha" docker compose ps 2>/dev/null || true
+  docker compose ps 2>/dev/null || true
 }
 
 snapshot_active_bundle "$prev_sha" || true
+previous_manifest=""
+if [[ "$prev_sha" =~ ^[0-9a-f]{40}$ ]]; then
+  ensure_previous_image_manifest "$prev_sha" || exit 1
+  previous_manifest="$release_root/$prev_sha/images.env"
+fi
+build_candidate_image_manifest "$previous_manifest" "$candidate_manifest"
 
-if start_release "$new_sha" "$env_bundle" true; then
+if start_release \
+  "$new_sha" "$env_bundle" "$candidate_manifest" true "$prev_sha"; then
   copy_bundle "$env_bundle" "$release_root/$new_sha/env"
+  install -m 600 "$candidate_manifest" \
+    "$release_root/$new_sha/images.env.tmp"
+  mv -f "$release_root/$new_sha/images.env.tmp" \
+    "$release_root/$new_sha/images.env"
   printf '%s\n' "$new_sha" >.deployed_sha.tmp
   mv -f .deployed_sha.tmp .deployed_sha
   find "$release_root" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' |
@@ -268,12 +545,18 @@ if start_release "$new_sha" "$env_bundle" true; then
   exit 0
 fi
 
-dump_failing_logs "$new_sha"
+dump_failing_logs "$candidate_manifest"
 echo "deploy of $new_sha failed; rolling back to ${prev_sha:-<none>}" >&2
 if [[ "$prev_sha" =~ ^[0-9a-f]{40}$ &&
-      -d "$release_root/$prev_sha/env" ]]; then
-  if start_release "$prev_sha" "$release_root/$prev_sha/env" false; then
-    echo "rolled back code and environment to $prev_sha" >&2
+      -d "$release_root/$prev_sha/env" &&
+      -f "$release_root/$prev_sha/images.env" ]]; then
+  if start_release \
+    "$prev_sha" \
+    "$release_root/$prev_sha/env" \
+    "$release_root/$prev_sha/images.env" \
+    false \
+    "$new_sha"; then
+    echo "rolled back code, environment, and images to $prev_sha" >&2
   else
     echo "ROLLBACK to $prev_sha FAILED; manual intervention required" >&2
   fi

@@ -99,7 +99,7 @@ jobs:
         run: gitleaks dir . --config .gitleaks.toml --redact --no-banner
 
   detect-changes:
-    # Diff the push/PR range and decide which tests, image builds, and GHCR re-tags run.
+    # Diff the push/PR range and decide which tests and image builds run.
     name: Detect changed services
     needs: security
     runs-on: ubuntu-latest
@@ -109,7 +109,6 @@ jobs:
       test_modules_json: ${{ steps.detect.outputs.test_modules_json }}
       run_frontend: ${{ steps.detect.outputs.run_frontend }}
       build_matrix_json: ${{ steps.detect.outputs.build_matrix_json }}
-      retag_services_json: ${{ steps.detect.outputs.retag_services_json }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -170,21 +169,11 @@ jobs:
             '
           }
 
-          retag_services_json_for() {
-            local changes_csv="${1:-}"
-            jq -n --arg all "$ALL_SERVICES" --arg changed "${changes_csv:-}" '
-              ($all | split(",")) as $all |
-              ($changed | split(",") | map(select(length > 0))) as $changed |
-              [$all[] | select(. as $s | ($changed | index($s) | not))]
-            '
-          }
-
           write_outputs() {
             local changes="$1" test_modules="$2" run_frontend="$3"
-            local test_modules_json build_matrix_json retag_services_json
+            local test_modules_json build_matrix_json
             test_modules_json=$(comma_to_json_array "$test_modules")
             build_matrix_json=$(build_matrix_json_for "$changes")
-            retag_services_json=$(retag_services_json_for "$changes")
             echo "changes=${changes:-}" >> "$GITHUB_OUTPUT"
             echo "test_modules=${test_modules:-}" >> "$GITHUB_OUTPUT"
             echo "run_frontend=${run_frontend}" >> "$GITHUB_OUTPUT"
@@ -195,15 +184,11 @@ jobs:
               echo 'build_matrix_json<<EOF'
               echo "$build_matrix_json"
               echo 'EOF'
-              echo 'retag_services_json<<EOF'
-              echo "$retag_services_json"
-              echo 'EOF'
             } >> "$GITHUB_OUTPUT"
             echo "services to build: ${changes:-<none>}"
             echo "test modules: ${test_modules:-<none>}"
             echo "run frontend: ${run_frontend}"
             echo "build matrix: ${build_matrix_json}"
-            echo "retag services: ${retag_services_json}"
           }
 
           emit_all() {
@@ -264,7 +249,7 @@ jobs:
           printf '%s\n' "$CHANGED"
 
           changed() { printf '%s\n' "$CHANGED" | grep -qE "$1"; }
-          if changed '^(docker-compose\.yml|\.gitmodules|go\.work|go\.work\.sum)$'; then
+          if changed '^(\.gitmodules|go\.work|go\.work\.sum)$'; then
             emit_all "infra change -> build all"; exit 0
           fi
 
@@ -327,11 +312,8 @@ jobs:
     needs: detect-changes
     # Cheap (docker compose config + grep) and secret-free: the script
     # materializes empty .env placeholders for any missing env_file, so it
-    # works on a fresh checkout. Run on every PR to catch network-mode /
-    # service-wiring regressions even when only docker-compose.yml changed
-    # (detect-changes treats such edits as "build all" and sets no dedicated
-    # output, so gate on the PR having any testable change rather than a
-    # compose-specific flag).
+    # works on a fresh checkout. Run on every PR to catch network-mode and
+    # service-wiring regressions even when no application image needs building.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -409,6 +391,8 @@ jobs:
     if: |
       always() &&
       needs.detect-changes.result == 'success' &&
+      (needs.test-go.result == 'success' || needs.test-go.result == 'skipped') &&
+      (needs.test-frontend.result == 'success' || needs.test-frontend.result == 'skipped') &&
       needs.detect-changes.outputs.changes != ''
     # Runs on both push (build + push) and pull_request (build-only validation, see the
     # 'push:' flag below) so a bad image — e.g. an auto bisq bump — is caught before merge.
@@ -461,48 +445,10 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
-  retag-images:
-    name: Re-tag ${{ matrix.service }}
-    needs: [detect-changes, test-go, test-frontend]
-    if: |
-      always() &&
-      needs.detect-changes.result == 'success' &&
-      github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
-      needs.detect-changes.outputs.retag_services_json != '[]'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        service: ${{ fromJson(needs.detect-changes.outputs.retag_services_json) }}
-    steps:
-      - name: Compute lowercase image owner
-        id: owner
-        run: |
-          echo "value=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
-
-      # Unchanged services still need a SHA-tagged image so pre-deploy's manifest check
-      # and deploy's `compose pull` succeed. Copy :latest -> :<sha> in GHCR.
-      - name: Re-tag latest as SHA (unchanged service)
-        env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OWNER: ${{ steps.owner.outputs.value }}
-          SHA: ${{ github.sha }}
-        run: |
-          set -Eeuo pipefail
-          echo "$TOKEN" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
-          IMG="${REGISTRY}/${OWNER}/dexarbtrading-${{ matrix.service }}"
-          if ! docker buildx imagetools inspect "$IMG:latest" >/dev/null 2>&1; then
-            echo "::error::no $IMG:latest to re-tag — re-run after a full build (e.g. touch an infra file) to seed it"
-            exit 1
-          fi
-          docker buildx imagetools create --tag "$IMG:$SHA" "$IMG:latest"
-          echo "re-tagged $IMG:latest -> :$SHA"
-
   build-report:
     name: Build report
-    needs: [build-and-push, retag-images]
-    if: always() && (needs.build-and-push.result != 'skipped' || needs.retag-images.result != 'skipped')
+    needs: build-and-push
+    if: always() && needs.build-and-push.result != 'skipped'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -519,9 +465,9 @@ jobs:
             gh api "/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
               --paginate --jq '
                 .jobs[]
-                | select(.name | startswith("Build & push ") or startswith("Re-tag "))
+                | select(.name | startswith("Build & push "))
                 | {
-                    svc:        (.name | if startswith("Build & push ") then ltrimstr("Build & push ") else ltrimstr("Re-tag ") end),
+                    svc:        (.name | ltrimstr("Build & push ")),
                     conclusion: .conclusion,
                     duration: (
                       if .started_at and .completed_at then
@@ -537,17 +483,16 @@ jobs:
 
   pre-deploy:
     name: Pre-deploy checks
-    needs: [build-and-push, retag-images]
+    needs: [detect-changes, test-go, test-frontend, build-and-push]
     if: |
       always() &&
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped') &&
-      (needs.retag-images.result == 'success' || needs.retag-images.result == 'skipped')
+      (needs.test-go.result == 'success' || needs.test-go.result == 'skipped') &&
+      (needs.test-frontend.result == 'success' || needs.test-frontend.result == 'skipped') &&
+      (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      SERVICES: tor bisq bisq2 unified-api unified-snapshot postgres-backup dexmonitor mm-controller totp-api fiat-controller
     steps:
       - name: Compute lowercase image owner
         id: owner
@@ -560,13 +505,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify all image SHA tags exist in GHCR
+      - name: Verify changed image SHA tags exist in GHCR
         env:
+          CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changes }}
           OWNER: ${{ steps.owner.outputs.value }}
           SHA: ${{ github.sha }}
         run: |
           set -Eeuo pipefail
-          for svc in $SERVICES; do
+          for svc in ${CHANGED_SERVICES//,/ }; do
             tag="${REGISTRY}/${OWNER}/dexarbtrading-${svc}:${SHA}"
             echo "checking $tag"
             docker manifest inspect "$tag" >/dev/null
@@ -655,7 +601,7 @@ jobs:
 
   deploy:
     name: Deploy
-    needs: pre-deploy
+    needs: [detect-changes, pre-deploy]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -702,18 +648,20 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GH_PAT }}
           GHCR_USER: ${{ github.actor }}
           NEW_SHA: ${{ github.sha }}
+          CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changes }}
         # The staged helper fetches the exact commit, activates the complete env bundle,
         # and restores both code and env files if health checks fail.
         run: |
           set -Eeuo pipefail
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' bash -s" <<'REMOTE'
+            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' CHANGED_SERVICES='$CHANGED_SERVICES' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
           exec "$REPO_DIR/.deploy/staging/$NEW_SHA/transactional-deploy.sh" \
             --repo-dir "$REPO_DIR" \
             --sha "$NEW_SHA" \
             --env-bundle "$REPO_DIR/.deploy/staging/$NEW_SHA/env" \
+            --changed-services "$CHANGED_SERVICES" \
             --fetch-origin
 
           REMOTE

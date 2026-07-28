@@ -58,10 +58,18 @@ write_bundle "$fake_repo" previous
 cat >"$fake_bin/docker" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-printf 'tag=%s fail=%s arg1=%s arg2=%s all=%s\n' \
-  "${IMAGE_TAG:-none}" "${MOCK_FAIL_SHA:-unset}" "${1:-}" "${2:-}" "$*" >>"${MOCK_LOG:?}"
+if [ "${1:-}" = compose ] && [ "${2:-}" = config ] &&
+   [ "${3:-}" = --services ]; then
+  printf '%s\n' tor bisq bisq2 unified-api unified-snapshot dexmonitor mm-controller fiat-controller
+  exit 0
+fi
+printf 'code=%s dexmonitor=%s snapshot=%s fail=%s arg1=%s arg2=%s all=%s\n' \
+  "$(cat release-marker 2>/dev/null || printf previous)" \
+  "${DEXMONITOR_IMAGE_TAG:-none}" \
+  "${UNIFIED_SNAPSHOT_IMAGE_TAG:-none}" \
+  "${MOCK_FAIL_SHA:-unset}" "${1:-}" "${2:-}" "$*" >>"${MOCK_LOG:?}"
 if [ "${1:-}" = compose ] && [ "${2:-}" = up ] &&
-   [ "${IMAGE_TAG:-}" = "${MOCK_FAIL_SHA:-never}" ]; then
+   [ "${DEXMONITOR_IMAGE_TAG:-}" = "${MOCK_FAIL_SHA:-never}" ]; then
   exit 1
 fi
 exit 0
@@ -99,8 +107,37 @@ stage="$(make_stage "$candidate_sha" candidate)"
 grep -q '^APP_ENCRYPTION_KEY=candidate-' "$fake_repo/.env"
 [[ "$(sed -n '1p' "$MOCK_CERT_LOG")" == verify ]]
 [[ "$(sed -n '2p' "$MOCK_CERT_LOG")" == install ]]
-grep -q "tag=$candidate_sha .* all=compose up -d --remove-orphans --wait --wait-timeout 600" \
+grep -q "code=candidate dexmonitor=$candidate_sha snapshot=$candidate_sha .* all=compose up -d --remove-orphans --wait --wait-timeout 600" \
   "$MOCK_LOG"
+grep -q "^DEXMONITOR_IMAGE_TAG=$candidate_sha$" \
+  "$fake_repo/.deploy/releases/$candidate_sha/images.env"
+grep -q "^UNIFIED_SNAPSHOT_IMAGE_TAG=$candidate_sha$" \
+  "$fake_repo/.deploy/releases/$candidate_sha/images.env"
+grep -q "^UNIFIED_SNAPSHOT_IMAGE_TAG=$previous_sha$" \
+  "$fake_repo/.deploy/releases/$previous_sha/images.env"
+
+printf 'frontend\n' >"$fake_repo/release-marker"
+git -C "$fake_repo" add release-marker
+git -C "$fake_repo" commit -qm "frontend candidate"
+frontend_sha="$(git -C "$fake_repo" rev-parse HEAD)"
+stage="$(make_stage "$frontend_sha" frontend)"
+"$deployer" \
+  --repo-dir "$fake_repo" \
+  --sha "$frontend_sha" \
+  --env-bundle "$stage/env" \
+  --changed-services dexmonitor
+
+[[ "$(cat "$fake_repo/.deployed_sha")" == "$frontend_sha" ]]
+grep -q "^DEXMONITOR_IMAGE_TAG=$frontend_sha$" \
+  "$fake_repo/.deploy/releases/$frontend_sha/images.env"
+grep -q "^UNIFIED_SNAPSHOT_IMAGE_TAG=$candidate_sha$" \
+  "$fake_repo/.deploy/releases/$frontend_sha/images.env"
+grep -q "code=frontend dexmonitor=$frontend_sha snapshot=$candidate_sha .* all=compose pull dexmonitor" \
+  "$MOCK_LOG"
+if grep -q "^code=frontend .* all=compose up -d --force-recreate" "$MOCK_LOG"; then
+  echo "unchanged config services were force-recreated" >&2
+  exit 1
+fi
 
 printf 'failing\n' >"$fake_repo/release-marker"
 git -C "$fake_repo" add release-marker
@@ -112,15 +149,18 @@ export MOCK_FAIL_SHA="$failing_sha"
 if "$deployer" \
   --repo-dir "$fake_repo" \
   --sha "$failing_sha" \
-  --env-bundle "$stage/env"; then
+  --env-bundle "$stage/env" \
+  --changed-services dexmonitor; then
   echo "expected candidate deployment to fail" >&2
   tail -20 "$MOCK_LOG" >&2
   exit 1
 fi
 
-[[ "$(git -C "$fake_repo" rev-parse HEAD)" == "$candidate_sha" ]]
-[[ "$(cat "$fake_repo/.deployed_sha")" == "$candidate_sha" ]]
-grep -q '^APP_ENCRYPTION_KEY=candidate-' "$fake_repo/.env"
+[[ "$(git -C "$fake_repo" rev-parse HEAD)" == "$frontend_sha" ]]
+[[ "$(cat "$fake_repo/.deployed_sha")" == "$frontend_sha" ]]
+grep -q '^APP_ENCRYPTION_KEY=frontend-' "$fake_repo/.env"
+grep -q "code=frontend dexmonitor=$frontend_sha snapshot=$candidate_sha .* all=compose up -d --remove-orphans --wait --wait-timeout 600" \
+  "$MOCK_LOG"
 
 printf '#!/usr/bin/env bash\nexit 1\n' >"$fake_repo/deploy/nginx/letsencrypt.sh"
 git -C "$fake_repo" add deploy/nginx/letsencrypt.sh
@@ -132,29 +172,40 @@ unset MOCK_FAIL_SHA
 if "$deployer" \
   --repo-dir "$fake_repo" \
   --sha "$certificate_failure_sha" \
-  --env-bundle "$stage/env"; then
+  --env-bundle "$stage/env" \
+  --changed-services ""; then
   echo "expected certificate preflight to fail" >&2
   exit 1
 fi
 
-[[ "$(git -C "$fake_repo" rev-parse HEAD)" == "$candidate_sha" ]]
-[[ "$(cat "$fake_repo/.deployed_sha")" == "$candidate_sha" ]]
-grep -q '^APP_ENCRYPTION_KEY=candidate-' "$fake_repo/.env"
-if grep -q "^tag=$certificate_failure_sha .* arg1=compose arg2=up " "$MOCK_LOG"; then
+[[ "$(git -C "$fake_repo" rev-parse HEAD)" == "$frontend_sha" ]]
+[[ "$(cat "$fake_repo/.deployed_sha")" == "$frontend_sha" ]]
+grep -q '^APP_ENCRYPTION_KEY=frontend-' "$fake_repo/.env"
+if grep -q "^code=certificate-failure .* arg1=compose arg2=up " "$MOCK_LOG"; then
   echo "compose started before the certificate preflight completed" >&2
   exit 1
 fi
 
-stage="$(make_stage "$candidate_sha" lock-test)"
+stage="$(make_stage "$frontend_sha" lock-test)"
 exec 8>"$fake_repo/.deploy/deploy.lock"
 flock -n 8
 if "$deployer" \
   --repo-dir "$fake_repo" \
-  --sha "$candidate_sha" \
+  --sha "$frontend_sha" \
   --env-bundle "$stage/env" >/dev/null 2>&1; then
   echo "expected the deployment lock to reject a concurrent rollout" >&2
   exit 1
 fi
 flock -u 8
+
+stage="$(make_stage "$frontend_sha" invalid-service)"
+if "$deployer" \
+  --repo-dir "$fake_repo" \
+  --sha "$frontend_sha" \
+  --env-bundle "$stage/env" \
+  --changed-services dexmonitor,not-a-service >/dev/null 2>&1; then
+  echo "expected unknown changed service to be rejected" >&2
+  exit 1
+fi
 
 echo "transactional deployment tests passed"

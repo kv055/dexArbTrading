@@ -88,7 +88,7 @@ jobs:
         run: gitleaks dir . --config .gitleaks.toml --redact --no-banner
 
   detect-changes:
-    # Diff the push range and decide which tests, image builds, and GHCR re-tags run.
+    # Diff the push range and decide which tests and image builds run.
     name: Detect changed services
     needs: security
     runs-on: ubuntu-latest
@@ -98,7 +98,6 @@ jobs:
       test_modules_json: ${{ steps.detect.outputs.test_modules_json }}
       run_frontend: ${{ steps.detect.outputs.run_frontend }}
       build_matrix_json: ${{ steps.detect.outputs.build_matrix_json }}
-      retag_services_json: ${{ steps.detect.outputs.retag_services_json }}
       deploy_main: ${{ steps.deploy.outputs.main }}
     steps:
       - uses: actions/checkout@v5
@@ -158,21 +157,11 @@ jobs:
             '
           }
 
-          retag_services_json_for() {
-            local changes_csv="${1:-}"
-            jq -n --arg all "$ALL_SERVICES" --arg changed "${changes_csv:-}" '
-              ($all | split(",")) as $all |
-              ($changed | split(",") | map(select(length > 0))) as $changed |
-              [$all[] | select(. as $s | ($changed | index($s) | not))]
-            '
-          }
-
           write_outputs() {
             local changes="$1" test_modules="$2" run_frontend="$3"
-            local test_modules_json build_matrix_json retag_services_json
+            local test_modules_json build_matrix_json
             test_modules_json=$(comma_to_json_array "$test_modules")
             build_matrix_json=$(build_matrix_json_for "$changes")
-            retag_services_json=$(retag_services_json_for "$changes")
             echo "changes=${changes:-}" >> "$GITHUB_OUTPUT"
             echo "test_modules=${test_modules:-}" >> "$GITHUB_OUTPUT"
             echo "run_frontend=${run_frontend}" >> "$GITHUB_OUTPUT"
@@ -183,15 +172,11 @@ jobs:
               echo 'build_matrix_json<<EOF'
               echo "$build_matrix_json"
               echo 'EOF'
-              echo 'retag_services_json<<EOF'
-              echo "$retag_services_json"
-              echo 'EOF'
             } >> "$GITHUB_OUTPUT"
             echo "services to build: ${changes:-<none>}"
             echo "test modules: ${test_modules:-<none>}"
             echo "run frontend: ${run_frontend}"
             echo "build matrix: ${build_matrix_json}"
-            echo "retag services: ${retag_services_json}"
           }
 
           emit_all() {
@@ -252,7 +237,7 @@ jobs:
           printf '%s\n' "$CHANGED"
 
           changed() { printf '%s\n' "$CHANGED" | grep -qE "$1"; }
-          if changed '^(docker-compose\.yml|\.gitea/workflows/ci\.yml|\.gitmodules|go\.work|go\.work\.sum)$'; then
+          if changed '^(\.gitmodules|go\.work|go\.work\.sum)$'; then
             emit_all "infra change -> build all"; exit 0
           fi
 
@@ -405,6 +390,8 @@ jobs:
     if: |
       always() &&
       needs.detect-changes.result == 'success' &&
+      (needs.test-go.result == 'success' || needs.test-go.result == 'skipped') &&
+      (needs.test-frontend.result == 'success' || needs.test-frontend.result == 'skipped') &&
       needs.detect-changes.outputs.changes != ''
     runs-on: ubuntu-latest
     env:
@@ -563,63 +550,17 @@ jobs:
           cache-from: type=registry,ref=${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:buildcache
           cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}/dexarbtrading-{2}:buildcache,mode=max', steps.reg.outputs.registry, steps.reg.outputs.image_owner, matrix.service) || '' }}
 
-  retag-images:
-    name: Re-tag ${{ matrix.service }}
-    needs: [detect-changes, test-go, test-frontend]
-    if: |
-      always() &&
-      needs.detect-changes.result == 'success' &&
-      needs.detect-changes.outputs.deploy_main == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        service: [tor, bisq, bisq2, unified-api, unified-snapshot, postgres-backup, dexmonitor, mm-controller, totp-api, fiat-controller]
-    steps:
-      # Unchanged services still need a SHA-tagged image so pre-deploy's manifest check
-      # and deploy's `compose pull` succeed. Copy :latest -> :<sha> in GHCR.
-      - name: Check if this service needs re-tagging
-        id: check
-        env:
-          CHANGES: ${{ needs.detect-changes.outputs.changes }}
-          SERVICE: ${{ matrix.service }}
-        run: |
-          if case ",$CHANGES," in *",$SERVICE,"*) true;; *) false;; esac; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "$SERVICE changed -> skip re-tag"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "$SERVICE unchanged -> re-tagging :latest to :$GITHUB_SHA"
-          fi
-
-      - name: Re-tag latest as SHA (unchanged service)
-        if: steps.check.outputs.run == 'true'
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-          SHA: ${{ github.sha }}
-        run: |
-          set -Eeuo pipefail
-          echo "$GH_PAT" | docker login ghcr.io -u kv055 --password-stdin
-          IMG="ghcr.io/kv055/dexarbtrading-${{ matrix.service }}"
-          if ! docker buildx imagetools inspect "$IMG:latest" >/dev/null 2>&1; then
-            echo "::error::no $IMG:latest to re-tag — run the workflow manually once to build all services"
-            exit 1
-          fi
-          docker buildx imagetools create --tag "$IMG:$SHA" "$IMG:latest"
-          echo "re-tagged $IMG:latest -> :$SHA"
-
   pre-deploy:
     name: Pre-deploy checks
-    needs: [detect-changes, build-and-push, retag-images]
+    needs: [detect-changes, test-go, test-frontend, build-and-push]
     if: |
       always() &&
       needs.detect-changes.outputs.deploy_main == 'true' &&
-      (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped') &&
-      (needs.retag-images.result == 'success' || needs.retag-images.result == 'skipped')
+      (needs.test-go.result == 'success' || needs.test-go.result == 'skipped') &&
+      (needs.test-frontend.result == 'success' || needs.test-frontend.result == 'skipped') &&
+      (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      SERVICES: tor bisq bisq2 unified-api unified-snapshot postgres-backup dexmonitor mm-controller totp-api fiat-controller
     steps:
       - name: Login to GHCR
         uses: docker/login-action@v4
@@ -628,12 +569,13 @@ jobs:
           username: kv055
           password: ${{ secrets.GH_PAT }}
 
-      - name: Verify all image SHA tags exist in GHCR
+      - name: Verify changed image SHA tags exist in GHCR
         env:
+          CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changes }}
           SHA: ${{ github.sha }}
         run: |
           set -Eeuo pipefail
-          for svc in $SERVICES; do
+          for svc in ${CHANGED_SERVICES//,/ }; do
             tag="ghcr.io/kv055/dexarbtrading-${svc}:${SHA}"
             echo "checking $tag"
             docker manifest inspect "$tag" >/dev/null
@@ -800,16 +742,18 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GH_PAT }}
           GHCR_USER: kv055
           NEW_SHA: ${{ github.sha }}
+          CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changes }}
         run: |
           set -Eeuo pipefail
           ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' bash -s" <<'REMOTE'
+            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' CHANGED_SERVICES='$CHANGED_SERVICES' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
           exec "$REPO_DIR/.deploy/staging/$NEW_SHA/transactional-deploy.sh" \
             --repo-dir "$REPO_DIR" \
             --sha "$NEW_SHA" \
-            --env-bundle "$REPO_DIR/.deploy/staging/$NEW_SHA/env"
+            --env-bundle "$REPO_DIR/.deploy/staging/$NEW_SHA/env" \
+            --changed-services "$CHANGED_SERVICES"
 
           REMOTE
 
