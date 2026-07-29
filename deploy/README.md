@@ -65,8 +65,8 @@ HTTP-to-HTTPS redirect, and 443 for the public dashboard, Telegram webhook, and 
 protected phone-payment callback paths: `/pushpush/notify` and
 `/pushpush/phone-heartbeat`. nginx does not expose any other Fiat Controller route.
 Set `PUSHPUSH_NOTIFY_SECRET` in the deployment secret environment before enabling a
-phone; public callbacks reject all requests when it is absent. An optional
-`PUSHPUSH_HEARTBEAT_SECRET` overrides the notification secret for heartbeat requests.
+phone; both public callback paths reject all requests when it is absent. The same
+secret authorizes notification and heartbeat requests.
 The authenticated Communication Hub reveals these deployment-managed values only on a
 deliberate request and its QR codes never include them.
 The initial CI rollout issues the certificate; Ansible also installs a daily
@@ -446,7 +446,7 @@ permanently ineligible. If DKIM fails after forwarding, activation remains block
 After deployment, query the Fiat Controller with its shared secret:
 
 ```bash
-curl -H "X-Webhook-Secret: $PUSHPUSH_HEARTBEAT_SECRET" \
+curl -H "X-Webhook-Secret: $PUSHPUSH_NOTIFY_SECRET" \
   "https://<fiat-controller>/notification-health?payment_method=Wise"
 ```
 

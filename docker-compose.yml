@@ -311,7 +311,6 @@ services:
       # phone setup health and reveal deployment-managed setup credentials.
       - FIAT_CONTROLLER_URL=http://fiat-controller:8080
       - PUSHPUSH_NOTIFY_SECRET=${PUSHPUSH_NOTIFY_SECRET:-}
-      - PUSHPUSH_HEARTBEAT_SECRET=${PUSHPUSH_HEARTBEAT_SECRET:-}
       - PUSHPUSH_HEARTBEAT_MAX_AGE=${PUSHPUSH_HEARTBEAT_MAX_AGE:-15m}
       - APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY:-}
       - TOR_PROXY_ADDR=tor:9050
@@ -461,7 +460,7 @@ services:
       # Bid-side pre-trade checks fail closed unless the fiat controller is
       # reachable and the MacroDroid phone heartbeat is fresh.
       - FIAT_CONTROLLER_URL=${FIAT_CONTROLLER_URL:-http://fiat-controller:8080}
-      - FIAT_CONTROLLER_HEARTBEAT_SECRET=${PUSHPUSH_HEARTBEAT_SECRET:-}
+      - FIAT_CONTROLLER_HEARTBEAT_SECRET=${PUSHPUSH_NOTIFY_SECRET:-}
       # Registered as secret_token on setWebhook; inbound /telegram-webhook
       # posts are rejected unless they echo it back (fail-closed when unset).
       - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
@@ -684,7 +683,6 @@ services:
       - SCRAPING_ENABLED=${SCRAPING_ENABLED:-false}
       - PUSHPUSH_ADDR=:8080
       - PUSHPUSH_NOTIFY_SECRET=${PUSHPUSH_NOTIFY_SECRET:-}
-      - PUSHPUSH_HEARTBEAT_SECRET=${PUSHPUSH_HEARTBEAT_SECRET:-}
       - PUSHPUSH_HEARTBEAT_MAX_AGE=${PUSHPUSH_HEARTBEAT_MAX_AGE:-15m}
       # Payment-ingestion IMAP settings are intentionally separate from
       # EMAIL_IMAP_* used by the scraping connector for email 2FA.
