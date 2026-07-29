@@ -92,14 +92,17 @@ func TestManualOptionsExposeEligibleSpotAndWithdrawalFees(t *testing.T) {
 	eng := testEngine(taker, withdraw, nil)
 
 	options := eng.ManualOptions(Input{BTCAmount: 1, Direction: "buy", ExcludedCEXes: []string{"binance"}})
-	if len(options.SpotTakerFees) != 3 || len(options.WithdrawalFees) != 3 {
-		t.Fatalf("eligible options = %d spot / %d withdrawal, want 3 each", len(options.SpotTakerFees), len(options.WithdrawalFees))
+	if len(options.SpotTakerFees) != 4 || len(options.WithdrawalFees) != 4 {
+		t.Fatalf("options = %d spot / %d withdrawal, want 4 each", len(options.SpotTakerFees), len(options.WithdrawalFees))
 	}
 	if options.SpotTakerFees[0].Exchange != "kraken" || options.SpotTakerFees[0].FeeBTC != 0.002 {
 		t.Fatalf("first spot option = %+v, want kraken at 0.002 BTC", options.SpotTakerFees[0])
 	}
 	if !options.WithdrawalFees[0].Applicable || options.WithdrawalFees[0].FeeBTC != 0.0001 {
 		t.Fatalf("first withdrawal option = %+v, want applicable kraken withdrawal", options.WithdrawalFees[0])
+	}
+	if !options.SpotTakerFees[1].Disabled || !options.WithdrawalFees[1].Disabled {
+		t.Fatalf("excluded binance options must remain visible and disabled")
 	}
 
 	ask := eng.ManualOptions(Input{BTCAmount: 1, Direction: "sell"})
