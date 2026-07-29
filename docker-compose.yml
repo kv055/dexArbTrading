@@ -313,9 +313,6 @@ services:
       - PUSHPUSH_NOTIFY_SECRET=${PUSHPUSH_NOTIFY_SECRET:-}
       - PUSHPUSH_HEARTBEAT_SECRET=${PUSHPUSH_HEARTBEAT_SECRET:-}
       - PUSHPUSH_HEARTBEAT_MAX_AGE=${PUSHPUSH_HEARTBEAT_MAX_AGE:-15m}
-      # Deployment sets this from EDGE_CERT_IDENTIFIER so development IP-edge
-      # callback instructions do not point at the production hostname.
-      - PUSHPUSH_PUBLIC_BASE_URL=${PUSHPUSH_PUBLIC_BASE_URL:-https://${PUBLIC_HOSTNAME:-dexmonitor.live}}
       - APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY:-}
       - TOR_PROXY_ADDR=tor:9050
       - BISQ_GRPC_HOST=bisq:9998
