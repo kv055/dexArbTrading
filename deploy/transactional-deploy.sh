@@ -179,6 +179,32 @@ activate_bundle() {
   done
 }
 
+# The public DEXMM Telegram endpoint follows the active edge identity, not the
+# generic PUBLIC_HOSTNAME kept in the encrypted environment bundle. This keeps
+# IP-edge development deployments reachable by Telegram without a manual UI
+# override, while production derives the equivalent domain URL.
+configure_dexmm_telegram_webhook() {
+  local identifier url temporary found
+  [[ -r /etc/dexarb/edge.env ]] || return 0
+
+  identifier="$(sed -nE 's/^EDGE_CERT_IDENTIFIER="?([^"[:space:]]+)"?$/\1/p' /etc/dexarb/edge.env | tail -n 1)"
+  [[ "$identifier" =~ ^[A-Za-z0-9.-]+$ ]] || {
+    echo "invalid EDGE_CERT_IDENTIFIER for DEXMM Telegram webhook" >&2
+    return 1
+  }
+  url="https://${identifier}/telegram-webhook"
+  temporary=".env.telegram-webhook.$$"
+  found=false
+  awk -v url="$url" '
+    /^DEXMM_TELEGRAM_WEBHOOK_URL=/ { print "DEXMM_TELEGRAM_WEBHOOK_URL=" url; found=1; next }
+    { print }
+    END { if (!found) print "DEXMM_TELEGRAM_WEBHOOK_URL=" url }
+  ' .env >"$temporary"
+  chmod 600 "$temporary"
+  mv -f "$temporary" .env
+  echo "configured system-managed DEXMM Telegram webhook: $url"
+}
+
 snapshot_active_bundle() {
   local sha="$1" target temporary relative
   target="$release_root/$sha/env"
@@ -477,6 +503,7 @@ start_release() {
   local restart_services=()
   sync_tree "$sha" || return 1
   activate_bundle "$bundle" || return 1
+  configure_dexmm_telegram_webhook || return 1
   load_image_manifest "$manifest" || return 1
   compose_preflight || return 1
   if [[ "$issue_certificate" == true ]]; then

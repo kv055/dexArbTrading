@@ -18,7 +18,6 @@ ROOT_REQUIRED=(
   APP_ENCRYPTION_KEY
   INTERNAL_API_SECRET
   PUBLIC_HOSTNAME
-  DEXMM_TELEGRAM_WEBHOOK_URL
   TELEGRAM_WEBHOOK_SECRET
   BISQ_API_PASSWORD
   POSTGRES_DB
@@ -35,6 +34,9 @@ ROOT_REQUIRED=(
 # dotenv fallback key present for older hosts, but allow it to be empty.
 ROOT_PRESENT=(
   LETSENCRYPT_EMAIL
+  # VPS deployments derive this from /etc/dexarb/edge.env. Keep the dotenv key
+  # as a local-development fallback, but allow it to be empty.
+  DEXMM_TELEGRAM_WEBHOOK_URL
 )
 
 UNIFIED_API_REQUIRED=(
