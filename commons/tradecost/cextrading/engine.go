@@ -41,9 +41,11 @@ type ManualRouteOptions struct {
 }
 
 type SpotTakerFeeOption struct {
-	Exchange string  `json:"exchange"`
-	FeePct   float64 `json:"fee_pct"`
-	FeeBTC   float64 `json:"fee_btc"`
+	Exchange       string  `json:"exchange"`
+	FeePct         float64 `json:"fee_pct"`
+	FeeBTC         float64 `json:"fee_btc"`
+	Disabled       bool    `json:"disabled"`
+	DisabledReason string  `json:"disabled_reason,omitempty"`
 }
 
 type WithdrawalFeeOption struct {
@@ -51,6 +53,7 @@ type WithdrawalFeeOption struct {
 	FeePct     float64 `json:"fee_pct"`
 	FeeBTC     float64 `json:"fee_btc"`
 	Applicable bool    `json:"applicable"`
+	Disabled   bool    `json:"disabled"`
 }
 
 type HedgeCostOption struct {
@@ -114,9 +117,8 @@ func NewEngine(providers ...exchangecredentials.Provider) *Engine {
 	}
 }
 
-// ManualOptions returns all eligible spot and withdrawal fees plus all hedge
-// venues. Excluded spot CEXes are omitted; paired hedge venues stay visible but
-// disabled so a user can see why they cannot select them.
+// ManualOptions returns all spot and withdrawal fees plus all hedge venues.
+// Dashboard-excluded choices remain visible but disabled for operator context.
 func (e *Engine) ManualOptions(in Input) ManualRouteOptions {
 	options := ManualRouteOptions{}
 	if e == nil || in.BTCAmount <= 0 {
@@ -128,16 +130,18 @@ func (e *Engine) ManualOptions(in Input) ManualRouteOptions {
 	}
 	isBid := in.Direction != "sell"
 	for _, cex := range e.cexes {
-		if _, skip := excluded[cex]; skip {
-			continue
-		}
+		_, disabled := excluded[cex]
 		takerBTC := in.BTCAmount * e.takerFrac(cex)
-		options.SpotTakerFees = append(options.SpotTakerFees, SpotTakerFeeOption{Exchange: cex, FeePct: round4(takerBTC / in.BTCAmount * 100), FeeBTC: round8(takerBTC)})
+		spot := SpotTakerFeeOption{Exchange: cex, FeePct: round4(takerBTC / in.BTCAmount * 100), FeeBTC: round8(takerBTC), Disabled: disabled}
+		if disabled {
+			spot.DisabledReason = "CEX excluded in dashboard settings"
+		}
+		options.SpotTakerFees = append(options.SpotTakerFees, spot)
 		withdrawBTC := 0.0
 		if isBid {
 			withdrawBTC = e.withdrawBTC(cex)
 		}
-		options.WithdrawalFees = append(options.WithdrawalFees, WithdrawalFeeOption{Exchange: cex, FeePct: round4(withdrawBTC / in.BTCAmount * 100), FeeBTC: round8(withdrawBTC), Applicable: isBid})
+		options.WithdrawalFees = append(options.WithdrawalFees, WithdrawalFeeOption{Exchange: cex, FeePct: round4(withdrawBTC / in.BTCAmount * 100), FeeBTC: round8(withdrawBTC), Applicable: isBid, Disabled: disabled})
 	}
 	if e.hedgeOptions == nil {
 		return options
