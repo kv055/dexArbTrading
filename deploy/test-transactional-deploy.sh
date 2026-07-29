@@ -107,7 +107,7 @@ stage="$(make_stage "$candidate_sha" candidate)"
 grep -q '^APP_ENCRYPTION_KEY=candidate-' "$fake_repo/.env"
 [[ "$(sed -n '1p' "$MOCK_CERT_LOG")" == verify ]]
 [[ "$(sed -n '2p' "$MOCK_CERT_LOG")" == install ]]
-grep -q "code=candidate dexmonitor=$candidate_sha snapshot=$candidate_sha .* all=compose up -d --remove-orphans --wait --wait-timeout 600" \
+grep -q "code=candidate dexmonitor=$candidate_sha snapshot=$candidate_sha .* all=compose up -d --remove-orphans --wait --wait-timeout 1800" \
   "$MOCK_LOG"
 grep -q "^DEXMONITOR_IMAGE_TAG=$candidate_sha$" \
   "$fake_repo/.deploy/releases/$candidate_sha/images.env"
@@ -159,7 +159,7 @@ fi
 [[ "$(git -C "$fake_repo" rev-parse HEAD)" == "$frontend_sha" ]]
 [[ "$(cat "$fake_repo/.deployed_sha")" == "$frontend_sha" ]]
 grep -q '^APP_ENCRYPTION_KEY=frontend-' "$fake_repo/.env"
-grep -q "code=frontend dexmonitor=$frontend_sha snapshot=$candidate_sha .* all=compose up -d --remove-orphans --wait --wait-timeout 600" \
+grep -q "code=frontend dexmonitor=$frontend_sha snapshot=$candidate_sha .* all=compose up -d --remove-orphans --wait --wait-timeout 1800" \
   "$MOCK_LOG"
 
 printf '#!/usr/bin/env bash\nexit 1\n' >"$fake_repo/deploy/nginx/letsencrypt.sh"

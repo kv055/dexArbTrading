@@ -617,7 +617,8 @@ jobs:
     name: Deploy
     needs: [detect-changes, pre-deploy]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Leave enough time for a 30-minute cold-start health wait and rollback.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v5
         with:
@@ -654,7 +655,7 @@ jobs:
           bash deploy/ci-stage-env.sh "$NEW_SHA"
 
       - name: Activate staged release transactionally
-        timeout-minutes: 10
+        timeout-minutes: 65
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
           SSH_USER: ${{ secrets.VPS_SSH_USER }}

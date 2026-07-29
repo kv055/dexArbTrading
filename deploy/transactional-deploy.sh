@@ -515,11 +515,11 @@ start_release() {
   fi
   pull_changed_images || return 1
   # Unified Snapshot's first cycle calls several external/Tor markets and can
-  # legitimately exceed five minutes before writing its success marker. With
+  # legitimately exceed twenty minutes before writing its success marker. With
   # per-service tags, Compose keeps its existing container unless its image or
   # service configuration actually changed.
   docker compose up -d --remove-orphans \
-    --wait --wait-timeout 600 || return 1
+    --wait --wait-timeout 1800 || return 1
   mapfile -t restart_services < <(
     config_services_to_recreate "$from_sha" "$sha" "$certificate_changed"
   )
