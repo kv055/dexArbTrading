@@ -642,6 +642,11 @@ type HedgeBreakdown = cextrading.HedgeBreakdown
 
 type HedgePositionDetail = cextrading.HedgePositionDetail
 
+// ManualRouteOptions holds all independently selectable CEX-side alternatives
+// for a live-offer scenario. It is intentionally separate from CostBreakdown,
+// which remains the automatically selected cheapest route.
+type ManualRouteOptions = cextrading.ManualRouteOptions
+
 // CapitalRequirement is the capital a trader must commit to *execute* the trade,
 // as opposed to the fees consumed by it (CostBreakdown). It is broken out into
 // the spot leg (EUR to buy BTC on the CEX), the perp hedge collateral, and the
@@ -887,6 +892,28 @@ func (e *TradeCostEstimator) AbortCostFromBreakdown(bd CostBreakdown) AbortCostB
 	return AbortCostFromBreakdown(bd)
 }
 
+// ManualRouteOptionsForTrade exposes all eligible spot/withdrawal fees and all
+// hedge venues for local, operator-facing what-if analysis at this exact trade
+// size. It does not participate in the automatic route selection.
+func (e *TradeCostEstimator) ManualRouteOptionsForTrade(btcAmount float64, refPriceEUR float64, dexExchange string, direction string, requiredConfirmations int, excludedCEXes []string, feeTier string) ManualRouteOptions {
+	if e == nil || e.cexEngine == nil || btcAmount <= 0 {
+		return ManualRouteOptions{}
+	}
+	requiredConfirmations = resolveRequiredConfirmations(direction, requiredConfirmations)
+	cost := e.routingCost(dexExchange, direction, btcAmount, requiredConfirmations, feeTier)
+	transferMinutes := 0.0
+	if cost.Detail != nil && cost.Detail.SelectedFullConfirmationMinutes > 0 {
+		transferMinutes = float64(cost.Detail.SelectedFullConfirmationMinutes * cost.NumOnchainTxs)
+	}
+	return e.cexEngine.ManualOptions(cextrading.Input{
+		BTCAmount:       btcAmount,
+		RefPriceEUR:     refPriceEUR,
+		TransferMinutes: transferMinutes,
+		Direction:       direction,
+		ExcludedCEXes:   excludedCEXes,
+	})
+}
+
 func (o *TradeRouteOptimizer) BestBreakdown(btcAmount float64, dexExchange string, direction string) CostBreakdown {
 	return o.BestBreakdownWithConfirmations(btcAmount, dexExchange, direction, 0)
 }
@@ -908,6 +935,13 @@ func (o *TradeRouteOptimizer) BestBreakdownFull(btcAmount float64, refPriceEUR f
 	// CEX (with its taker/withdrawal/hedge combo) is chosen inside breakdown via the
 	// cextrading engine.
 	return o.est.breakdown(btcAmount, refPriceEUR, dexExchange, direction, requiredConfirmations, feeTier, excludedCEXes, coupledHedge, realDepositPct)
+}
+
+func (o *TradeRouteOptimizer) ManualRouteOptionsForTrade(btcAmount float64, refPriceEUR float64, dexExchange string, direction string, requiredConfirmations int, excludedCEXes []string, feeTier string) ManualRouteOptions {
+	if o == nil || o.est == nil {
+		return ManualRouteOptions{}
+	}
+	return o.est.ManualRouteOptionsForTrade(btcAmount, refPriceEUR, dexExchange, direction, requiredConfirmations, excludedCEXes, feeTier)
 }
 
 func (o *TradeRouteOptimizer) AbortCostFromBreakdown(bd CostBreakdown) AbortCostBreakdown {
