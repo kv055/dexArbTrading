@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"commons/exchangecredentials"
+	"commons/hedge"
 )
 
 // Input carries everything the CEX-combo optimizer needs to price and rank the
@@ -31,13 +32,42 @@ type Selection struct {
 	ComboBTC         float64              // taker + withdrawal + hedge (raw) — the minimized quantity
 }
 
+// ManualRouteOptions contains independently selectable CEX-side components
+// for live-offer what-if analysis. The automatic optimizer still uses Best.
+type ManualRouteOptions struct {
+	SpotTakerFees  []SpotTakerFeeOption  `json:"spot_taker_fees"`
+	WithdrawalFees []WithdrawalFeeOption `json:"withdrawal_fees"`
+	HedgeCosts     []HedgeCostOption     `json:"hedge_costs"`
+}
+
+type SpotTakerFeeOption struct {
+	Exchange string  `json:"exchange"`
+	FeePct   float64 `json:"fee_pct"`
+	FeeBTC   float64 `json:"fee_btc"`
+}
+
+type WithdrawalFeeOption struct {
+	Exchange   string  `json:"exchange"`
+	FeePct     float64 `json:"fee_pct"`
+	FeeBTC     float64 `json:"fee_btc"`
+	Applicable bool    `json:"applicable"`
+}
+
+type HedgeCostOption struct {
+	Exchange       string         `json:"exchange"`
+	Hedge          HedgeBreakdown `json:"hedge"`
+	Disabled       bool           `json:"disabled"`
+	DisabledReason string         `json:"disabled_reason,omitempty"`
+}
+
 // Engine ranks the active CEXes by their fee combo. The fee sources are function
 // fields so the optimizer can be unit-tested offline with deterministic inputs.
 type Engine struct {
-	cexes       []string
-	takerFrac   func(cex string) float64
-	withdrawBTC func(cex string) float64
-	hedgeCost   func(cex string, btcAmount, refPriceEUR, transferMinutes float64, coupled bool, side string) hedgeCostDetails
+	cexes        []string
+	takerFrac    func(cex string) float64
+	withdrawBTC  func(cex string) float64
+	hedgeCost    func(cex string, btcAmount, refPriceEUR, transferMinutes float64, coupled bool, side string) hedgeCostDetails
+	hedgeOptions func(btcAmount, refPriceEUR, transferMinutes float64, side string) []hedgeCostDetails
 }
 
 type cexFees struct {
@@ -60,6 +90,7 @@ func NewEngine(providers ...exchangecredentials.Provider) *Engine {
 			withdrawal: newWithdrawalFeeFetcher(c, provider),
 		}
 	}
+	cache := newCachedHedgeInput(feeTTL, provider)
 	return &Engine{
 		cexes: cexes,
 		takerFrac: func(cex string) float64 {
@@ -74,7 +105,65 @@ func NewEngine(providers ...exchangecredentials.Provider) *Engine {
 			}
 			return withdrawalFallbacks[cex]
 		},
-		hedgeCost: newHedgeCostEstimator(provider),
+		hedgeCost: func(cex string, btcAmount, refPriceEUR, transferMinutes float64, coupled bool, side string) hedgeCostDetails {
+			return estimateBestHedgeCost(cache, cex, btcAmount, refPriceEUR, transferMinutes, coupled, side)
+		},
+		hedgeOptions: func(btcAmount, refPriceEUR, transferMinutes float64, side string) []hedgeCostDetails {
+			return estimateHedgeCosts(cache, []hedge.Venue{hedge.VenueKrakenFutures, hedge.VenueCoinbaseFutures, hedge.VenueBinanceFutures}, btcAmount, refPriceEUR, transferMinutes, side)
+		},
+	}
+}
+
+// ManualOptions returns all eligible spot and withdrawal fees plus all hedge
+// venues. Excluded spot CEXes are omitted; paired hedge venues stay visible but
+// disabled so a user can see why they cannot select them.
+func (e *Engine) ManualOptions(in Input) ManualRouteOptions {
+	options := ManualRouteOptions{}
+	if e == nil || in.BTCAmount <= 0 {
+		return options
+	}
+	excluded := make(map[string]struct{}, len(in.ExcludedCEXes))
+	for _, c := range in.ExcludedCEXes {
+		excluded[strings.TrimSpace(strings.ToLower(c))] = struct{}{}
+	}
+	isBid := in.Direction != "sell"
+	for _, cex := range e.cexes {
+		if _, skip := excluded[cex]; skip {
+			continue
+		}
+		takerBTC := in.BTCAmount * e.takerFrac(cex)
+		options.SpotTakerFees = append(options.SpotTakerFees, SpotTakerFeeOption{Exchange: cex, FeePct: round4(takerBTC / in.BTCAmount * 100), FeeBTC: round8(takerBTC)})
+		withdrawBTC := 0.0
+		if isBid {
+			withdrawBTC = e.withdrawBTC(cex)
+		}
+		options.WithdrawalFees = append(options.WithdrawalFees, WithdrawalFeeOption{Exchange: cex, FeePct: round4(withdrawBTC / in.BTCAmount * 100), FeeBTC: round8(withdrawBTC), Applicable: isBid})
+	}
+	if e.hedgeOptions == nil {
+		return options
+	}
+	for _, h := range e.hedgeOptions(in.BTCAmount, in.RefPriceEUR, in.TransferMinutes, hedgeSideForDirection(in.Direction)) {
+		exchange := hedgeExchange(h.venue)
+		_, disabled := excluded[exchange]
+		option := HedgeCostOption{Exchange: exchange, Hedge: buildHedgeBreakdown(h, in.BTCAmount), Disabled: disabled}
+		if disabled {
+			option.DisabledReason = "CEX excluded in dashboard settings"
+		}
+		options.HedgeCosts = append(options.HedgeCosts, option)
+	}
+	return options
+}
+
+func hedgeExchange(venue string) string {
+	switch venue {
+	case string(hedge.VenueKrakenFutures):
+		return "kraken"
+	case string(hedge.VenueCoinbaseFutures):
+		return "coinbase"
+	case string(hedge.VenueBinanceFutures):
+		return "binance"
+	default:
+		return venue
 	}
 }
 

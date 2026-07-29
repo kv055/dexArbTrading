@@ -86,6 +86,28 @@ func TestBestAskSideHasNoWithdrawalFee(t *testing.T) {
 	eq(t, sel.ComboBTC, 0.001)
 }
 
+func TestManualOptionsExposeEligibleSpotAndWithdrawalFees(t *testing.T) {
+	taker := map[string]float64{"kraken": 0.002, "binance": 0.001, "bitstamp": 0.005, "coinbase": 0.006}
+	withdraw := map[string]float64{"kraken": 0.0001, "binance": 0.0002, "bitstamp": 0.0003, "coinbase": 0}
+	eng := testEngine(taker, withdraw, nil)
+
+	options := eng.ManualOptions(Input{BTCAmount: 1, Direction: "buy", ExcludedCEXes: []string{"binance"}})
+	if len(options.SpotTakerFees) != 3 || len(options.WithdrawalFees) != 3 {
+		t.Fatalf("eligible options = %d spot / %d withdrawal, want 3 each", len(options.SpotTakerFees), len(options.WithdrawalFees))
+	}
+	if options.SpotTakerFees[0].Exchange != "kraken" || options.SpotTakerFees[0].FeeBTC != 0.002 {
+		t.Fatalf("first spot option = %+v, want kraken at 0.002 BTC", options.SpotTakerFees[0])
+	}
+	if !options.WithdrawalFees[0].Applicable || options.WithdrawalFees[0].FeeBTC != 0.0001 {
+		t.Fatalf("first withdrawal option = %+v, want applicable kraken withdrawal", options.WithdrawalFees[0])
+	}
+
+	ask := eng.ManualOptions(Input{BTCAmount: 1, Direction: "sell"})
+	if ask.WithdrawalFees[0].Applicable || ask.WithdrawalFees[0].FeeBTC != 0 {
+		t.Fatalf("ask withdrawal option = %+v, want not applicable and zero", ask.WithdrawalFees[0])
+	}
+}
+
 func TestBestHedgeParticipatesInComboAndThreadsCoupledFlag(t *testing.T) {
 	// Equal taker/withdrawal across CEXes so the hedge dominates the choice.
 	taker := map[string]float64{"kraken": 0.001, "binance": 0.001, "bitstamp": 0.001, "coinbase": 0.001}
