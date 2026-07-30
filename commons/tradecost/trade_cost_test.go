@@ -274,8 +274,8 @@ func fixedCostEstimatorWithHedgePosition(exchange, dexExchange string, takerFeeF
 func TestBreakdownCapitalRespectsFullAndCappedVolume(t *testing.T) {
 	est := fixedCostEstimatorWithHedgePosition("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 
-	full := est.breakdown(0.1, 45000, "bisq", "buy", 0, "", nil, false, nil)
-	capped := est.breakdown(0.04, 45000, "bisq", "buy", 0, "", nil, false, nil)
+	full := est.breakdown(0.1, 45000, "bisq", "buy", 0, "", nil, nil, false, nil)
+	capped := est.breakdown(0.04, 45000, "bisq", "buy", 0, "", nil, nil, false, nil)
 
 	// Full size.
 	assertFloat(t, full.Capital.SpotNotionalEUR, 4500)     // 0.1 * 45000
@@ -298,8 +298,8 @@ func TestBreakdownRealDepositPctScalesWithCappedVolume(t *testing.T) {
 	est := fixedCostEstimatorWithHedgePosition("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 	realPct := 0.18
 
-	full := est.breakdown(0.1, 45000, "bisq", "buy", 0, "", nil, false, &realPct)
-	capped := est.breakdown(0.04, 45000, "bisq", "buy", 0, "", nil, false, &realPct)
+	full := est.breakdown(0.1, 45000, "bisq", "buy", 0, "", nil, nil, false, &realPct)
+	capped := est.breakdown(0.04, 45000, "bisq", "buy", 0, "", nil, nil, false, &realPct)
 
 	// The real pct is fixed, but since SecurityDepositBTC = btcAmount * pct, the
 	// absolute deposit still scales down correctly with the smaller capped size.

@@ -161,3 +161,67 @@ func TestCoupledHedgePinsPairedVenueMap(t *testing.T) {
 		t.Fatal("binance must not have a paired hedge venue")
 	}
 }
+
+func TestIndependentSpotAndHedgeExclusions(t *testing.T) {
+	eng := testEngine(
+		map[string]float64{"kraken": 0.001, "coinbase": 0.002},
+		map[string]float64{"kraken": 0, "coinbase": 0},
+		func(_ string, _, _, _ float64, _ bool, _ string) hedgeCostDetails {
+			t.Fatal("independent selection with exclusions must evaluate enabled hedge options")
+			return hedgeCostDetails{}
+		},
+	)
+	eng.cexes = []string{"kraken", "coinbase"}
+	eng.hedgeOptions = func(_, _, _ float64, _ string) []hedgeCostDetails {
+		return []hedgeCostDetails{
+			{venue: "kraken_futures", feeBTC: 0.0001},
+			{venue: "coinbase_futures", feeBTC: 0.0002},
+		}
+	}
+
+	sel, ok := eng.Best(Input{
+		BTCAmount:          1,
+		Direction:          "buy",
+		ExcludedSpotCEXes:  []string{"coinbase"},
+		ExcludedHedgeCEXes: []string{"kraken"},
+	})
+	if !ok || sel.CEX != "kraken" || sel.Hedge.Venue != "coinbase_futures" {
+		t.Fatalf("selection = %+v, ok=%v", sel, ok)
+	}
+}
+
+func TestCoupledRejectsSpotWithDisabledPairedHedge(t *testing.T) {
+	eng := testEngine(
+		map[string]float64{"kraken": 0.001, "coinbase": 0.002},
+		map[string]float64{"kraken": 0, "coinbase": 0},
+		func(cex string, _, _, _ float64, _ bool, _ string) hedgeCostDetails {
+			return hedgeCostDetails{venue: cex + "_futures"}
+		},
+	)
+	eng.cexes = []string{"kraken", "coinbase"}
+
+	sel, ok := eng.Best(Input{
+		BTCAmount:          1,
+		Direction:          "buy",
+		CoupledHedge:       true,
+		ExcludedHedgeCEXes: []string{"kraken"},
+	})
+	if !ok || sel.CEX != "coinbase" {
+		t.Fatalf("selection = %+v, ok=%v; want coinbase", sel, ok)
+	}
+}
+
+func TestAllHedgesDisabledReturnsNoRoute(t *testing.T) {
+	eng := testEngine(map[string]float64{"kraken": 0.001}, map[string]float64{"kraken": 0}, nil)
+	eng.cexes = []string{"kraken"}
+	eng.hedgeOptions = func(_, _, _ float64, _ string) []hedgeCostDetails {
+		return []hedgeCostDetails{{venue: "kraken_futures"}}
+	}
+	if _, ok := eng.Best(Input{
+		BTCAmount:          1,
+		Direction:          "buy",
+		ExcludedHedgeCEXes: []string{"kraken"},
+	}); ok {
+		t.Fatal("expected no route when every hedge is disabled")
+	}
+}
