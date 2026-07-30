@@ -10,12 +10,14 @@ import (
 // Input carries everything the CEX-combo optimizer needs to price and rank the
 // active exchanges for one offer.
 type Input struct {
-	BTCAmount       float64
-	RefPriceEUR     float64 // CEX reference price; sizes the hedge position simulation (0 to skip)
-	TransferMinutes float64 // from txrouting; drives the hedge funding-cost window
-	Direction       string  // DEX offer direction: "buy" (bid) or "sell" (ask)
-	ExcludedCEXes   []string
-	CoupledHedge    bool // pin the hedge venue to the spot CEX where a pairing exists
+	BTCAmount          float64
+	RefPriceEUR        float64  // CEX reference price; sizes the hedge position simulation (0 to skip)
+	TransferMinutes    float64  // from txrouting; drives the hedge funding-cost window
+	Direction          string   // DEX offer direction: "buy" (bid) or "sell" (ask)
+	ExcludedCEXes      []string // legacy: excludes both spot and hedge
+	ExcludedSpotCEXes  []string
+	ExcludedHedgeCEXes []string
+	CoupledHedge       bool // pin the hedge venue to the spot CEX where a pairing exists
 }
 
 // Selection is the cheapest CEX fee combo for an Input. BTC fields are raw
@@ -124,13 +126,10 @@ func (e *Engine) ManualOptions(in Input) ManualRouteOptions {
 	if e == nil || in.BTCAmount <= 0 {
 		return options
 	}
-	excluded := make(map[string]struct{}, len(in.ExcludedCEXes))
-	for _, c := range in.ExcludedCEXes {
-		excluded[strings.TrimSpace(strings.ToLower(c))] = struct{}{}
-	}
+	excludedSpot, excludedHedge := exclusionSets(in)
 	isBid := in.Direction != "sell"
 	for _, cex := range e.cexes {
-		_, disabled := excluded[cex]
+		_, disabled := excludedSpot[cex]
 		takerBTC := in.BTCAmount * e.takerFrac(cex)
 		spot := SpotTakerFeeOption{Exchange: cex, FeePct: round4(takerBTC / in.BTCAmount * 100), FeeBTC: round8(takerBTC), Disabled: disabled}
 		if disabled {
@@ -148,7 +147,7 @@ func (e *Engine) ManualOptions(in Input) ManualRouteOptions {
 	}
 	for _, h := range e.hedgeOptions(in.BTCAmount, in.RefPriceEUR, in.TransferMinutes, hedgeSideForDirection(in.Direction)) {
 		exchange := hedgeExchange(h.venue)
-		_, disabled := excluded[exchange]
+		_, disabled := excludedHedge[exchange]
 		option := HedgeCostOption{Exchange: exchange, Hedge: buildHedgeBreakdown(h, in.BTCAmount), Disabled: disabled}
 		if disabled {
 			option.DisabledReason = "CEX excluded in dashboard settings"
@@ -179,17 +178,14 @@ func (e *Engine) Best(in Input) (Selection, bool) {
 	if in.BTCAmount <= 0 {
 		return Selection{}, false
 	}
-	excluded := make(map[string]struct{}, len(in.ExcludedCEXes))
-	for _, c := range in.ExcludedCEXes {
-		excluded[strings.TrimSpace(strings.ToLower(c))] = struct{}{}
-	}
+	excludedSpot, excludedHedge := exclusionSets(in)
 	isBid := in.Direction != "sell"
 	side := hedgeSideForDirection(in.Direction)
 
 	best := Selection{}
 	found := false
 	for _, cex := range e.cexes {
-		if _, skip := excluded[cex]; skip {
+		if _, skip := excludedSpot[cex]; skip {
 			continue
 		}
 		takerFrac := e.takerFrac(cex)
@@ -197,7 +193,10 @@ func (e *Engine) Best(in Input) (Selection, bool) {
 		if isBid {
 			withdrawalBTC = e.withdrawBTC(cex)
 		}
-		hc := e.hedgeCost(cex, in.BTCAmount, in.RefPriceEUR, in.TransferMinutes, in.CoupledHedge, side)
+		hc, hedgeFound := e.bestEnabledHedge(in, cex, side, excludedHedge)
+		if !hedgeFound {
+			continue
+		}
 		takerBTC := in.BTCAmount * takerFrac
 		comboBTC := takerBTC + withdrawalBTC + hc.feeBTC
 		if !found || comboBTC < best.ComboBTC {
@@ -211,6 +210,59 @@ func (e *Engine) Best(in Input) (Selection, bool) {
 				Position:         hc.position,
 				ComboBTC:         comboBTC,
 			}
+			found = true
+		}
+	}
+	return best, found
+}
+
+func exclusionSets(in Input) (map[string]struct{}, map[string]struct{}) {
+	spot := make(map[string]struct{}, len(in.ExcludedCEXes)+len(in.ExcludedSpotCEXes))
+	hedge := make(map[string]struct{}, len(in.ExcludedCEXes)+len(in.ExcludedHedgeCEXes))
+	add := func(target map[string]struct{}, values []string) {
+		for _, value := range values {
+			value = strings.TrimSpace(strings.ToLower(value))
+			if value != "" {
+				target[value] = struct{}{}
+			}
+		}
+	}
+	add(spot, in.ExcludedCEXes)
+	add(hedge, in.ExcludedCEXes)
+	add(spot, in.ExcludedSpotCEXes)
+	add(hedge, in.ExcludedHedgeCEXes)
+	return spot, hedge
+}
+
+func (e *Engine) bestEnabledHedge(in Input, spotCEX, side string, excluded map[string]struct{}) (hedgeCostDetails, bool) {
+	if in.CoupledHedge {
+		if _, paired := cexToHedgeVenue[spotCEX]; paired {
+			if _, disabled := excluded[spotCEX]; disabled {
+				return hedgeCostDetails{}, false
+			}
+			return e.hedgeCost(spotCEX, in.BTCAmount, in.RefPriceEUR, in.TransferMinutes, true, side), true
+		}
+	}
+	if len(excluded) == 0 {
+		return e.hedgeCost(spotCEX, in.BTCAmount, in.RefPriceEUR, in.TransferMinutes, false, side), true
+	}
+	if e.hedgeOptions == nil {
+		candidate := e.hedgeCost(spotCEX, in.BTCAmount, in.RefPriceEUR, in.TransferMinutes, false, side)
+		if exchange := hedgeExchange(candidate.venue); exchange != "" {
+			if _, disabled := excluded[exchange]; disabled {
+				return hedgeCostDetails{}, false
+			}
+		}
+		return candidate, true
+	}
+	best := hedgeCostDetails{}
+	found := false
+	for _, candidate := range e.hedgeOptions(in.BTCAmount, in.RefPriceEUR, in.TransferMinutes, side) {
+		if _, disabled := excluded[hedgeExchange(candidate.venue)]; disabled {
+			continue
+		}
+		if !found || candidate.feeBTC < best.feeBTC {
+			best = candidate
 			found = true
 		}
 	}
