@@ -11,6 +11,11 @@
     letsencrypt_email: "{{ lookup('env', 'LETSENCRYPT_EMAIL') }}"
     edge_mode: production
     edge_http01_webroot: "{{ app_dir }}/deploy/nginx/acme-webroot"
+    # 6 GiB file-backed swap: host safety net on the 8 GiB cx33. Does not
+    # enlarge Docker cgroup limits; those stay in docker-compose.yml.
+    swap_file: /swapfile
+    swap_size_mb: 6144
+    swappiness: 10
 
   tasks:
 
@@ -19,6 +24,66 @@
         that: edge_mode in ['production', 'development']
         fail_msg: edge_mode must be production or development
 
+    - name: Check whether swapfile already exists
+      ansible.builtin.stat:
+        path: "{{ swap_file }}"
+      register: swapfile_stat
+      tags: [swap]
+
+    - name: Allocate swapfile
+      ansible.builtin.command:
+        cmd: fallocate -l {{ swap_size_mb }}M {{ swap_file }}
+      when: not swapfile_stat.stat.exists
+      tags: [swap]
+
+    - name: Restrict swapfile permissions
+      ansible.builtin.file:
+        path: "{{ swap_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+      tags: [swap]
+
+    - name: Format swapfile
+      ansible.builtin.command:
+        cmd: mkswap {{ swap_file }}
+      when: not swapfile_stat.stat.exists
+      tags: [swap]
+
+    - name: Enable swapfile
+      ansible.builtin.command:
+        cmd: swapon {{ swap_file }}
+      # Idempotent: swapon fails if already active; ignore that case.
+      register: swapon_result
+      changed_when: swapon_result.rc == 0
+      failed_when:
+        - swapon_result.rc != 0
+        - "'already exists' not in (swapon_result.stderr | default(''))"
+        - "'Device or resource busy' not in (swapon_result.stderr | default(''))"
+      tags: [swap]
+
+    - name: Persist swapfile in fstab
+      ansible.builtin.mount:
+        path: none
+        src: "{{ swap_file }}"
+        fstype: swap
+        opts: sw
+        state: present
+      tags: [swap]
+
+    - name: Persist low swappiness
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-dexarb-swappiness.conf
+        content: |
+          vm.swappiness={{ swappiness }}
+        mode: "0644"
+      tags: [swap]
+
+    - name: Apply vm.swappiness now
+      ansible.builtin.command:
+        cmd: sysctl -w vm.swappiness={{ swappiness }}
+      changed_when: false
+      tags: [swap]
 
     - name: Update apt cache and upgrade packages
       ansible.builtin.apt:
