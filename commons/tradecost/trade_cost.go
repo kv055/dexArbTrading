@@ -647,23 +647,36 @@ type HedgePositionDetail = cextrading.HedgePositionDetail
 // which remains the automatically selected cheapest route.
 type ManualRouteOptions = cextrading.ManualRouteOptions
 
+// Trade mode identifiers for live-offer capital / cost variants.
+const (
+	TradeModeHedgefullSingleCollateral = "hedgefull_single_collateral"
+	TradeModeHedgelessDoubleCollateral = "hedgeless_double_collateral"
+)
+
 // CapitalRequirement is the capital a trader must commit to *execute* the trade,
 // as opposed to the fees consumed by it (CostBreakdown). It is broken out into
 // the spot leg (EUR to buy BTC on the CEX), the perp hedge collateral, and the
 // DEX security deposit, plus the grand total. All figures are for the BTCAmount
 // the enclosing CostBreakdown was built with, so the capped breakdown carries a
 // capped capital block. EUR figures are 0 when the ref price is unknown.
+//
+// Hedgeless double-collateral mode additionally reports BTCLiquidityBTC
+// (position + security deposit) and FiatCollateralEUR (position×price only);
+// TotalEUR is then BTC-pool EUR + fiat position.
 type CapitalRequirement struct {
-	BTCAmount           float64 `json:"btc_amount"`            // trade size the figures are based on
-	BTCPriceEUR         float64 `json:"btc_price_eur"`         // ref price used for EUR conversion (0 when unknown)
-	SpotNotionalEUR     float64 `json:"spot_notional_eur"`     // EUR to buy the BTC leg on the CEX (btcAmount * refPrice)
-	HedgeCollateralEUR  float64 `json:"hedge_collateral_eur"`  // = Hedge.Position.RecommendedCollateralEUR (0 if no position)
-	SecurityDepositPct  float64 `json:"security_deposit_pct"`  // fraction applied (e.g. 0.15); 0 for non-deposit DEXes
-	SecurityDepositSide string  `json:"security_deposit_side"` // "buyer" or "seller" — the side we play on the DEX
-	SecurityDepositBTC  float64 `json:"security_deposit_btc"`  // max(btcAmount*pct, floor)
-	SecurityDepositEUR  float64 `json:"security_deposit_eur"`  // deposit in EUR (0 when refPrice unknown)
-	TotalEUR            float64 `json:"total_eur"`             // spot + hedge + deposit
-	DepositEstimated    bool    `json:"deposit_estimated"`     // true while using the configured %, false once the real per-offer value is plumbed
+	BTCAmount           float64 `json:"btc_amount"`                      // trade size the figures are based on
+	BTCPriceEUR         float64 `json:"btc_price_eur"`                   // ref price used for EUR conversion (0 when unknown)
+	SpotNotionalEUR     float64 `json:"spot_notional_eur"`               // EUR to buy the BTC leg on the CEX (btcAmount * refPrice)
+	HedgeCollateralEUR  float64 `json:"hedge_collateral_eur"`            // = Hedge.Position.RecommendedCollateralEUR (0 if no position / hedgeless)
+	SecurityDepositPct  float64 `json:"security_deposit_pct"`            // fraction applied (e.g. 0.15); 0 for non-deposit DEXes
+	SecurityDepositSide string  `json:"security_deposit_side"`           // "buyer" or "seller" — the side we play on the DEX
+	SecurityDepositBTC  float64 `json:"security_deposit_btc"`            // max(btcAmount*pct, floor)
+	SecurityDepositEUR  float64 `json:"security_deposit_eur"`            // deposit in EUR (0 when refPrice unknown)
+	TotalEUR            float64 `json:"total_eur"`                       // hedgefull: spot + hedge + deposit; hedgeless: btc pool EUR + fiat position
+	DepositEstimated    bool    `json:"deposit_estimated"`               // true while using the configured %, false once the real per-offer value is plumbed
+	TradeMode           string  `json:"trade_mode,omitempty"`            // hedgefull_single_collateral | hedgeless_double_collateral
+	BTCLiquidityBTC     float64 `json:"btc_liquidity_btc,omitempty"`     // hedgeless: position + security deposit
+	FiatCollateralEUR   float64 `json:"fiat_collateral_eur,omitempty"`   // hedgeless: position×price (no deposit on fiat side)
 }
 
 func round8(v float64) float64 {
@@ -796,6 +809,7 @@ func computeCapitalRequirement(btcAmount, refPriceEUR float64, dexExchange strin
 	cap := CapitalRequirement{
 		BTCAmount:   round8(btcAmount),
 		BTCPriceEUR: round2(refPriceEUR),
+		TradeMode:   TradeModeHedgefullSingleCollateral,
 	}
 	if refPriceEUR > 0 {
 		cap.SpotNotionalEUR = round2(btcAmount * refPriceEUR)
@@ -837,6 +851,51 @@ func computeCapitalRequirement(btcAmount, refPriceEUR float64, dexExchange strin
 
 	cap.TotalEUR = round2(cap.SpotNotionalEUR + cap.HedgeCollateralEUR + cap.SecurityDepositEUR)
 	return cap
+}
+
+// computeHedgelessCapital builds Hedgeless Double Collateral capital from a
+// hedgefull CapitalRequirement: BTC pool = position + deposit, fiat = position
+// only (no deposit on the fiat side). TotalEUR = pool EUR + fiat position.
+func computeHedgelessCapital(hedgefull CapitalRequirement) CapitalRequirement {
+	if hedgefull.BTCAmount <= 0 {
+		return CapitalRequirement{}
+	}
+	cap := hedgefull
+	cap.TradeMode = TradeModeHedgelessDoubleCollateral
+	cap.HedgeCollateralEUR = 0
+	cap.BTCLiquidityBTC = round8(cap.BTCAmount + cap.SecurityDepositBTC)
+	if cap.BTCPriceEUR > 0 {
+		cap.FiatCollateralEUR = round2(cap.BTCAmount * cap.BTCPriceEUR)
+		btcPoolEUR := round2(cap.BTCLiquidityBTC * cap.BTCPriceEUR)
+		cap.TotalEUR = round2(btcPoolEUR + cap.FiatCollateralEUR)
+	} else {
+		cap.FiatCollateralEUR = 0
+		cap.TotalEUR = 0
+	}
+	return cap
+}
+
+// DeriveHedgelessDoubleCollateral copies a hedgefull CostBreakdown and removes
+// hedge fees from totals (same spot route; no independent re-ranking). Capital
+// is replaced with the hedgeless double-collateral requirement.
+func DeriveHedgelessDoubleCollateral(bd CostBreakdown) CostBreakdown {
+	if bd.BTCAmount <= 0 || bd.RouteCEX == "" {
+		return CostBreakdown{}
+	}
+	out := bd
+	hedgeFeeBTC := bd.Hedge.FeeSumBTC
+	out.Hedge = HedgeBreakdown{}
+	out.TotalCostBTC = round8(bd.TotalCostBTC - hedgeFeeBTC)
+	if out.TotalCostBTC < 0 {
+		out.TotalCostBTC = 0
+	}
+	out.TotalCostPct = round4(out.TotalCostBTC / bd.BTCAmount * 100)
+	if bd.EstimatedProfitPct != 0 || bd.EstimatedProfitBTC != 0 {
+		out.EstimatedProfitPct = round4(bd.EstimatedProfitPct + bd.Hedge.FeeSumPct)
+		out.EstimatedProfitBTC = round8(bd.BTCAmount * (out.EstimatedProfitPct / 100))
+	}
+	out.Capital = computeHedgelessCapital(bd.Capital)
+	return out
 }
 
 // CapitalRequirementForTrade reports the capital required for a trade using a
