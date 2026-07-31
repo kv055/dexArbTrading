@@ -136,17 +136,20 @@ func TestRobosatsRoutesViaSwapBothSides(t *testing.T) {
 }
 
 func TestComputeCapitalRequirementBidBisq(t *testing.T) {
-	pos := &HedgePositionDetail{RecommendedCollateralEUR: 900}
+	pos := &HedgePositionDetail{RecommendedCollateral: 900}
 	cap := computeCapitalRequirement(0.1, 45000, "bisq", true, pos, nil)
 
 	assertFloat(t, cap.BTCAmount, 0.1)
-	assertFloat(t, cap.BTCPriceEUR, 45000)
-	assertFloat(t, cap.SpotNotionalEUR, 4500)   // 0.1 * 45000
-	assertFloat(t, cap.HedgeCollateralEUR, 900) // reused from the hedge position
+	assertFloat(t, cap.BTCPrice, 45000)
+	assertFloat(t, cap.SpotNotional, 4500)   // 0.1 * 45000
+	assertFloat(t, cap.HedgeCollateral, 900) // reused from the hedge position
 	assertFloat(t, cap.SecurityDepositPct, 0.15)
 	assertFloat(t, cap.SecurityDepositBTC, 0.015) // 0.1 * 0.15, above the 0.001 floor
-	assertFloat(t, cap.SecurityDepositEUR, 675)   // 0.015 * 45000
-	assertFloat(t, cap.TotalEUR, 6075)            // 4500 + 900 + 675
+	assertFloat(t, cap.SecurityDepositFiat, 675)   // 0.015 * 45000
+	assertFloat(t, cap.TotalFiat, 6075)            // 4500 + 900 + 675
+	if cap.TradeMode != TradeModeHedgefullSingleCollateral {
+		t.Fatalf("TradeMode = %q, want %q", cap.TradeMode, TradeModeHedgefullSingleCollateral)
+	}
 	if cap.SecurityDepositSide != "seller" {
 		t.Fatalf("deposit side = %q, want seller", cap.SecurityDepositSide)
 	}
@@ -155,13 +158,58 @@ func TestComputeCapitalRequirementBidBisq(t *testing.T) {
 	}
 }
 
+func TestComputeHedgelessCapitalDoubleCollateral(t *testing.T) {
+	pos := &HedgePositionDetail{RecommendedCollateral: 900}
+	hedgefull := computeCapitalRequirement(0.1, 45000, "bisq", true, pos, nil)
+	cap := computeHedgelessCapital(hedgefull)
+
+	if cap.TradeMode != TradeModeHedgelessDoubleCollateral {
+		t.Fatalf("TradeMode = %q, want %q", cap.TradeMode, TradeModeHedgelessDoubleCollateral)
+	}
+	assertFloat(t, cap.HedgeCollateral, 0)
+	assertFloat(t, cap.BTCLiquidityBTC, 0.115)    // 0.1 + 0.015
+	assertFloat(t, cap.FiatCollateral, 4500)   // position only
+	assertFloat(t, cap.SecurityDepositBTC, 0.015) // preserved from hedgefull
+	// total = (pos+deposit)*price + pos*price = 0.115*45000 + 4500 = 5175 + 4500 = 9675
+	assertFloat(t, cap.TotalFiat, 9675)
+	assertFloat(t, cap.TotalFiat, 2*cap.SpotNotional+cap.SecurityDepositFiat)
+}
+
+func TestDeriveHedgelessDoubleCollateralStripsHedgeFees(t *testing.T) {
+	bd := CostBreakdown{
+		BTCAmount:            0.1,
+		RouteCEX:             "kraken",
+		RouteDEX:             "bisq",
+		TotalCostBTC:         0.0012,
+		TotalCostPct:         1.2,
+		EstimatedProfitPct:   2.5,
+		EstimatedProfitBTC:   0.0025,
+		Hedge:                HedgeBreakdown{FeeSumBTC: 0.0002, FeeSumPct: 0.2, Venue: "kraken_futures"},
+		Capital:              computeCapitalRequirement(0.1, 45000, "bisq", true, &HedgePositionDetail{RecommendedCollateral: 900}, nil),
+	}
+	out := DeriveHedgelessDoubleCollateral(bd)
+
+	assertFloat(t, out.TotalCostBTC, 0.001) // 0.0012 - 0.0002
+	assertFloat(t, out.TotalCostPct, 1.0)
+	assertFloat(t, out.EstimatedProfitPct, 2.7) // 2.5 + 0.2
+	assertFloat(t, out.EstimatedProfitBTC, 0.0027)
+	assertFloat(t, out.Hedge.FeeSumBTC, 0)
+	if out.Hedge.Venue != "" {
+		t.Fatalf("hedge venue = %q, want empty", out.Hedge.Venue)
+	}
+	if out.Capital.TradeMode != TradeModeHedgelessDoubleCollateral {
+		t.Fatalf("capital trade mode = %q", out.Capital.TradeMode)
+	}
+	assertFloat(t, out.Capital.TotalFiat, 9675)
+}
+
 func TestComputeCapitalRequirementAskSideUsesBuyerDeposit(t *testing.T) {
 	cap := computeCapitalRequirement(0.1, 45000, "bisq", false, nil, nil)
 
 	if cap.SecurityDepositSide != "buyer" {
 		t.Fatalf("deposit side = %q, want buyer", cap.SecurityDepositSide)
 	}
-	assertFloat(t, cap.HedgeCollateralEUR, 0) // nil position
+	assertFloat(t, cap.HedgeCollateral, 0) // nil position
 }
 
 func TestComputeCapitalRequirementAppliesDepositFloor(t *testing.T) {
@@ -169,18 +217,18 @@ func TestComputeCapitalRequirementAppliesDepositFloor(t *testing.T) {
 
 	// 0.001 * 0.15 = 0.00015 is below the 0.001 BTC floor.
 	assertFloat(t, cap.SecurityDepositBTC, 0.001)
-	assertFloat(t, cap.SecurityDepositEUR, 45) // 0.001 * 45000
+	assertFloat(t, cap.SecurityDepositFiat, 45) // 0.001 * 45000
 }
 
 func TestComputeCapitalRequirementUnknownRefPriceZeroesEUR(t *testing.T) {
-	pos := &HedgePositionDetail{RecommendedCollateralEUR: 900}
+	pos := &HedgePositionDetail{RecommendedCollateral: 900}
 	cap := computeCapitalRequirement(0.1, 0, "bisq", true, pos, nil)
 
-	assertFloat(t, cap.SpotNotionalEUR, 0)
-	assertFloat(t, cap.SecurityDepositEUR, 0)
+	assertFloat(t, cap.SpotNotional, 0)
+	assertFloat(t, cap.SecurityDepositFiat, 0)
 	assertFloat(t, cap.SecurityDepositBTC, 0.015) // BTC deposit still known without a price
-	assertFloat(t, cap.HedgeCollateralEUR, 900)
-	assertFloat(t, cap.TotalEUR, 900) // only the hedge collateral, which is already EUR
+	assertFloat(t, cap.HedgeCollateral, 900)
+	assertFloat(t, cap.TotalFiat, 900) // only the hedge collateral, which is already EUR
 }
 
 func TestComputeCapitalRequirementNonDepositDEX(t *testing.T) {
@@ -188,7 +236,7 @@ func TestComputeCapitalRequirementNonDepositDEX(t *testing.T) {
 
 	assertFloat(t, cap.SecurityDepositPct, 0)
 	assertFloat(t, cap.SecurityDepositBTC, 0)
-	assertFloat(t, cap.SecurityDepositEUR, 0)
+	assertFloat(t, cap.SecurityDepositFiat, 0)
 	if cap.SecurityDepositSide != "" {
 		t.Fatalf("deposit side = %q, want empty", cap.SecurityDepositSide)
 	}
@@ -203,7 +251,7 @@ func TestComputeCapitalRequirementRealDepositBeatsEstimate(t *testing.T) {
 
 	assertFloat(t, cap.SecurityDepositPct, 0.18)
 	assertFloat(t, cap.SecurityDepositBTC, 0.018) // 0.1 * 0.18, no estimate floor applied
-	assertFloat(t, cap.SecurityDepositEUR, 810)   // 0.018 * 45000
+	assertFloat(t, cap.SecurityDepositFiat, 810)   // 0.018 * 45000
 	if cap.SecurityDepositSide != "seller" {
 		t.Fatalf("deposit side = %q, want seller", cap.SecurityDepositSide)
 	}
@@ -243,7 +291,7 @@ func fixedCostEstimatorWithHedgePosition(exchange, dexExchange string, takerFeeF
 		if in.Direction == "sell" {
 			side = "long"
 		}
-		pos := &cextrading.HedgePositionDetail{RecommendedCollateralEUR: in.BTCAmount * in.RefPriceEUR * 0.1}
+		pos := &cextrading.HedgePositionDetail{RecommendedCollateral: in.BTCAmount * in.RefPriceEUR * 0.1}
 		feePct := 0.0
 		if in.BTCAmount > 0 {
 			feePct = round4(hedgeFeeBTC / in.BTCAmount * 100)
@@ -278,19 +326,19 @@ func TestBreakdownCapitalRespectsFullAndCappedVolume(t *testing.T) {
 	capped := est.breakdown(0.04, 45000, "bisq", "buy", 0, "", nil, nil, false, nil)
 
 	// Full size.
-	assertFloat(t, full.Capital.SpotNotionalEUR, 4500)     // 0.1 * 45000
-	assertFloat(t, full.Capital.HedgeCollateralEUR, 450)   // 0.1 * 45000 * 0.1
+	assertFloat(t, full.Capital.SpotNotional, 4500)     // 0.1 * 45000
+	assertFloat(t, full.Capital.HedgeCollateral, 450)   // 0.1 * 45000 * 0.1
 	assertFloat(t, full.Capital.SecurityDepositBTC, 0.015) // 0.1 * 0.15
-	assertFloat(t, full.Capital.TotalEUR, 5625)            // 4500 + 450 + 675
+	assertFloat(t, full.Capital.TotalFiat, 5625)            // 4500 + 450 + 675
 
 	// Capped size scales every component down with the smaller btc amount.
-	assertFloat(t, capped.Capital.SpotNotionalEUR, 1800)     // 0.04 * 45000
-	assertFloat(t, capped.Capital.HedgeCollateralEUR, 180)   // 0.04 * 45000 * 0.1
+	assertFloat(t, capped.Capital.SpotNotional, 1800)     // 0.04 * 45000
+	assertFloat(t, capped.Capital.HedgeCollateral, 180)   // 0.04 * 45000 * 0.1
 	assertFloat(t, capped.Capital.SecurityDepositBTC, 0.006) // 0.04 * 0.15
-	assertFloat(t, capped.Capital.TotalEUR, 2250)            // 1800 + 180 + 270
+	assertFloat(t, capped.Capital.TotalFiat, 2250)            // 1800 + 180 + 270
 
-	if capped.Capital.TotalEUR >= full.Capital.TotalEUR {
-		t.Fatalf("capped total %.2f should be below full total %.2f", capped.Capital.TotalEUR, full.Capital.TotalEUR)
+	if capped.Capital.TotalFiat >= full.Capital.TotalFiat {
+		t.Fatalf("capped total %.2f should be below full total %.2f", capped.Capital.TotalFiat, full.Capital.TotalFiat)
 	}
 }
 

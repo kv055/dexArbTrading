@@ -9,13 +9,13 @@ import (
 // Config contains all externally supplied parameters needed by the optimizer.
 // No prices, fees, or funding rates are fetched internally.
 type Config struct {
-	// TotalEUR is the total capital available to split between:
+	// TotalFiat is the total capital available to split between:
 	// 1) buying BTC spot to transfer, and
 	// 2) retaining collateral for the hedge.
-	TotalEUR float64
+	TotalFiat float64
 
-	// BTCPriceEUR is the BTC spot price in EUR at optimization time.
-	BTCPriceEUR float64
+	// BTCPrice is the BTC spot price in EUR at optimization time.
+	BTCPrice float64
 
 	// TransferMinutes is accepted as an input because it is expected to come
 	// from an external prediction source. The optimizer does not transform it
@@ -162,7 +162,7 @@ func optimizeForHedgeRatio(cfg Config, hedgeRatio float64) Result {
 
 func optimizeForLeverage(cfg Config, leverage, hedgeRatio float64) Result {
 	best := Result{}
-	maxAffordableSpot := cfg.TotalEUR / (1.0 + cfg.SpotBuyFeeRate)
+	maxAffordableSpot := cfg.TotalFiat / (1.0 + cfg.SpotBuyFeeRate)
 
 	for transferNotional := 0.0; transferNotional <= maxAffordableSpot; transferNotional += cfg.SearchStepEUR {
 		res := evaluateCandidate(cfg, leverage, hedgeRatio, transferNotional)
@@ -196,7 +196,7 @@ func evaluateCandidate(cfg Config, leverage, hedgeRatio, transferNotionalEUR flo
 	fundingCostEUR := hedgeNotionalEUR * cfg.FundingCostRate
 	stressLossEUR := hedgeNotionalEUR * cfg.StressMovePct
 
-	retainedCollateralEUR := cfg.TotalEUR - transferNotionalEUR - spotBuyFeeEUR
+	retainedCollateralEUR := cfg.TotalFiat - transferNotionalEUR - spotBuyFeeEUR
 	if retainedCollateralEUR < 0 {
 		return Result{Feasible: false}
 	}
@@ -224,7 +224,7 @@ func evaluateCandidate(cfg Config, leverage, hedgeRatio, transferNotionalEUR flo
 		return Result{Feasible: false}
 	}
 
-	btcToSend := transferNotionalEUR / cfg.BTCPriceEUR
+	btcToSend := transferNotionalEUR / cfg.BTCPrice
 	return Result{
 		Feasible:                     true,
 		TransferNotionalEUR:          transferNotionalEUR,
@@ -285,10 +285,10 @@ func hedgeRatioCandidates(cfg Config) []float64 {
 
 func validateConfig(cfg Config) error {
 	switch {
-	case cfg.TotalEUR <= 0:
-		return errors.New("TotalEUR must be > 0")
-	case cfg.BTCPriceEUR <= 0:
-		return errors.New("BTCPriceEUR must be > 0")
+	case cfg.TotalFiat <= 0:
+		return errors.New("TotalFiat must be > 0")
+	case cfg.BTCPrice <= 0:
+		return errors.New("BTCPrice must be > 0")
 	case cfg.TransferMinutes < 0:
 		return errors.New("TransferMinutes must be >= 0")
 	case cfg.StressMovePct < 0:
