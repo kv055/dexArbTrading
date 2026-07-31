@@ -86,6 +86,31 @@ func TestBestAskSideHasNoWithdrawalFee(t *testing.T) {
 	eq(t, sel.ComboBTC, 0.001)
 }
 
+func TestManualOptionsExposeEligibleSpotAndWithdrawalFees(t *testing.T) {
+	taker := map[string]float64{"kraken": 0.002, "binance": 0.001, "bitstamp": 0.005, "coinbase": 0.006}
+	withdraw := map[string]float64{"kraken": 0.0001, "binance": 0.0002, "bitstamp": 0.0003, "coinbase": 0}
+	eng := testEngine(taker, withdraw, nil)
+
+	options := eng.ManualOptions(Input{BTCAmount: 1, Direction: "buy", ExcludedCEXes: []string{"binance"}})
+	if len(options.SpotTakerFees) != 4 || len(options.WithdrawalFees) != 4 {
+		t.Fatalf("options = %d spot / %d withdrawal, want 4 each", len(options.SpotTakerFees), len(options.WithdrawalFees))
+	}
+	if options.SpotTakerFees[0].Exchange != "kraken" || options.SpotTakerFees[0].FeeBTC != 0.002 {
+		t.Fatalf("first spot option = %+v, want kraken at 0.002 BTC", options.SpotTakerFees[0])
+	}
+	if !options.WithdrawalFees[0].Applicable || options.WithdrawalFees[0].FeeBTC != 0.0001 {
+		t.Fatalf("first withdrawal option = %+v, want applicable kraken withdrawal", options.WithdrawalFees[0])
+	}
+	if !options.SpotTakerFees[1].Disabled || !options.WithdrawalFees[1].Disabled {
+		t.Fatalf("excluded binance options must remain visible and disabled")
+	}
+
+	ask := eng.ManualOptions(Input{BTCAmount: 1, Direction: "sell"})
+	if ask.WithdrawalFees[0].Applicable || ask.WithdrawalFees[0].FeeBTC != 0 {
+		t.Fatalf("ask withdrawal option = %+v, want not applicable and zero", ask.WithdrawalFees[0])
+	}
+}
+
 func TestBestHedgeParticipatesInComboAndThreadsCoupledFlag(t *testing.T) {
 	// Equal taker/withdrawal across CEXes so the hedge dominates the choice.
 	taker := map[string]float64{"kraken": 0.001, "binance": 0.001, "bitstamp": 0.001, "coinbase": 0.001}
@@ -134,5 +159,69 @@ func TestCoupledHedgePinsPairedVenueMap(t *testing.T) {
 	}
 	if _, ok := cexToHedgeVenue["binance"]; ok {
 		t.Fatal("binance must not have a paired hedge venue")
+	}
+}
+
+func TestIndependentSpotAndHedgeExclusions(t *testing.T) {
+	eng := testEngine(
+		map[string]float64{"kraken": 0.001, "coinbase": 0.002},
+		map[string]float64{"kraken": 0, "coinbase": 0},
+		func(_ string, _, _, _ float64, _ bool, _ string) hedgeCostDetails {
+			t.Fatal("independent selection with exclusions must evaluate enabled hedge options")
+			return hedgeCostDetails{}
+		},
+	)
+	eng.cexes = []string{"kraken", "coinbase"}
+	eng.hedgeOptions = func(_, _, _ float64, _ string) []hedgeCostDetails {
+		return []hedgeCostDetails{
+			{venue: "kraken_futures", feeBTC: 0.0001},
+			{venue: "coinbase_futures", feeBTC: 0.0002},
+		}
+	}
+
+	sel, ok := eng.Best(Input{
+		BTCAmount:          1,
+		Direction:          "buy",
+		ExcludedSpotCEXes:  []string{"coinbase"},
+		ExcludedHedgeCEXes: []string{"kraken"},
+	})
+	if !ok || sel.CEX != "kraken" || sel.Hedge.Venue != "coinbase_futures" {
+		t.Fatalf("selection = %+v, ok=%v", sel, ok)
+	}
+}
+
+func TestCoupledRejectsSpotWithDisabledPairedHedge(t *testing.T) {
+	eng := testEngine(
+		map[string]float64{"kraken": 0.001, "coinbase": 0.002},
+		map[string]float64{"kraken": 0, "coinbase": 0},
+		func(cex string, _, _, _ float64, _ bool, _ string) hedgeCostDetails {
+			return hedgeCostDetails{venue: cex + "_futures"}
+		},
+	)
+	eng.cexes = []string{"kraken", "coinbase"}
+
+	sel, ok := eng.Best(Input{
+		BTCAmount:          1,
+		Direction:          "buy",
+		CoupledHedge:       true,
+		ExcludedHedgeCEXes: []string{"kraken"},
+	})
+	if !ok || sel.CEX != "coinbase" {
+		t.Fatalf("selection = %+v, ok=%v; want coinbase", sel, ok)
+	}
+}
+
+func TestAllHedgesDisabledReturnsNoRoute(t *testing.T) {
+	eng := testEngine(map[string]float64{"kraken": 0.001}, map[string]float64{"kraken": 0}, nil)
+	eng.cexes = []string{"kraken"}
+	eng.hedgeOptions = func(_, _, _ float64, _ string) []hedgeCostDetails {
+		return []hedgeCostDetails{{venue: "kraken_futures"}}
+	}
+	if _, ok := eng.Best(Input{
+		BTCAmount:          1,
+		Direction:          "buy",
+		ExcludedHedgeCEXes: []string{"kraken"},
+	}); ok {
+		t.Fatal("expected no route when every hedge is disabled")
 	}
 }

@@ -173,9 +173,26 @@ func estimateBestHedgeCost(cache *cachedHedgeInput, cex string, btcAmount float6
 			candidates = []hedge.Venue{paired}
 		}
 	}
+	options := estimateHedgeCosts(cache, candidates, btcAmount, refPriceEUR, transferMinutes, side)
 	best := hedgeCostDetails{}
 	found := false
+	for _, details := range options {
+		if !found || details.feeBTC < best.feeBTC {
+			best = details
+			found = true
+		}
+	}
+	if !found {
+		return hedgeCostDetails{}
+	}
+	return best
+}
 
+// estimateHedgeCosts evaluates every supplied venue independently. It is used
+// by the live-offer API to expose manual-analysis alternatives as well as by
+// the automatic optimizer above.
+func estimateHedgeCosts(cache *cachedHedgeInput, candidates []hedge.Venue, btcAmount float64, refPriceEUR float64, transferMinutes float64, side string) []hedgeCostDetails {
+	options := make([]hedgeCostDetails, 0, len(candidates))
 	for _, venue := range candidates {
 		profile, err := hedge.DefaultVenueProfile(venue)
 		if err != nil {
@@ -231,16 +248,9 @@ func estimateBestHedgeCost(cache *cachedHedgeInput, cex string, btcAmount float6
 			transferMinutes: transferMinutes,
 			position:        position,
 		}
-		if !found || details.feeBTC < best.feeBTC {
-			best = details
-			found = true
-		}
+		options = append(options, details)
 	}
-
-	if !found {
-		return hedgeCostDetails{}
-	}
-	return best
+	return options
 }
 
 // ---------------------------------------------------------------------------
