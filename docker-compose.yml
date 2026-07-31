@@ -34,7 +34,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          # 256M OOM-killed under shared-buffer + shmem pressure on the VPS;
+          # 384M gives headroom without reclaiming the Bisq budget.
+          memory: 384M
           cpus: '0.5'
     restart: unless-stopped
 
@@ -479,7 +481,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 128M
+          # 128M OOM-killed mm-controller (~129M RSS) during account-health
+          # probes; 256M absorbs bursts while host swap covers host pressure.
+          memory: 256M
           cpus: '0.5'
     restart: unless-stopped
 
