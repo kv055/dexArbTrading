@@ -446,11 +446,6 @@ services:
       - BISQ2_REST_HOST=bisq2:8090
       - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
       - BISQ2_VERSION=2.1.11
-      # xprv restore disabled: wallet is generated fresh from a new aezeed seed
-      # (stored in DB on first boot). Re-enable both lines + the secret mounts
-      # below to restore a wallet from the extended master key instead.
-      # - LND_EXTENDED_MASTER_KEY_FILE=/run/secrets/lnd_extended_master_key
-      # - LND_EXTENDED_MASTER_KEY_BIRTHDAY_TIMESTAMP_FILE=/run/secrets/lnd_extended_master_key_birthday_timestamp
       - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
       # RoboSats coordinators are Tor onion services; reach them through the
       # tor sidecar's SOCKS port on the bridge network (tor:9050).
@@ -464,7 +459,6 @@ services:
       # Registered as secret_token on setWebhook; inbound /telegram-webhook
       # posts are rejected unless they echo it back (fail-closed when unset).
       - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}
-      # Alternative to xprv/tprv:
       # - LND_SEED_MNEMONIC_FILE=/run/secrets/lnd_seed_mnemonic
       # - LND_AEZEED_PASSPHRASE_FILE=/run/secrets/lnd_aezeed_passphrase
       # - LND_RECOVERY_WINDOW=250
@@ -474,10 +468,6 @@ services:
       - "127.0.0.1:5001:5001"
     volumes:
       - lnd-data:/lnd:ro
-      # xprv restore disabled (see env block above):
-      # - ./dexMmController/secrets/lnd_extended_master_key:/run/secrets/lnd_extended_master_key:ro
-      # - ./dexMmController/secrets/lnd_extended_master_key_birthday_timestamp:/run/secrets/lnd_extended_master_key_birthday_timestamp:ro
-      # Alternative to aezeed:
       # - ./dexMmController/secrets/lnd_seed_mnemonic:/run/secrets/lnd_seed_mnemonic:ro
       # - ./dexMmController/secrets/lnd_aezeed_passphrase:/run/secrets/lnd_aezeed_passphrase:ro
     healthcheck:

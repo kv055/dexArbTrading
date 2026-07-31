@@ -192,5 +192,5 @@ For full-stack verification, prefer Compose because several services expect the 
 
 - Do not commit `.env` files or files under service `secrets/` directories.
 - Fiat account passwords, TOTP secrets, passkeys, API keys, and Bisq seeds should be stored through the shared account/secret storage flow rather than hard-coded in service env files.
-- The MM controller's LND restore workflow requires an aezeed mnemonic or extended master key. A single raw private key is not enough to initialize LND.
+- The MM controller restores LND wallets from their 24-word aezeed mnemonic and the latest static channel backup.
 - The VPS deploy script intentionally refuses dirty worktrees before rebuilding containers.
