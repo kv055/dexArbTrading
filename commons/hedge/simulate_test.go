@@ -32,7 +32,7 @@ func TestSimulatePositionSizesNotionalAndMargin(t *testing.T) {
 	assertClose(t, sim.InitialMarginEUR, 500)         // 5000 / 10
 	assertClose(t, sim.StressLossEUR, 500)            // 5000 * 0.10
 	assertClose(t, sim.MaintenanceRequirementEUR, 50) // 5000 * 0.01
-	assertClose(t, sim.BTCPriceEUR, 50000)
+	assertClose(t, sim.BTCPrice, 50000)
 }
 
 func TestSimulatePositionWithSideKeepsLongSide(t *testing.T) {
@@ -56,9 +56,9 @@ func TestSimulatePositionRecommendedCollateralSurvivesStress(t *testing.T) {
 		t.Fatalf("free collateral after stress should be >= 0, got %.4f", sim.FreeCollateralAfterStressEUR)
 	}
 	// Recommended collateral strictly exceeds the initial margin alone.
-	if sim.RecommendedCollateralEUR <= sim.InitialMarginEUR {
+	if sim.RecommendedCollateral <= sim.InitialMarginEUR {
 		t.Fatalf("recommended collateral %.2f should exceed initial margin %.2f",
-			sim.RecommendedCollateralEUR, sim.InitialMarginEUR)
+			sim.RecommendedCollateral, sim.InitialMarginEUR)
 	}
 }
 

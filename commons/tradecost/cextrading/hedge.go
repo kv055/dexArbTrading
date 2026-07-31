@@ -223,13 +223,13 @@ func estimateHedgeCosts(cache *cachedHedgeInput, candidates []hedge.Venue, btcAm
 				LeverageUsed:                 round4(sim.LeverageUsed),
 				HedgeNotionalEUR:             round2(sim.HedgeNotionalEUR),
 				InitialMarginEUR:             round2(sim.InitialMarginEUR),
-				RecommendedCollateralEUR:     round2(sim.RecommendedCollateralEUR),
+				RecommendedCollateral:     round2(sim.RecommendedCollateral),
 				StressMovePct:                round4(sim.StressMovePct),
 				StressLossEUR:                round2(sim.StressLossEUR),
 				MaintenanceRequirementEUR:    round2(sim.MaintenanceRequirementEUR),
 				FreeCollateralAfterStressEUR: round2(sim.FreeCollateralAfterStressEUR),
 				LiquidationMovePct:           round4(sim.LiquidationMovePct),
-				BTCPriceEUR:                  round2(sim.BTCPriceEUR),
+				BTCPrice:                  round2(sim.BTCPrice),
 			}
 		}
 
@@ -283,17 +283,17 @@ type HedgePositionDetail struct {
 	LeverageUsed                 float64 `json:"leverage_used"`                    // leverage assumed for sizing (venue max)
 	HedgeNotionalEUR             float64 `json:"hedge_notional_eur"`               // perp notional in EUR
 	InitialMarginEUR             float64 `json:"initial_margin_eur"`               // required initial margin = notional / leverage
-	RecommendedCollateralEUR     float64 `json:"recommended_collateral_eur"`       // collateral to post so the position survives the stress move
+	RecommendedCollateral     float64 `json:"recommended_collateral"`       // collateral to post so the position survives the stress move
 	StressMovePct                float64 `json:"stress_move_pct"`                  // adverse BTC move assumed in the stress scenario (e.g. 0.10)
 	StressLossEUR                float64 `json:"stress_loss_eur"`                  // unrealized loss on the short under the stress move
 	MaintenanceRequirementEUR    float64 `json:"maintenance_requirement_eur"`      // venue maintenance margin on the notional
 	FreeCollateralAfterStressEUR float64 `json:"free_collateral_after_stress_eur"` // equity left above maintenance after the stress move
 	LiquidationMovePct           float64 `json:"liquidation_move_pct"`             // adverse BTC move that would liquidate the position at the chosen leverage
-	BTCPriceEUR                  float64 `json:"btc_price_eur"`                    // CEX ref price used to size the notional
+	BTCPrice                  float64 `json:"btc_price"`                    // CEX ref price used to size the notional
 	// Historical is true when this position was reconstructed from persisted
 	// per-cycle averages (order_lifecycle) for a closed offer, rather than
 	// freshly simulated for a live one. Only Side, HedgeRatio, LeverageUsed,
-	// HedgeNotionalEUR, RecommendedCollateralEUR, and BTCPriceEUR are
+	// HedgeNotionalEUR, RecommendedCollateral, and BTCPrice are
 	// populated in that case — the other fields were never persisted and are
 	// left zero, so consumers should hide them rather than display a fake 0.
 	Historical bool `json:"historical,omitempty"`

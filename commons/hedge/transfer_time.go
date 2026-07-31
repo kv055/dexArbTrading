@@ -56,8 +56,8 @@ func ApplyLivePerpInputs(cfg Config, inputs LivePerpInputs) Config {
 }
 
 // PrepareConfigForVenue applies hardcoded venue defaults and live perp inputs to
-// the optimizer config. The caller remains responsible for supplying TotalEUR,
-// BTCPriceEUR, TransferMinutes, stress assumptions, and hedge-ratio policy.
+// the optimizer config. The caller remains responsible for supplying TotalFiat,
+// BTCPrice, TransferMinutes, stress assumptions, and hedge-ratio policy.
 func PrepareConfigForVenue(cfg Config, venue Venue, credentials exchangecredentials.Credentials) (Config, LivePerpInputs, error) {
 	profile, err := DefaultVenueProfile(venue)
 	if err != nil {

@@ -7,8 +7,8 @@ import (
 
 func baseConfig() Config {
 	return Config{
-		TotalEUR:              500,
-		BTCPriceEUR:           50000,
+		TotalFiat:              500,
+		BTCPrice:           50000,
 		TransferMinutes:       20,
 		SpotBuyFeeRate:        0.006,
 		PerpOpenFeeRate:       0.0005,
@@ -69,7 +69,7 @@ func TestOptimizeAllowsNegativeFundingRate(t *testing.T) {
 
 func TestOptimizeFallsBackToPartialHedgeButNotZero(t *testing.T) {
 	cfg := baseConfig()
-	cfg.TotalEUR = 11.5
+	cfg.TotalFiat = 11.5
 	cfg.SafetyBufferEUR = 10
 	cfg.MaxLeverage = 1
 	cfg.AllowPartialHedge = true
@@ -92,7 +92,7 @@ func TestOptimizeFallsBackToPartialHedgeButNotZero(t *testing.T) {
 
 func TestOptimizeReturnsInfeasibleWhenEvenSmallPositiveHedgeFails(t *testing.T) {
 	cfg := baseConfig()
-	cfg.TotalEUR = 15
+	cfg.TotalFiat = 15
 	cfg.MaxLeverage = 1
 	cfg.AllowPartialHedge = true
 	cfg.HedgeRatioStep = 0.5
@@ -109,7 +109,7 @@ func TestOptimizeReturnsInfeasibleWhenEvenSmallPositiveHedgeFails(t *testing.T) 
 
 func TestValidateConfigRejectsBadInputs(t *testing.T) {
 	cfg := baseConfig()
-	cfg.TotalEUR = 0
+	cfg.TotalFiat = 0
 	if _, err := Optimize(cfg); err == nil {
 		t.Fatal("expected validation error")
 	}

@@ -11,13 +11,13 @@ type PositionSimulation struct {
 	LeverageUsed                 float64
 	HedgeNotionalEUR             float64
 	InitialMarginEUR             float64
-	RecommendedCollateralEUR     float64
+	RecommendedCollateral     float64
 	StressMovePct                float64
 	StressLossEUR                float64
 	MaintenanceRequirementEUR    float64
 	FreeCollateralAfterStressEUR float64
 	LiquidationMovePct           float64
-	BTCPriceEUR                  float64
+	BTCPrice                  float64
 }
 
 // SimulatePosition computes the short-perp hedge sizing for a fixed BTC
@@ -92,12 +92,12 @@ func SimulatePositionWithSide(cfg Config, btcAmount, btcPriceEUR float64, side s
 		LeverageUsed:                 leverage,
 		HedgeNotionalEUR:             notionalEUR,
 		InitialMarginEUR:             initialMargin,
-		RecommendedCollateralEUR:     recommendedCollateral,
+		RecommendedCollateral:     recommendedCollateral,
 		StressMovePct:                cfg.StressMovePct,
 		StressLossEUR:                stressLoss,
 		MaintenanceRequirementEUR:    maintenanceReq,
 		FreeCollateralAfterStressEUR: freeCollateralAfterStress,
 		LiquidationMovePct:           liquidationMove,
-		BTCPriceEUR:                  btcPriceEUR,
+		BTCPrice:                  btcPriceEUR,
 	}
 }
