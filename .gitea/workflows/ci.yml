@@ -612,7 +612,9 @@ jobs:
           SSH_USER: ${{ secrets.VPS_SSH_USER }}
         run: |
           set -Eeuo pipefail
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "bash -s" <<'REMOTE'
+          ssh -i ~/.ssh/id_ed25519 \
+            -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ConnectTimeout=10 \
+            "$SSH_USER@$SSH_HOST" "bash -s" <<'REMOTE'
           set -Eeuo pipefail
 
           check_ws() {
@@ -663,7 +665,9 @@ jobs:
           REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
         run: |
           set -Eeuo pipefail
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "REPO_DIR='$REPO_DIR' bash -s" <<'REMOTE'
+          ssh -i ~/.ssh/id_ed25519 \
+            -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ConnectTimeout=10 \
+            "$SSH_USER@$SSH_HOST" "REPO_DIR='$REPO_DIR' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           docker info >/dev/null
           docker compose version >/dev/null
@@ -744,7 +748,7 @@ jobs:
           # per-SHA ref under refs/deploy/* (never a checked-out branch, so receive-pack's
           # denyCurrentBranch can't reject it) — this also keeps the previous deploy's
           # commit reachable for the auto-rollback path.
-          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_ed25519" \
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_ed25519 -o BatchMode=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o ConnectTimeout=10" \
             git push --force "ssh://$SSH_USER@$SSH_HOST$REPO_DIR" "HEAD:refs/deploy/$NEW_SHA"
 
       - name: Activate staged release transactionally
@@ -757,19 +761,8 @@ jobs:
           GHCR_USER: kv055
           NEW_SHA: ${{ github.sha }}
           CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changes }}
-        run: |
-          set -Eeuo pipefail
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' CHANGED_SERVICES='$CHANGED_SERVICES' bash -s" <<'REMOTE'
-          set -Eeuo pipefail
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-          exec "$REPO_DIR/.deploy/staging/$NEW_SHA/transactional-deploy.sh" \
-            --repo-dir "$REPO_DIR" \
-            --sha "$NEW_SHA" \
-            --env-bundle "$REPO_DIR/.deploy/staging/$NEW_SHA/env" \
-            --changed-services "$CHANGED_SERVICES"
-
-          REMOTE
+          FETCH_ORIGIN: "false"
+        run: bash deploy/ci-activate.sh
 
       - name: Remove staged plaintext environment
         if: always()
@@ -779,8 +772,4 @@ jobs:
           SSH_USER: ${{ secrets.VPS_SSH_USER }}
           REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
           NEW_SHA: ${{ github.sha }}
-        run: |
-          [[ "$NEW_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$REPO_DIR" == /* && "$REPO_DIR" != "/" ]]
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "rm -rf '$REPO_DIR/.deploy/staging/$NEW_SHA'"
+        run: bash deploy/ci-cleanup-staging.sh

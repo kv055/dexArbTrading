@@ -664,22 +664,10 @@ jobs:
           GHCR_USER: ${{ github.actor }}
           NEW_SHA: ${{ github.sha }}
           CHANGED_SERVICES: ${{ needs.detect-changes.outputs.changes }}
-        # The staged helper fetches the exact commit, activates the complete env bundle,
-        # and restores both code and env files if health checks fail.
-        run: |
-          set -Eeuo pipefail
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "REPO_DIR='$REPO_DIR' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' NEW_SHA='$NEW_SHA' CHANGED_SERVICES='$CHANGED_SERVICES' bash -s" <<'REMOTE'
-          set -Eeuo pipefail
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-          exec "$REPO_DIR/.deploy/staging/$NEW_SHA/transactional-deploy.sh" \
-            --repo-dir "$REPO_DIR" \
-            --sha "$NEW_SHA" \
-            --env-bundle "$REPO_DIR/.deploy/staging/$NEW_SHA/env" \
-            --changed-services "$CHANGED_SERVICES" \
-            --fetch-origin
-
-          REMOTE
+          FETCH_ORIGIN: "true"
+        # Detached VPS activate + result polling so a hung SSH pipe cannot
+        # false-fail CI after a successful transactional deploy.
+        run: bash deploy/ci-activate.sh
 
       - name: Remove staged plaintext environment
         if: always()
@@ -689,8 +677,4 @@ jobs:
           SSH_USER: ${{ secrets.VPS_SSH_USER }}
           REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
           NEW_SHA: ${{ github.sha }}
-        run: |
-          [[ "$NEW_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$REPO_DIR" == /* && "$REPO_DIR" != "/" ]]
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" \
-            "rm -rf '$REPO_DIR/.deploy/staging/$NEW_SHA'"
+        run: bash deploy/ci-cleanup-staging.sh
