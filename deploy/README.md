@@ -169,8 +169,13 @@ Tests and image builds run in GitHub Actions ([`.github/workflows/ci-cd.yml`](..
 
 1. The CI/CD workflow finishes a successful build and pushes images to `ghcr.io/<owner>/dexarbtrading-<service>:latest` (and `:<sha>`).
 2. The `pre-deploy` job verifies every image SHA tag is present in GHCR, then SSHes into the VPS to confirm docker, compose, disk, and memory are all healthy.
-3. The `deploy` job SCPs `docker-compose.yml` to the VPS and runs `docker compose pull` + `docker compose up -d --remove-orphans` over SSH.
-4. Post-deploy smoke tests hit `http://<vps>:5010/health` and `http://<vps>:5000/` from the runner to confirm the stack is reachable.
+3. The `deploy` job stages decrypted env files, pushes the release commit into
+   the VPS bare-ish checkout, then activates via [`ci-activate.sh`](ci-activate.sh):
+   the transactional deploy runs **detached** on the VPS and CI polls
+   `.deploy/runs/<sha>/result` over short SSH sessions (with keepalives). This
+   avoids false failures when a long-lived SSH pipe hangs after a successful
+   rollout. Run artifacts: `.deploy/runs/<sha>/{pid,deploy.log,result}`.
+4. Post-activate cleanup removes staging only when that SHA is not still running.
 
 This keeps the VPS thin: no builds, no test runs — just an SSH endpoint for docker compose commands.
 

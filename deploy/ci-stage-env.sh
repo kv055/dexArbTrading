@@ -64,16 +64,28 @@ decrypt_copy dexFiatController/.env.enc "$bundle/dexFiatController/.env" \
 
 "$repo_root/scripts/validate-env-contract.sh" values "$bundle"
 
+SSH_IDENTITY="${SSH_IDENTITY:-$HOME/.ssh/id_ed25519}"
+SSH_OPTS=(
+  -i "$SSH_IDENTITY"
+  -o BatchMode=yes
+  -o StrictHostKeyChecking=yes
+  -o ServerAliveInterval=15
+  -o ServerAliveCountMax=4
+  -o ConnectTimeout=10
+)
+
 stage="$REPO_DIR/.deploy/staging/$new_sha"
-ssh -i "$HOME/.ssh/id_ed25519" "$SSH_USER@$SSH_HOST" \
+# shellcheck disable=SC2029
+ssh "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" \
   "set -eu; case '$new_sha' in (*[!0-9a-f]*|'') exit 2;; esac; rm -rf '$stage'; mkdir -p '$stage'"
-scp -q -i "$HOME/.ssh/id_ed25519" -r "$bundle" \
+scp -q "${SSH_OPTS[@]}" -r "$bundle" \
   "$SSH_USER@$SSH_HOST:$stage/env"
-scp -q -i "$HOME/.ssh/id_ed25519" \
+scp -q "${SSH_OPTS[@]}" \
   "$repo_root/scripts/validate-env-contract.sh" \
   "$repo_root/deploy/transactional-deploy.sh" \
   "$SSH_USER@$SSH_HOST:$stage/"
-ssh -i "$HOME/.ssh/id_ed25519" "$SSH_USER@$SSH_HOST" \
+# shellcheck disable=SC2029
+ssh "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" \
   "chmod 700 '$stage' '$stage/transactional-deploy.sh' '$stage/validate-env-contract.sh'; \
    find '$stage/env' -type d -exec chmod 700 {} +; \
    find '$stage/env' -type f -exec chmod 600 {} +"
