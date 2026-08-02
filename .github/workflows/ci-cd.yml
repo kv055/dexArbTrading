@@ -385,9 +385,17 @@ jobs:
           path: dexMonitor/react-frontend/playwright-report/
           retention-days: 7
 
+  certificate-renewal-test:
+    name: Certificate renewal regression tests
+    needs: security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: bash deploy/test-letsencrypt.sh
+
   test-gate:
     name: Test gate
-    needs: [detect-changes, test-go, test-frontend]
+    needs: [detect-changes, test-go, test-frontend, certificate-renewal-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -396,11 +404,13 @@ jobs:
           DETECT_RESULT: ${{ needs.detect-changes.result }}
           GO_RESULT: ${{ needs.test-go.result }}
           FRONTEND_RESULT: ${{ needs.test-frontend.result }}
+          CERTIFICATE_RESULT: ${{ needs.certificate-renewal-test.result }}
         run: |
           set -Eeuo pipefail
           [ "$DETECT_RESULT" = success ]
           case "$GO_RESULT" in success|skipped) ;; *) exit 1;; esac
           case "$FRONTEND_RESULT" in success|skipped) ;; *) exit 1;; esac
+          [ "$CERTIFICATE_RESULT" = success ]
 
   build-and-push:
     name: Build & push ${{ matrix.service }}

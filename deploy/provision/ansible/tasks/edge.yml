@@ -73,7 +73,7 @@
   when: edge_mode == 'production'
   tags: [edge, dns]
 
-- name: Create nginx ACME and certificate directories
+- name: Create nginx certificate and Certbot state directories
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -81,9 +81,21 @@
     group: "{{ deploy_user }}"
     mode: "0750"
   loop:
-    - "{{ app_dir }}/deploy/nginx/acme-webroot"
     - "{{ app_dir }}/deploy/nginx/letsencrypt"
     - "{{ app_dir }}/deploy/nginx/certs"
+  tags: [edge]
+
+- name: Create nginx ACME challenge directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ deploy_user }}"
+    group: "{{ deploy_user }}"
+    mode: "0755"
+  loop:
+    - "{{ edge_http01_webroot }}"
+    - "{{ edge_http01_webroot }}/.well-known"
+    - "{{ edge_http01_webroot }}/.well-known/acme-challenge"
   tags: [edge]
 
 - name: Install certificate renewal service
@@ -115,4 +127,40 @@
   become_user: "{{ deploy_user }}"
   register: certificate_issue
   changed_when: "'certificate unchanged' not in certificate_issue.stdout"
+  tags: [edge]
+
+- name: Check whether nginx is running for the public ACME probe
+  ansible.builtin.command: docker compose ps --status running --services nginx
+  args:
+    chdir: "{{ app_dir }}"
+  become_user: "{{ deploy_user }}"
+  register: edge_nginx_services
+  changed_when: false
+  tags: [edge]
+
+- name: Verify public ACME challenge path when nginx is running
+  when: "'nginx' in edge_nginx_services.stdout_lines"
+  block:
+    - name: Write public ACME challenge probe
+      ansible.builtin.copy:
+        dest: "{{ edge_http01_webroot }}/.well-known/acme-challenge/dexarb-provision-probe"
+        content: "dexarb-provision-probe\n"
+        owner: "{{ deploy_user }}"
+        group: "{{ deploy_user }}"
+        mode: "0644"
+
+    - name: Read public ACME challenge probe
+      ansible.builtin.uri:
+        url: "http://{{ ansible_host }}/.well-known/acme-challenge/dexarb-provision-probe"
+        return_content: true
+        status_code: 200
+      register: acme_http_probe
+      failed_when: acme_http_probe.content | trim != 'dexarb-provision-probe'
+      changed_when: false
+
+  always:
+    - name: Remove public ACME challenge probe
+      ansible.builtin.file:
+        path: "{{ edge_http01_webroot }}/.well-known/acme-challenge/dexarb-provision-probe"
+        state: absent
   tags: [edge]

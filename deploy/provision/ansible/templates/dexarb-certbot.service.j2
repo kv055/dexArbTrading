@@ -2,10 +2,15 @@
 Description=Renew dexArbTrading Let's Encrypt certificate
 After=docker.service
 Requires=docker.service
+StartLimitIntervalSec=1h
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
 User={{ deploy_user }}
 EnvironmentFile=/etc/dexarb/edge.env
 WorkingDirectory={{ app_dir }}
+UMask=0022
 ExecStart=/usr/local/lib/dexarb/letsencrypt.sh renew
+Restart=on-failure
+RestartSec=15min

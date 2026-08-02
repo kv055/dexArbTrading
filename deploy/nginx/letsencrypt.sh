@@ -52,14 +52,24 @@ nginx_running() {
   docker compose ps --status running --services nginx 2>/dev/null | grep -qx nginx
 }
 
+prepare_webroot() {
+  local challenge_dir="$http01_webroot/.well-known/acme-challenge"
+
+  mkdir -p "$challenge_dir"
+  # nginx runs as an unprivileged user in its container. Every bind-mounted
+  # directory in the challenge path must therefore be world-searchable.
+  chmod 0755 "$http01_webroot" "$http01_webroot/.well-known" "$challenge_dir"
+}
+
 webroot_reachable() {
   local probe_name="dexarb-acme-probe-$$"
   local probe_dir="$http01_webroot/.well-known/acme-challenge"
   local probe_file="$probe_dir/$probe_name"
   local response=""
 
-  mkdir -p "$probe_dir"
+  prepare_webroot
   printf '%s' "$probe_name" > "$probe_file"
+  chmod 0644 "$probe_file"
   response="$(curl -fsS --max-time 5 "http://$cert_identifier/.well-known/acme-challenge/$probe_name" 2>/dev/null || true)"
   rm -f "$probe_file"
   [[ "$response" == "$probe_name" ]]
@@ -89,7 +99,17 @@ request_certificate() {
       ;;
   esac
 
-  if webroot_reachable; then
+  if nginx_running; then
+    if ! webroot_reachable; then
+      echo "ACME webroot probe failed while nginx is running; refusing standalone mode because port 80 is already in use" >&2
+      return 1
+    fi
+    certbot_args+=(--webroot --webroot-path /var/www/certbot)
+    docker run --rm \
+      -v "$http01_webroot:/var/www/certbot" \
+      -v "$certbot_state:/etc/letsencrypt" \
+      "$certbot_image" "${certbot_args[@]}"
+  elif webroot_reachable; then
     certbot_args+=(--webroot --webroot-path /var/www/certbot)
     docker run --rm \
       -v "$http01_webroot:/var/www/certbot" \
