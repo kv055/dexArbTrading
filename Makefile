@@ -12,10 +12,13 @@
 COMPOSE ?= docker compose
 SONAR_COMPOSE := deploy/sonarqube/docker-compose.yml
 ENV_FILES := .env dexUnifiedApi/.env dexMonitor/.env
+BACKEND_TOOLS_DIR ?= /tmp/dexarb-backend-tools
+STATICCHECK_VERSION := 2026.1
+DEADCODE_VERSION := v0.48.0
 
 .DEFAULT_GOAL := help
 .PHONY: help staging-up staging-wait staging-down staging-logs staging-rebuild staging-ps staging-env-check \
-	prune sonar-up sonar-scan sonar-down sonar-reset compose-validate
+	prune sonar-up sonar-scan sonar-down sonar-reset compose-validate backend-tools backend-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -51,6 +54,14 @@ staging-logs: ## Tail logs from the local stack
 
 compose-validate: ## Assert docker-compose topology (no host networking, DNS-based service wiring)
 	@bash scripts/compose-validate.sh
+
+backend-tools: ## Install pinned backend maintainability tools under /tmp
+	@mkdir -p $(BACKEND_TOOLS_DIR)
+	GOBIN=$(BACKEND_TOOLS_DIR) go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
+	GOBIN=$(BACKEND_TOOLS_DIR) go install golang.org/x/tools/cmd/deadcode@$(DEADCODE_VERSION)
+
+backend-check: ## Test, vet, lint, and report dead backend Go code in every module
+	@BACKEND_TOOLS_DIR=$(BACKEND_TOOLS_DIR) bash scripts/backend-check.sh
 
 prune: ## Drop stale remote refs and delete local branches already merged into develop
 	@git fetch origin --prune

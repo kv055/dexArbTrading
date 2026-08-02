@@ -175,9 +175,8 @@ func (fa *FeeAnalyzer) estimateProjectedInclusionBlocks(feeRate int64, mempool *
 	}
 
 	lastMinFee := lastBlock.FeeRange[0]
-	lastMaxFee := lastBlock.FeeRange[len(lastBlock.FeeRange)-1]
-	if lastMinFee > lastMaxFee {
-		lastMinFee, lastMaxFee = lastMaxFee, lastMinFee
+	if lastFee := lastBlock.FeeRange[len(lastBlock.FeeRange)-1]; lastFee < lastMinFee {
+		lastMinFee = lastFee
 	}
 	if feeRate >= lastMinFee {
 		return len(mempool.ProjectedBlocks)

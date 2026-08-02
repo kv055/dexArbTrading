@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -666,17 +667,17 @@ const (
 // (position + security deposit) and FiatCollateral (position×price only);
 // TotalFiat is then BTC-pool fiat + fiat position.
 type CapitalRequirement struct {
-	BTCAmount           float64 `json:"btc_amount"`            // trade size the figures are based on
-	BTCPrice            float64 `json:"btc_price"`             // ref price in fiat (0 when unknown)
-	SpotNotional        float64 `json:"spot_notional"`         // fiat to buy the BTC leg on the CEX (btcAmount * refPrice)
-	HedgeCollateral     float64 `json:"hedge_collateral"`      // = Hedge.Position.RecommendedCollateral (0 if no position / hedgeless)
-	SecurityDepositPct  float64 `json:"security_deposit_pct"`  // fraction applied (e.g. 0.15); 0 for non-deposit DEXes
-	SecurityDepositSide string  `json:"security_deposit_side"` // "buyer" or "seller" — the side we play on the DEX
-	SecurityDepositBTC  float64 `json:"security_deposit_btc"`  // max(btcAmount*pct, floor)
-	SecurityDepositFiat float64 `json:"security_deposit_fiat"` // deposit in fiat (0 when refPrice unknown)
-	TotalFiat           float64 `json:"total_fiat"`            // hedgefull: spot + hedge + deposit; hedgeless: btc pool fiat + fiat position
-	DepositEstimated    bool    `json:"deposit_estimated"`     // true while using the configured %, false once the real per-offer value is plumbed
-	TradeMode           string  `json:"trade_mode,omitempty"`  // hedgefull_single_collateral | hedgeless_double_collateral
+	BTCAmount           float64 `json:"btc_amount"`                  // trade size the figures are based on
+	BTCPrice            float64 `json:"btc_price"`                   // ref price in fiat (0 when unknown)
+	SpotNotional        float64 `json:"spot_notional"`               // fiat to buy the BTC leg on the CEX (btcAmount * refPrice)
+	HedgeCollateral     float64 `json:"hedge_collateral"`            // = Hedge.Position.RecommendedCollateral (0 if no position / hedgeless)
+	SecurityDepositPct  float64 `json:"security_deposit_pct"`        // fraction applied (e.g. 0.15); 0 for non-deposit DEXes
+	SecurityDepositSide string  `json:"security_deposit_side"`       // "buyer" or "seller" — the side we play on the DEX
+	SecurityDepositBTC  float64 `json:"security_deposit_btc"`        // max(btcAmount*pct, floor)
+	SecurityDepositFiat float64 `json:"security_deposit_fiat"`       // deposit in fiat (0 when refPrice unknown)
+	TotalFiat           float64 `json:"total_fiat"`                  // hedgefull: spot + hedge + deposit; hedgeless: btc pool fiat + fiat position
+	DepositEstimated    bool    `json:"deposit_estimated"`           // true while using the configured %, false once the real per-offer value is plumbed
+	TradeMode           string  `json:"trade_mode,omitempty"`        // hedgefull_single_collateral | hedgeless_double_collateral
 	BTCLiquidityBTC     float64 `json:"btc_liquidity_btc,omitempty"` // hedgeless: position + security deposit
 	FiatCollateral      float64 `json:"fiat_collateral,omitempty"`   // hedgeless: position×price (no deposit on fiat side)
 }
@@ -809,9 +810,9 @@ func computeCapitalRequirement(btcAmount, refPriceEUR float64, dexExchange strin
 	}
 
 	cap := CapitalRequirement{
-		BTCAmount:   round8(btcAmount),
-		BTCPrice: round2(refPriceEUR),
-		TradeMode:   TradeModeHedgefullSingleCollateral,
+		BTCAmount: round8(btcAmount),
+		BTCPrice:  round2(refPriceEUR),
+		TradeMode: TradeModeHedgefullSingleCollateral,
 	}
 	if refPriceEUR > 0 {
 		cap.SpotNotional = round2(btcAmount * refPriceEUR)
@@ -888,12 +889,22 @@ func DeriveHedgelessDoubleCollateral(bd CostBreakdown) CostBreakdown {
 	hedgeFeeBTC := bd.Hedge.FeeSumBTC
 	out.Hedge = HedgeBreakdown{}
 	out.TotalCostBTC = round8(bd.TotalCostBTC - hedgeFeeBTC)
+	// Bisq v1 is direct only in the hedgefull CEX-first flow. Hedgeless starts
+	// from the LND pool, so it needs LND→Bisq before TakeOffer and CEX→LND for
+	// replenishment: two on-chain transactions rather than one.
+	if strings.EqualFold(strings.TrimSpace(bd.RouteDEX), "bisq") && bd.TradeDirection == "bid" && bd.NumNetworkTxs == 1 {
+		out.RouteMethod = "onchain_hub"
+		out.NumNetworkTxs = 2
+		out.NetworkFeeBTC = round8(bd.NetworkFeeBTC * 2)
+		out.NetworkFeePct = round4(out.NetworkFeeBTC / bd.BTCAmount * 100)
+		out.TotalCostBTC = round8(out.TotalCostBTC + bd.NetworkFeeBTC)
+	}
 	if out.TotalCostBTC < 0 {
 		out.TotalCostBTC = 0
 	}
 	out.TotalCostPct = round4(out.TotalCostBTC / bd.BTCAmount * 100)
 	if bd.EstimatedProfitPct != 0 || bd.EstimatedProfitBTC != 0 {
-		out.EstimatedProfitPct = round4(bd.EstimatedProfitPct + bd.Hedge.FeeSumPct)
+		out.EstimatedProfitPct = round4(bd.EstimatedProfitPct + bd.Hedge.FeeSumPct - (out.NetworkFeePct - bd.NetworkFeePct))
 		out.EstimatedProfitBTC = round8(bd.BTCAmount * (out.EstimatedProfitPct / 100))
 	}
 	out.Capital = computeHedgelessCapital(bd.Capital)

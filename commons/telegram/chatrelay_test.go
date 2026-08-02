@@ -9,9 +9,9 @@ import (
 )
 
 type fakeChat struct {
-	msgs     []telegram.Message
-	sent     []string
-	orderID  string
+	msgs    []telegram.Message
+	sent    []string
+	orderID string
 }
 
 func (f *fakeChat) SendMessage(_ context.Context, orderID, text string) error {
@@ -28,11 +28,6 @@ func (f *fakeChat) Messages(_ context.Context, orderID string) ([]telegram.Messa
 		return nil, nil
 	}
 	return append([]telegram.Message(nil), f.msgs...), nil
-}
-
-type recordingTG struct {
-	telegram.Client
-	out []string
 }
 
 func TestChatRelayForwardsInboundOnly(t *testing.T) {

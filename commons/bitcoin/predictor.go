@@ -26,11 +26,6 @@ type BitcoinFeePredictor struct {
 	lastAttemptTime time.Time // last fetch attempt (success or failure)
 }
 
-// NewBitcoinFeePredictor creates a fee predictor with a plain HTTP client.
-func NewBitcoinFeePredictor() *BitcoinFeePredictor {
-	return NewBitcoinFeePredictorWithClient(nil)
-}
-
 // NewBitcoinFeePredictorWithClient creates a fee predictor using the given HTTP client.
 // Pass a Tor-proxied client when running in an environment that routes clearnet through Tor.
 // A nil client falls back to the default plain HTTP client.

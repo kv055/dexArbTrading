@@ -145,8 +145,8 @@ func TestComputeCapitalRequirementBidBisq(t *testing.T) {
 	assertFloat(t, cap.HedgeCollateral, 900) // reused from the hedge position
 	assertFloat(t, cap.SecurityDepositPct, 0.15)
 	assertFloat(t, cap.SecurityDepositBTC, 0.015) // 0.1 * 0.15, above the 0.001 floor
-	assertFloat(t, cap.SecurityDepositFiat, 675)   // 0.015 * 45000
-	assertFloat(t, cap.TotalFiat, 6075)            // 4500 + 900 + 675
+	assertFloat(t, cap.SecurityDepositFiat, 675)  // 0.015 * 45000
+	assertFloat(t, cap.TotalFiat, 6075)           // 4500 + 900 + 675
 	if cap.TradeMode != TradeModeHedgefullSingleCollateral {
 		t.Fatalf("TradeMode = %q, want %q", cap.TradeMode, TradeModeHedgefullSingleCollateral)
 	}
@@ -168,7 +168,7 @@ func TestComputeHedgelessCapitalDoubleCollateral(t *testing.T) {
 	}
 	assertFloat(t, cap.HedgeCollateral, 0)
 	assertFloat(t, cap.BTCLiquidityBTC, 0.115)    // 0.1 + 0.015
-	assertFloat(t, cap.FiatCollateral, 4500)   // position only
+	assertFloat(t, cap.FiatCollateral, 4500)      // position only
 	assertFloat(t, cap.SecurityDepositBTC, 0.015) // preserved from hedgefull
 	// total = (pos+deposit)*price + pos*price = 0.115*45000 + 4500 = 5175 + 4500 = 9675
 	assertFloat(t, cap.TotalFiat, 9675)
@@ -177,15 +177,15 @@ func TestComputeHedgelessCapitalDoubleCollateral(t *testing.T) {
 
 func TestDeriveHedgelessDoubleCollateralStripsHedgeFees(t *testing.T) {
 	bd := CostBreakdown{
-		BTCAmount:            0.1,
-		RouteCEX:             "kraken",
-		RouteDEX:             "bisq",
-		TotalCostBTC:         0.0012,
-		TotalCostPct:         1.2,
-		EstimatedProfitPct:   2.5,
-		EstimatedProfitBTC:   0.0025,
-		Hedge:                HedgeBreakdown{FeeSumBTC: 0.0002, FeeSumPct: 0.2, Venue: "kraken_futures"},
-		Capital:              computeCapitalRequirement(0.1, 45000, "bisq", true, &HedgePositionDetail{RecommendedCollateral: 900}, nil),
+		BTCAmount:          0.1,
+		RouteCEX:           "kraken",
+		RouteDEX:           "bisq",
+		TotalCostBTC:       0.0012,
+		TotalCostPct:       1.2,
+		EstimatedProfitPct: 2.5,
+		EstimatedProfitBTC: 0.0025,
+		Hedge:              HedgeBreakdown{FeeSumBTC: 0.0002, FeeSumPct: 0.2, Venue: "kraken_futures"},
+		Capital:            computeCapitalRequirement(0.1, 45000, "bisq", true, &HedgePositionDetail{RecommendedCollateral: 900}, nil),
 	}
 	out := DeriveHedgelessDoubleCollateral(bd)
 
@@ -201,6 +201,25 @@ func TestDeriveHedgelessDoubleCollateralStripsHedgeFees(t *testing.T) {
 		t.Fatalf("capital trade mode = %q", out.Capital.TradeMode)
 	}
 	assertFloat(t, out.Capital.TotalFiat, 9675)
+}
+
+func TestDeriveHedgelessDoubleCollateralBisqUsesTwoOnChainLegs(t *testing.T) {
+	bd := CostBreakdown{
+		BTCAmount: 0.1, RouteCEX: "kraken", RouteDEX: "bisq", RouteMethod: "onchain_direct",
+		TradeDirection: "bid", NumNetworkTxs: 1, NetworkFeeBTC: 0.0001, NetworkFeePct: 0.1,
+		TotalCostBTC: 0.001, TotalCostPct: 1, EstimatedProfitBTC: 0.001, EstimatedProfitPct: 1,
+		Capital: CapitalRequirement{BTCAmount: 0.1},
+	}
+	out := DeriveHedgelessDoubleCollateral(bd)
+	if out.RouteMethod != "onchain_hub" || out.NumNetworkTxs != 2 {
+		t.Fatalf("route = %s/%d, want onchain_hub/2", out.RouteMethod, out.NumNetworkTxs)
+	}
+	if out.NetworkFeeBTC != 0.0002 || out.TotalCostBTC != 0.0011 {
+		t.Fatalf("network/total = %.8f/%.8f", out.NetworkFeeBTC, out.TotalCostBTC)
+	}
+	if out.EstimatedProfitPct != 0.9 {
+		t.Fatalf("estimated profit = %.4f, want 0.9", out.EstimatedProfitPct)
+	}
 }
 
 func TestComputeCapitalRequirementAskSideUsesBuyerDeposit(t *testing.T) {
@@ -251,7 +270,7 @@ func TestComputeCapitalRequirementRealDepositBeatsEstimate(t *testing.T) {
 
 	assertFloat(t, cap.SecurityDepositPct, 0.18)
 	assertFloat(t, cap.SecurityDepositBTC, 0.018) // 0.1 * 0.18, no estimate floor applied
-	assertFloat(t, cap.SecurityDepositFiat, 810)   // 0.018 * 45000
+	assertFloat(t, cap.SecurityDepositFiat, 810)  // 0.018 * 45000
 	if cap.SecurityDepositSide != "seller" {
 		t.Fatalf("deposit side = %q, want seller", cap.SecurityDepositSide)
 	}
@@ -326,16 +345,16 @@ func TestBreakdownCapitalRespectsFullAndCappedVolume(t *testing.T) {
 	capped := est.breakdown(0.04, 45000, "bisq", "buy", 0, "", nil, nil, false, nil)
 
 	// Full size.
-	assertFloat(t, full.Capital.SpotNotional, 4500)     // 0.1 * 45000
-	assertFloat(t, full.Capital.HedgeCollateral, 450)   // 0.1 * 45000 * 0.1
+	assertFloat(t, full.Capital.SpotNotional, 4500)        // 0.1 * 45000
+	assertFloat(t, full.Capital.HedgeCollateral, 450)      // 0.1 * 45000 * 0.1
 	assertFloat(t, full.Capital.SecurityDepositBTC, 0.015) // 0.1 * 0.15
-	assertFloat(t, full.Capital.TotalFiat, 5625)            // 4500 + 450 + 675
+	assertFloat(t, full.Capital.TotalFiat, 5625)           // 4500 + 450 + 675
 
 	// Capped size scales every component down with the smaller btc amount.
-	assertFloat(t, capped.Capital.SpotNotional, 1800)     // 0.04 * 45000
-	assertFloat(t, capped.Capital.HedgeCollateral, 180)   // 0.04 * 45000 * 0.1
+	assertFloat(t, capped.Capital.SpotNotional, 1800)        // 0.04 * 45000
+	assertFloat(t, capped.Capital.HedgeCollateral, 180)      // 0.04 * 45000 * 0.1
 	assertFloat(t, capped.Capital.SecurityDepositBTC, 0.006) // 0.04 * 0.15
-	assertFloat(t, capped.Capital.TotalFiat, 2250)            // 1800 + 180 + 270
+	assertFloat(t, capped.Capital.TotalFiat, 2250)           // 1800 + 180 + 270
 
 	if capped.Capital.TotalFiat >= full.Capital.TotalFiat {
 		t.Fatalf("capped total %.2f should be below full total %.2f", capped.Capital.TotalFiat, full.Capital.TotalFiat)

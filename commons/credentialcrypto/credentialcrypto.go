@@ -37,15 +37,15 @@ func Encrypt(value string) (string, error) {
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create credential cipher: %w", err)
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create credential gcm: %w", err)
 	}
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
-		return "", err
+		return "", fmt.Errorf("generate credential nonce: %w", err)
 	}
 	header := []byte(version + ":" + keyID)
 	sealed := gcm.Seal(nil, nonce, []byte(value), header)
@@ -70,11 +70,11 @@ func Decrypt(value string) (string, error) {
 	}
 	sealed, err := base64.RawStdEncoding.DecodeString(parts[3])
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("decode encrypted credential: %w", err)
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("create credential cipher: %w", err)
 	}
 	gcm, err := cipher.NewGCM(block)
 	if err != nil || len(sealed) < gcm.NonceSize()+gcm.Overhead() {

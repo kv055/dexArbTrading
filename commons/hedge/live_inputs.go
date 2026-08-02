@@ -476,19 +476,3 @@ func fetchBinancePremiumIndex(symbol string) (float64, error) {
 	}
 	return rate, nil
 }
-
-// signBinanceFuturesRequest appends timestamp and HMAC-SHA256 signature to a query string
-// and sets the X-MBX-APIKEY header. Used for signed Binance USDⓈ-M Futures endpoints.
-func signBinanceFuturesRequest(req *http.Request, apiKey, apiSecret, existingQuery string) string {
-	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	query := existingQuery
-	if query != "" {
-		query += "&"
-	}
-	query += "timestamp=" + timestamp
-	mac := hmac.New(sha256.New, []byte(apiSecret))
-	mac.Write([]byte(query))
-	query += "&signature=" + fmt.Sprintf("%x", mac.Sum(nil))
-	req.Header.Set("X-MBX-APIKEY", apiKey)
-	return query
-}

@@ -181,6 +181,9 @@ services:
       - BISQ2_REST_HOST=bisq2:8090
       - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
       - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
+      - MM_CEX_CAPABILITY_MAX_AGE=${MM_CEX_CAPABILITY_MAX_AGE:-30m}
+      # Explicit opt-in for money-moving recovery, DEX relay, and hedgeless refill.
+      - ENABLE_AUTOMATED_TRADEFLOW_WORKERS=${ENABLE_AUTOMATED_TRADEFLOW_WORKERS:-false}
       # OpenTelemetry: traces -> Alloy -> Tempo; structured logs scraped from stdout.
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-alloy:4317}
       - OTEL_SERVICE_NAME=unified-api
