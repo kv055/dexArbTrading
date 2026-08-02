@@ -865,6 +865,35 @@ services:
           cpus: '0.25'
     restart: unless-stopped
 
+  # One local Swagger UI for all service-owned OpenAPI documents. It is kept
+  # behind the docs profile and bound to loopback because internal/admin routes
+  # are included in the catalogs.
+  api-docs:
+    image: swaggerapi/swagger-ui:v5.30.1
+    profiles:
+      - docs
+    environment:
+      URLS: >-
+        [{"name":"dexUnifiedApi","url":"/specs/unified-api.yaml"},{"name":"dexMmController — complete routes","url":"/specs/mm-controller.yaml"},{"name":"dexMmController — typed execution contract","url":"/specs/mm-execution.yaml"},{"name":"dexMonitor","url":"/specs/monitor.yaml"},{"name":"dexMonitor — bisqstats","url":"/specs/bisqstats.yaml"},{"name":"dexFiatController","url":"/specs/fiat-controller.yaml"}]
+      URLS_PRIMARY_NAME: dexMonitor
+      DISPLAY_REQUEST_DURATION: "true"
+      PERSIST_AUTHORIZATION: "true"
+    ports:
+      - "127.0.0.1:8088:8080"
+    volumes:
+      - ./dexUnifiedApi/api/openapi.yaml:/usr/share/nginx/html/specs/unified-api.yaml:ro
+      - ./dexMmController/api/openapi.yaml:/usr/share/nginx/html/specs/mm-controller.yaml:ro
+      - ./dexMmController/api/execution.openapi.yaml:/usr/share/nginx/html/specs/mm-execution.yaml:ro
+      - ./dexMonitor/api/openapi.yaml:/usr/share/nginx/html/specs/monitor.yaml:ro
+      - ./dexMonitor/api/bisqstats.openapi.yaml:/usr/share/nginx/html/specs/bisqstats.yaml:ro
+      - ./dexFiatController/api/openapi.yaml:/usr/share/nginx/html/specs/fiat-controller.yaml:ro
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          cpus: '0.1'
+    restart: unless-stopped
+
   # docs:
   #   logging: *default-logging
   #   image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-docs:${IMAGE_TAG:-latest}

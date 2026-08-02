@@ -5,6 +5,9 @@ services in this repository.
 
 ## Modules
 
+- [API documentation](api-documentation.md) explains the combined Swagger UI,
+  service-owned specifications, and route-catalog maturity model.
+
 - [dexMonitor](dexMonitor/README.md) documents the monitoring API, live-offer views,
   account health proxying, statistics, and trading-account management code.
 - [dexUnifiedApi](dexUnifiedApi/README.md) documents the unified API, snapshot

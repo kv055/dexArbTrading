@@ -209,16 +209,16 @@ jobs:
             if path_changed '^dexUnifiedApi(/|$)'; then
               S=$(add_csv "$S" tor); S=$(add_csv "$S" bisq); S=$(add_csv "$S" bisq2)
               S=$(add_csv "$S" unified-api); S=$(add_csv "$S" unified-snapshot); S=$(add_csv "$S" postgres-backup)
-              M=$(add_csv "$M" dexUnifiedApi)
+              M=$(add_csv "$M" dexUnifiedApi); run_frontend=true
             fi
             if path_changed '^dexMonitor(/|$)'; then
               S=$(add_csv "$S" dexmonitor); M=$(add_csv "$M" dexMonitor); run_frontend=true
             fi
             if path_changed '^dexMmController(/|$)'; then
-              S=$(add_csv "$S" mm-controller); M=$(add_csv "$M" dexMmController)
+              S=$(add_csv "$S" mm-controller); M=$(add_csv "$M" dexMmController); run_frontend=true
             fi
             if path_changed '^dexFiatController(/|$)'; then
-              S=$(add_csv "$S" fiat-controller); S=$(add_csv "$S" totp-api); M=$(add_csv "$M" dexFiatController)
+              S=$(add_csv "$S" fiat-controller); S=$(add_csv "$S" totp-api); M=$(add_csv "$M" dexFiatController); run_frontend=true
             fi
             if $run_frontend; then write_outputs "$S" "$M" "true"; else write_outputs "$S" "$M" "false"; fi
           }
@@ -377,6 +377,13 @@ jobs:
           cache-dependency-path: dexMonitor/react-frontend/package-lock.json
 
       - run: npm ci
+
+      - name: Verify OpenAPI route catalogs
+        working-directory: ${{ github.workspace }}
+        run: python3 scripts/openapi-route-catalogs.py --check
+
+      - name: Verify generated API contracts
+        run: npm run check:api-contract
 
       - name: Lint
         run: npm run lint
