@@ -317,6 +317,7 @@ services:
       - FIAT_CONTROLLER_URL=http://fiat-controller:8080
       - PUSHPUSH_NOTIFY_SECRET=${PUSHPUSH_NOTIFY_SECRET:-}
       - PUSHPUSH_HEARTBEAT_MAX_AGE=${PUSHPUSH_HEARTBEAT_MAX_AGE:-15m}
+      - MM_CEX_CAPABILITY_MAX_AGE=${MM_CEX_CAPABILITY_MAX_AGE:-30m}
       - APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY:-}
       - TOR_PROXY_ADDR=tor:9050
       - BISQ_GRPC_HOST=bisq:9998
@@ -452,6 +453,7 @@ services:
       - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
       - BISQ2_VERSION=2.1.11
       - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
+      - MM_CEX_CAPABILITY_MAX_AGE=${MM_CEX_CAPABILITY_MAX_AGE:-30m}
       # RoboSats coordinators are Tor onion services; reach them through the
       # tor sidecar's SOCKS port on the bridge network (tor:9050).
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}

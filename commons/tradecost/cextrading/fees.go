@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"commons/exchangecredentials"
+	"commons/mmcapabilities"
 
 	"github.com/google/uuid"
 )
@@ -49,13 +50,9 @@ var takerFeeFallbacks = map[string]float64{
 	"bitstamp": 0.0050,
 }
 
-var supportedCEXes = []string{"kraken", "binance", "bitstamp", "coinbase"}
-
 // SupportedCEXes returns the canonical list of CEXes the cost model knows about.
 func SupportedCEXes() []string {
-	out := make([]string, len(supportedCEXes))
-	copy(out, supportedCEXes)
-	return out
+	return mmcapabilities.CostSupportedProviderIDs()
 }
 
 // TakerFeeFallback returns the static taker fee fraction for an exchange.
