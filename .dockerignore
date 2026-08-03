@@ -1,0 +1,59 @@
+# VCS / IDE / OS
+.git
+.github
+.gitea
+.agents
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Secrets and local env (never needed in image builds)
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Dependency and build outputs (especially host node_modules —
+# compose uses context: ., so nested service .dockerignore files do not apply)
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/.vite
+**/.turbo
+**/__pycache__
+**/*.pyc
+**/.venv
+**/venv
+
+# Docs site output (source docs/ still needed for docs image builds)
+docs/site
+
+# Markdown and local notes (not used by service Dockerfiles)
+*.md
+
+# Tests and fixtures not needed for production images
+**/*_test.go
+**/testdata
+**/*_test.tsx
+**/*_test.ts
+**/e2e
+**/playwright-report
+**/test-results
+
+# Deploy / act / sonar local artifacts
+deploy/sonarqube
+*.log
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Large dumps that must never enter a build context
+**/*.dump
+**/*.sql.gz

@@ -18,7 +18,7 @@ DEADCODE_VERSION := v0.48.0
 
 .DEFAULT_GOAL := help
 .PHONY: help staging-up staging-wait staging-down staging-logs staging-rebuild staging-ps staging-env-check \
-	prune sonar-up sonar-scan sonar-down sonar-reset compose-validate backend-tools backend-check
+	prune docker-reclaim sonar-up sonar-scan sonar-down sonar-reset compose-validate backend-tools backend-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -45,6 +45,22 @@ staging-rebuild: staging-env-check ## Force a clean rebuild + recreate of every 
 
 staging-down: ## Stop and remove the local stack (keeps named volumes)
 	$(COMPOSE) down
+
+# Safe local disk reclaim. Keeps named compose volumes (e.g. dexarbtrading_postgres-data,
+# bisq data). Does not remove tagged images you may still want.
+docker-reclaim: ## Free Docker build cache, stopped containers, and anonymous volumes
+	@ids=$$(docker ps -aq --filter label=org.testcontainers=true 2>/dev/null); \
+	if [ -n "$$ids" ]; then docker rm -f $$ids; fi
+	@ids=$$(docker ps -aq --filter name='^act-' 2>/dev/null); \
+	if [ -n "$$ids" ]; then docker rm -f $$ids; fi
+	docker container prune -f
+	docker volume prune -f
+	@for v in $$(docker volume ls -q | grep -E '^act'); do \
+		docker volume rm "$$v" 2>/dev/null || true; \
+	done
+	docker builder prune -af
+	docker image prune -f
+	@echo "Named compose volumes were kept. Run: docker system df"
 
 staging-ps: ## Show local stack status
 	$(COMPOSE) ps

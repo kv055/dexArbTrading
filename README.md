@@ -141,7 +141,7 @@ See `deploy/README.md` for required GitHub Secrets, the one-time VPS setup, and 
 
 Rules of the road:
 
-- **Never commit or merge to `main` locally.** Lefthook installs `pre-push` and
+- **Never commit or merge to `main` locally.** Lefthook installs `pre-commit`, `pre-push`, and
   `pre-merge-commit` guards that reject it. Run `lefthook install` once per clone to activate
   them (see `deploy/README.md`). These are the protection on this Free private repo and are
   bypassable with `--no-verify`; server-side GitHub branch protection (PR + green checks,
@@ -165,7 +165,12 @@ make staging-wait        # build + start everything, block until healthy
 make staging-ps          # status
 make staging-logs        # tail logs
 make staging-down        # tear down (named volumes are kept)
+make docker-reclaim      # free build cache / stopped containers / anonymous volumes
 ```
+
+`staging-down` keeps named volumes, images, and BuildKit cache on purpose so the
+next bring-up stays fast. Use `make docker-reclaim` when local Docker disk usage
+grows (safe: does not delete `dexarbtrading_*` named volumes).
 
 The dashboard is then at `http://localhost:5000/` and the unified API at
 `http://localhost:5010/health`.
