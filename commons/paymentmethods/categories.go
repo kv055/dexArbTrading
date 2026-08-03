@@ -30,7 +30,7 @@ var categoryOrder = []string{
 // labels are the DB values of payment_methods.category, byte-for-byte.
 var categoryDisplayNames = map[string]string{
 	CategoryCash:            "Cash",
-	CategoryBankTransfer:    "Bank Transfer",
+	CategoryBankTransfer:    "Bank",
 	CategoryFiatTransmitter: "Fiat Transmitter",
 	CategoryGiftCards:       "Gift Cards",
 	CategoryCrypto:          "Crypto",

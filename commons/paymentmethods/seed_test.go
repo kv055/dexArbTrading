@@ -78,7 +78,7 @@ func TestRegistryUnknownRowExactNameMatch(t *testing.T) {
 func TestRegistryAliasListExactMatch(t *testing.T) {
 	reg := NewRegistry([]MethodRow{
 		{Name: "PayPal", AliasList: []string{"Paypal", "pay pal f & f"}, Category: "Fiat Transmitter", MatchOrder: 100},
-		{Name: "SEPA", AliasList: []string{"National Bank", "Sepa Instant"}, Category: "Bank Transfer", MatchOrder: 110},
+		{Name: "SEPA", AliasList: []string{"National Bank", "Sepa Instant"}, Category: "Bank", MatchOrder: 110},
 	})
 	for _, c := range []struct {
 		raw  string
