@@ -6,7 +6,7 @@ package paymentmethods
 // from a payment method to its account lives in the payment_methods table
 // (account_id foreign key), managed through the categorization panel.
 var RequiredAccountFields = map[string][]string{
-	"Revolut": {"phone"},
+	"Revolut": {"payment_tag"},
 	"WISE":    {"email"},
 	"PayPal":  {"email"},
 	"N26":     {},

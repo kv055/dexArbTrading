@@ -17,8 +17,8 @@ func TestRequiredAccountFieldsProviders(t *testing.T) {
 			t.Errorf("RequiredAccountFields key %q is not an allowed accounts.provider value", provider)
 		}
 	}
-	if fields := RequiredAccountFields["Revolut"]; len(fields) != 1 || fields[0] != "phone" {
-		t.Errorf("Revolut fields = %v, want [phone]", fields)
+	if fields := RequiredAccountFields["Revolut"]; len(fields) != 1 || fields[0] != "payment_tag" {
+		t.Errorf("Revolut fields = %v, want [payment_tag]", fields)
 	}
 	if fields := RequiredAccountFields["WISE"]; len(fields) != 1 || fields[0] != "email" {
 		t.Errorf("WISE fields = %v, want [email]", fields)
