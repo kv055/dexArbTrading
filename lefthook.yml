@@ -5,6 +5,8 @@
 
 pre-commit:
   scripts:
+    "protect-main.sh":
+      runner: bash
     "protect-secrets.sh":
       runner: bash
 
