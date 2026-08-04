@@ -24,6 +24,8 @@ type MethodRow struct {
 	IsLinked        bool
 	Priority        int
 	MatchOrder      int
+	Sources         []string // DEX offer slugs (bisq, robosats, …)
+	Currencies      []string // ISO fiat codes (EUR, USD, …)
 }
 
 // TextArray scans and writes Postgres TEXT[] values without tying this shared
@@ -67,7 +69,8 @@ func LoadRows(ctx context.Context, db *sql.DB) ([]MethodRow, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, name, COALESCE(merge_regex, ''), alias_list, category,
 		       bank_account_id, account_id, wallet_address_id,
-		       is_active, is_linked, priority, match_order
+		       is_active, is_linked, priority, match_order,
+		       sources, currencies
 		FROM payment_methods
 		ORDER BY match_order, id`)
 	if err != nil {
@@ -78,13 +81,16 @@ func LoadRows(ctx context.Context, db *sql.DB) ([]MethodRow, error) {
 	var out []MethodRow
 	for rows.Next() {
 		var r MethodRow
-		var aliases TextArray
+		var aliases, sources, currencies TextArray
 		if err := rows.Scan(&r.ID, &r.Name, &r.MergeRegex, &aliases, &r.Category,
 			&r.BankAccountID, &r.AccountID, &r.WalletAddressID,
-			&r.IsActive, &r.IsLinked, &r.Priority, &r.MatchOrder); err != nil {
+			&r.IsActive, &r.IsLinked, &r.Priority, &r.MatchOrder,
+			&sources, &currencies); err != nil {
 			return nil, fmt.Errorf("scan payment_methods row: %w", err)
 		}
 		r.AliasList = []string(aliases)
+		r.Sources = []string(sources)
+		r.Currencies = []string(currencies)
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
