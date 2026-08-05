@@ -4,7 +4,7 @@
 # .gitea/workflows/ file exists, uses it and ignores .github/workflows/ — so on Gitea
 # only this runs.
 #
-# develop: test + build (push images to Gitea registry)
+# develop: test + build (push images to Gitea registry) + open develop→main PR
 # main:    test + build (push images to GHCR) + pre-deploy + deploy to VPS
 name: ci
 
@@ -580,6 +580,52 @@ jobs:
           # daemon from source (git clone + full gradle compile).
           cache-from: type=registry,ref=${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:buildcache
           cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}/dexarbtrading-{2}:buildcache,mode=max', steps.reg.outputs.registry, steps.reg.outputs.image_owner, matrix.service) || '' }}
+
+  open-promote-pr:
+    name: Open develop → main PR
+    needs: [detect-changes, test-gate, build-and-push]
+    if: |
+      always() &&
+      needs.detect-changes.outputs.deploy_main != 'true' &&
+      needs.test-gate.result == 'success' &&
+      (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or reuse promote PR
+        env:
+          TOKEN: ${{ github.token }}
+          API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -Eeuo pipefail
+          existing=$(curl -fsS -H "Authorization: token ${TOKEN}" \
+            "${API}/pulls?state=open&limit=50" \
+            | jq -r '.[] | select(.base.ref == "main" and .head.ref == "develop") | .html_url' \
+            | head -1) || existing=""
+
+          if [ -n "$existing" ]; then
+            echo "Open promote PR already exists: ${existing}"
+            exit 0
+          fi
+
+          payload=$(jq -n \
+            --arg sha "$SHA" \
+            --arg run "$RUN_URL" \
+            '{
+              title: "Promote develop → main",
+              head: "develop",
+              base: "main",
+              body: ("Develop CI is green for `" + $sha + "`. Merge this PR into `main` to promote.\n\nActions run: " + $run)
+            }')
+
+          resp=$(curl -fsS -X POST \
+            -H "Authorization: token ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$payload" \
+            "${API}/pulls")
+
+          echo "Opened promote PR: $(echo "$resp" | jq -r '.html_url')"
 
   pre-deploy:
     name: Pre-deploy checks
