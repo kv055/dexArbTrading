@@ -661,23 +661,26 @@ services:
       # DATABASE_URL comes from dexFiatController/.env. Compose expands
       # ${...} before loading env_file, so constructing it here would replace
       # that valid value with empty root-level credentials.
-      - HEADLESS=true
-      - CHROME_PATH=/usr/bin/chromium-browser
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - TOTP_API_URL=http://totp-api:8080
-      - TOTP_API_KEY=${TOTP_API_KEY:-}
-      - SMS_PROVIDER=${SMS_PROVIDER:-}
-      - SMS_ACCOUNT_SID=${SMS_ACCOUNT_SID:-}
-      - SMS_AUTH_TOKEN=${SMS_AUTH_TOKEN:-}
-      - SMS_PHONE_NUMBER=${SMS_PHONE_NUMBER:-}
-      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-}
-      - EMAIL_IMAP_HOST=${EMAIL_IMAP_HOST:-}
-      - EMAIL_IMAP_USER=${EMAIL_IMAP_USER:-}
-      - EMAIL_IMAP_PASS=${EMAIL_IMAP_PASS:-}
-      - POLL_INTERVAL=${POLL_INTERVAL:-30s}
-      - PAYMENT_NOTIFICATIONS_API_URL=${PAYMENT_NOTIFICATIONS_API_URL:-http://unified-api:5010/internal/payment_notifications}
-      - PAYMENT_NOTIFICATIONS_SHARED_SECRET=${PAYMENT_NOTIFICATIONS_SHARED_SECRET:-}
-      - PAYMENT_NOTIFICATIONS_DEX=${PAYMENT_NOTIFICATIONS_DEX:-}
+      # Scraping browser automation is off by default (SCRAPING_ENABLED=false).
+      # Re-enable these together with Chromium in dexFiatController/Dockerfile
+      # when turning scraping back on.
+      # - HEADLESS=true
+      # - CHROME_PATH=/usr/bin/chromium-browser
+      # - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # - TOTP_API_URL=http://totp-api:8080
+      # - TOTP_API_KEY=${TOTP_API_KEY:-}
+      # - SMS_PROVIDER=${SMS_PROVIDER:-}
+      # - SMS_ACCOUNT_SID=${SMS_ACCOUNT_SID:-}
+      # - SMS_AUTH_TOKEN=${SMS_AUTH_TOKEN:-}
+      # - SMS_PHONE_NUMBER=${SMS_PHONE_NUMBER:-}
+      # - EMAIL_PROVIDER=${EMAIL_PROVIDER:-}
+      # - EMAIL_IMAP_HOST=${EMAIL_IMAP_HOST:-}
+      # - EMAIL_IMAP_USER=${EMAIL_IMAP_USER:-}
+      # - EMAIL_IMAP_PASS=${EMAIL_IMAP_PASS:-}
+      # - POLL_INTERVAL=${POLL_INTERVAL:-30s}
+      # - PAYMENT_NOTIFICATIONS_API_URL=${PAYMENT_NOTIFICATIONS_API_URL:-http://unified-api:5010/internal/payment_notifications}
+      # - PAYMENT_NOTIFICATIONS_SHARED_SECRET=${PAYMENT_NOTIFICATIONS_SHARED_SECRET:-}
+      # - PAYMENT_NOTIFICATIONS_DEX=${PAYMENT_NOTIFICATIONS_DEX:-}
       # pushpush (primary fiat-arrival path)
       - SCRAPING_ENABLED=${SCRAPING_ENABLED:-false}
       - PUSHPUSH_ADDR=:8080
