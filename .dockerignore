@@ -57,3 +57,10 @@ deploy/sonarqube
 # Large dumps that must never enter a build context
 **/*.dump
 **/*.sql.gz
+
+# Disabled totp-api helper (and its host-built binary) — not part of the
+# default PushPush fiat-controller image. Nested .dockerignore does not apply
+# when compose uses context: .
+dexFiatController/services/totp-api
+**/services/totp-api/totp-api
+**/totp-api/totp-api

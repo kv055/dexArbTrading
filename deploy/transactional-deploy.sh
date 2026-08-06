@@ -86,7 +86,7 @@ image_services=(
   postgres-backup
   dexmonitor
   mm-controller
-  totp-api
+  # totp-api disabled (see docker-compose.yml)
   fiat-controller
 )
 image_vars=(
@@ -98,7 +98,7 @@ image_vars=(
   POSTGRES_BACKUP_IMAGE_TAG
   DEXMONITOR_IMAGE_TAG
   MM_CONTROLLER_IMAGE_TAG
-  TOTP_API_IMAGE_TAG
+  # TOTP_API_IMAGE_TAG
   FIAT_CONTROLLER_IMAGE_TAG
 )
 config_services=(grafana prometheus loki tempo alloy nginx)
