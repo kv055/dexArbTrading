@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND="$ROOT/dexMonitor/react-frontend"
 
-for command in docker npm; do
+for command in docker npm tmux; do
 	if ! command -v "$command" >/dev/null 2>&1; then
 		echo "dev-server: $command is required" >&2
 		exit 1
@@ -37,6 +37,9 @@ export SESSION_COOKIE_SECURE=false
 echo "dev-server: starting backend services"
 docker compose --project-directory "$ROOT" -f "$ROOT/docker-compose.yml" up -d --build "${compose_services[@]}"
 
-echo "dev-server: starting Vite at http://localhost:5173"
-echo "dev-server: Compose services remain running when Vite stops"
-exec npm --prefix "$FRONTEND" run dev
+echo "dev-server: starting Vite in tmux session 'vite' at http://localhost:5173"
+tmux new-session -d -s vite -c "$FRONTEND" "SESSION_COOKIE_SECURE=false npm run dev"
+
+echo "dev-server: backend and Vite are running detached"
+echo "dev-server: attach to Vite with: tmux attach -t vite"
+echo "dev-server: stop Vite with: tmux kill-session -t vite"
