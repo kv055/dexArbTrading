@@ -17,24 +17,20 @@ func TestCanonicalize(t *testing.T) {
 		{"SEPA_INSTANT", []string{"SEPA Instant"}},
 		{"SEPA", []string{"SEPA"}},
 		{"WISE", []string{"Wise"}},
-		{"AMAZON_GIFT_CARD", []string{"Amazon Gift Card"}},
 		{"NATIONAL_BANK", []string{"National Bank"}},
+		{"Lightning", []string{"Lightning"}},
+		{"lnurl", []string{"Lightning"}},
 
 		// PayPal case variants all collapse
 		{"PayPal", []string{"PayPal"}},
 		{"Paypal", []string{"PayPal"}},
 		{"paypal", []string{"PayPal"}},
 
-		// PayPal F&F kept distinct from plain PayPal
-		{"Paypal Friends & Family", []string{"PayPal F&F"}},
-		{"PayPal(frnd&fam)", []string{"PayPal F&F"}},
-		{"(Frnds&Fam)", []string{"PayPal F&F"}},
-		{"f&f", []string{"PayPal F&F"}},
-
-		// Paysafe variants
-		{"paysafecard", []string{"Paysafecard"}},
-		{"paysafe card", []string{"Paysafecard"}},
-		{"Paysafe", []string{"Paysafecard"}},
+		// PayPal F&F labels fold into PayPal
+		{"Paypal Friends & Family", []string{"PayPal"}},
+		{"PayPal(frnd&fam)", []string{"PayPal"}},
+		{"(Frnds&Fam)", []string{"PayPal"}},
+		{"f&f", []string{"PayPal"}},
 
 		// Regex / typo tolerance
 		{"revoult", []string{"Revolut"}},
@@ -43,26 +39,10 @@ func TestCanonicalize(t *testing.T) {
 		{"paypall", []string{"PayPal"}},
 
 		// Compound free-text combos (CanonicalizeAll sorts output)
-		{"Instant SEPA Bizum", []string{"Bizum", "SEPA Instant"}},
-		{"Instant SEPA Revolut Strike MBWay", []string{"MB Way", "Revolut", "SEPA Instant", "Strike"}},
-		{"Instant SEPA Wise N26 Paysera Vivid", []string{"N26", "Paysera", "SEPA Instant", "Vivid", "Wise"}},
-		{"Instant SEPA Bizum Amazon ES GiftCard", []string{"Amazon Gift Card", "Bizum", "SEPA Instant"}},
-		{"Instant SEPA Paypal Friends & Family", []string{"PayPal F&F", "SEPA Instant"}},
-		{"Revolut Instant SEPA Paypal Friends & Family N26", []string{"N26", "PayPal F&F", "Revolut", "SEPA Instant"}},
-		{"HalCash Amazon ES GiftCard Revolut Instant SEPA", []string{"Amazon Gift Card", "HalCash", "Revolut", "SEPA Instant"}},
-		{"MONERO XMR", []string{"Monero"}},
-
-		// Crypto coins and rails
-		{"Other coins", []string{"Other Coins"}},
-		{"SOL XRP XLM", []string{"Solana", "Stellar", "XRP"}},
-		{"USDT LTC", []string{"Litecoin", "USDT"}},
-		{"Altcoins Instant", []string{"Altcoins Instant"}},
-		{"ETH", []string{"Ethereum"}},
-		{"L-BTC", []string{"Liquid Bitcoin"}},
-		{"Liquid", []string{"Liquid Bitcoin"}},
-		{"TUSD", []string{"True USD"}},
-		{"True USD", []string{"True USD"}},
-		{"USDC FDUSD", []string{"FDUSD", "USDC"}},
+		{"Instant SEPA Revolut N26", []string{"N26", "Revolut", "SEPA Instant"}},
+		{"Instant SEPA Wise N26", []string{"N26", "SEPA Instant", "Wise"}},
+		{"Instant SEPA Paypal Friends & Family", []string{"PayPal", "SEPA Instant"}},
+		{"Revolut Instant SEPA Paypal Friends & Family N26", []string{"N26", "PayPal", "Revolut", "SEPA Instant"}},
 
 		// Traditional banks collapse to National Bank
 		{"Deutsche Bank", []string{"National Bank"}},
@@ -73,12 +53,13 @@ func TestCanonicalize(t *testing.T) {
 
 		// Multi-rail providers never become National Bank
 		{"Revolut Bank", []string{"Revolut"}},
-		{"Monzo Bank", []string{"Monzo"}},
 
-		// Unknown preserved verbatim
+		// Unknown preserved verbatim (not in tradeflow seed)
 		{"Western Union", []string{"Western Union"}},
 		{"Sabadell Instant Money", []string{"Sabadell Instant Money"}},
 		{"M-Pesa", []string{"M-Pesa"}},
+		{"Strike", []string{"Strike"}},
+		{"Monero", []string{"Monero"}},
 
 		// False positive guard: bare "instant" must not become SEPA Instant
 		{"instant", []string{"instant"}},
@@ -99,12 +80,12 @@ func TestCanonicalize(t *testing.T) {
 }
 
 func TestCanonicalizeOrderIndependent(t *testing.T) {
-	a := CanonicalizeAll([]string{"Instant SEPA Revolut Strike MBWay"})
-	b := CanonicalizeAll([]string{"Revolut Strike Instant SEPA MBWay"})
+	a := CanonicalizeAll([]string{"Instant SEPA Revolut N26"})
+	b := CanonicalizeAll([]string{"Revolut N26 Instant SEPA"})
 	if !reflect.DeepEqual(a, b) {
 		t.Errorf("order-dependent: %#v vs %#v", a, b)
 	}
-	want := []string{"MB Way", "Revolut", "SEPA Instant", "Strike"}
+	want := []string{"N26", "Revolut", "SEPA Instant"}
 	if !reflect.DeepEqual(a, want) {
 		t.Errorf("CanonicalizeAll = %#v, want %#v", a, want)
 	}
@@ -153,10 +134,7 @@ func TestCategoryOf(t *testing.T) {
 		{"Revolut", CategoryFiatTransmitter},
 		{"SEPA Instant", CategoryBankTransfer},
 		{"National Bank", CategoryBankTransfer},
-		{"Monero", CategoryCrypto},
-		{"Litecoin", CategoryCrypto},
-		{"Other Coins", CategoryCrypto},
-		{"Altcoins", CategoryCrypto},
+		{"Lightning", CategoryCrypto},
 		{"Unknown Thing", CategoryOthers},
 	}
 	for _, tt := range tests {
