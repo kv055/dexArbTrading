@@ -225,3 +225,26 @@ func TestAllHedgesDisabledReturnsNoRoute(t *testing.T) {
 		t.Fatal("expected no route when every hedge is disabled")
 	}
 }
+
+func TestAllowNoHedgeReturnsSpotOnlyWhenHedgesDisabled(t *testing.T) {
+	eng := testEngine(map[string]float64{"kraken": 0.001, "binance": 0.002}, map[string]float64{"kraken": 0.0001, "binance": 0}, nil)
+	eng.cexes = []string{"kraken", "binance"}
+	eng.hedgeOptions = func(_, _, _ float64, _ string) []hedgeCostDetails {
+		return []hedgeCostDetails{{venue: "kraken_futures"}, {venue: "binance_futures"}}
+	}
+	sel, ok := eng.Best(Input{
+		BTCAmount:          1,
+		Direction:          "buy",
+		ExcludedHedgeCEXes: []string{"kraken", "binance"},
+		AllowNoHedge:       true,
+	})
+	if !ok {
+		t.Fatal("expected spot-only route when AllowNoHedge is set")
+	}
+	if sel.CEX != "kraken" {
+		t.Fatalf("CEX = %q, want kraken (cheaper spot-only combo)", sel.CEX)
+	}
+	if sel.HedgeFeeBTC != 0 || sel.Hedge.Venue != "" {
+		t.Fatalf("expected empty hedge on spot-only selection: %+v", sel)
+	}
+}
