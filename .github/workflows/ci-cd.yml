@@ -531,7 +531,10 @@ jobs:
     steps:
       - name: Create or reuse promote PR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN cannot create PRs unless the repo setting
+          # "Allow GitHub Actions to create and approve pull requests" is on;
+          # GH_PAT is the same pattern as bisq-version-bump.
+          GH_TOKEN: ${{ secrets.GH_PAT }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
