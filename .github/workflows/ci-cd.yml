@@ -532,11 +532,12 @@ jobs:
       - name: Create or reuse promote PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -Eeuo pipefail
-          existing=$(gh pr list --base main --head develop --state open --json url --jq '.[0].url // empty')
+          existing=$(gh pr list --repo "$REPO" --base main --head develop --state open --json url --jq '.[0].url // empty')
           if [ -n "$existing" ]; then
             echo "Open promote PR already exists: ${existing}"
             exit 0
@@ -544,6 +545,7 @@ jobs:
 
           body=$(printf 'Develop CI is green for `%s`. Merge this PR into `main` to promote.\n\nActions run: %s' "$SHA" "$RUN_URL")
           url=$(gh pr create \
+            --repo "$REPO" \
             --base main \
             --head develop \
             --title "Promote develop → main" \
