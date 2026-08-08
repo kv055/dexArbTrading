@@ -12,20 +12,19 @@ import (
 // name exactly as stored in the DB (e.g. "Fiat Transmitter"); use
 // CategoryIDFromDisplay to get the API category ID.
 type MethodRow struct {
-	ID              int64
-	Name            string
-	MergeRegex      string // "" when NULL: exact-name matching only
-	AliasList       []string
-	Category        string
-	BankAccountID   *int64
-	AccountID       *int64
-	WalletAddressID *int64
-	IsActive        bool
-	IsLinked        bool
-	Priority        int
-	MatchOrder      int
-	Sources         []string // DEX offer slugs (bisq, robosats, …)
-	Currencies      []string // ISO fiat codes (EUR, USD, …)
+	ID         int64
+	Name       string
+	MergeRegex string // "" when NULL: exact-name matching only
+	AliasList  []string
+	Category   string
+	AccountID  *int64
+	IsActive   bool
+	IsLinked   bool
+	Priority   int
+	MatchOrder int
+	Popularity int
+	Sources    []string // DEX offer slugs (bisq, robosats, …)
+	Currencies []string // ISO fiat codes (EUR, USD, …)
 }
 
 // TextArray scans and writes Postgres TEXT[] values without tying this shared
@@ -68,8 +67,8 @@ func (a *TextArray) scanLiteral(s string) error {
 func LoadRows(ctx context.Context, db *sql.DB) ([]MethodRow, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, name, COALESCE(merge_regex, ''), alias_list, category,
-		       bank_account_id, account_id, wallet_address_id,
-		       is_active, is_linked, priority, match_order,
+		       account_id,
+		       is_active, is_linked, priority, match_order, popularity,
 		       sources, currencies
 		FROM payment_methods
 		ORDER BY match_order, id`)
@@ -83,8 +82,8 @@ func LoadRows(ctx context.Context, db *sql.DB) ([]MethodRow, error) {
 		var r MethodRow
 		var aliases, sources, currencies TextArray
 		if err := rows.Scan(&r.ID, &r.Name, &r.MergeRegex, &aliases, &r.Category,
-			&r.BankAccountID, &r.AccountID, &r.WalletAddressID,
-			&r.IsActive, &r.IsLinked, &r.Priority, &r.MatchOrder,
+			&r.AccountID,
+			&r.IsActive, &r.IsLinked, &r.Priority, &r.MatchOrder, &r.Popularity,
 			&sources, &currencies); err != nil {
 			return nil, fmt.Errorf("scan payment_methods row: %w", err)
 		}
