@@ -208,4 +208,36 @@ if "$deployer" \
   exit 1
 fi
 
+# Prior releases may still list image tags for services that were later
+# removed from image_vars (e.g. TOTP_API_IMAGE_TAG). Deploy must strip those
+# and continue inheriting the remaining per-service tags.
+printf 'TOTP_API_IMAGE_TAG=%s\n' "$frontend_sha" \
+  >>"$fake_repo/.deploy/releases/$frontend_sha/images.env"
+printf 'obsolete-drop\n' >"$fake_repo/release-marker"
+git -C "$fake_repo" add release-marker
+git -C "$fake_repo" commit -qm "drop obsolete image tag"
+obsolete_sha="$(git -C "$fake_repo" rev-parse HEAD)"
+stage="$(make_stage "$obsolete_sha" obsolete-drop)"
+"$deployer" \
+  --repo-dir "$fake_repo" \
+  --sha "$obsolete_sha" \
+  --env-bundle "$stage/env" \
+  --changed-services dexmonitor
+
+[[ "$(cat "$fake_repo/.deployed_sha")" == "$obsolete_sha" ]]
+if grep -q '^TOTP_API_IMAGE_TAG=' \
+  "$fake_repo/.deploy/releases/$frontend_sha/images.env"; then
+  echo "previous image manifest still contains obsolete TOTP_API_IMAGE_TAG" >&2
+  exit 1
+fi
+if grep -q '^TOTP_API_IMAGE_TAG=' \
+  "$fake_repo/.deploy/releases/$obsolete_sha/images.env"; then
+  echo "candidate image manifest still contains obsolete TOTP_API_IMAGE_TAG" >&2
+  exit 1
+fi
+grep -q "^DEXMONITOR_IMAGE_TAG=$obsolete_sha$" \
+  "$fake_repo/.deploy/releases/$obsolete_sha/images.env"
+grep -q "^UNIFIED_SNAPSHOT_IMAGE_TAG=$candidate_sha$" \
+  "$fake_repo/.deploy/releases/$obsolete_sha/images.env"
+
 echo "transactional deployment tests passed"

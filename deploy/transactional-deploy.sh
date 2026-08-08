@@ -282,12 +282,75 @@ load_image_manifest() {
   done <"$manifest"
 }
 
+# Rewrite a prior release's images.env onto the current image_vars set.
+# Drops obsolete keys (e.g. TOTP_API_IMAGE_TAG after totp-api was removed)
+# so a promote can still inherit unchanged service tags. Still fails if any
+# currently required variable is missing — those cannot be invented.
+normalize_image_manifest() {
+  local manifest="$1" line variable value variable_name expected
+  local changed=false
+  declare -A values=()
+
+  [[ -f "$manifest" ]] || {
+    echo "image manifest is missing: $manifest" >&2
+    return 1
+  }
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    [[ "$line" =~ ^([A-Z][A-Z0-9_]*)=([0-9a-f]{40})$ ]] || {
+      echo "invalid image manifest entry: $line" >&2
+      return 1
+    }
+    variable="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    expected=false
+    for variable_name in "${image_vars[@]}"; do
+      if [[ "$variable_name" == "$variable" ]]; then
+        expected=true
+        break
+      fi
+    done
+    if ! "$expected"; then
+      echo "dropping obsolete image manifest variable: $variable"
+      changed=true
+      continue
+    fi
+    [[ -z "${values[$variable]:-}" ]] || {
+      echo "duplicate image manifest variable: $variable" >&2
+      return 1
+    }
+    values["$variable"]="$value"
+  done <"$manifest"
+
+  for variable in "${image_vars[@]}"; do
+    [[ -n "${values[$variable]:-}" ]] || {
+      echo "image manifest is missing $variable" >&2
+      return 1
+    }
+  done
+
+  if ! "$changed"; then
+    validate_image_manifest "$manifest"
+    return
+  fi
+
+  echo "migrating image manifest to current service set"
+  : >"$manifest.tmp"
+  chmod 600 "$manifest.tmp"
+  for variable in "${image_vars[@]}"; do
+    printf '%s=%s\n' "$variable" "${values[$variable]}" >>"$manifest.tmp"
+  done
+  mv -f "$manifest.tmp" "$manifest"
+  validate_image_manifest "$manifest"
+}
+
 ensure_previous_image_manifest() {
   local sha="$1" manifest
   [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 0
   manifest="$release_root/$sha/images.env"
   if [[ -f "$manifest" ]]; then
-    validate_image_manifest "$manifest"
+    normalize_image_manifest "$manifest"
     return
   fi
 
