@@ -113,7 +113,7 @@ jobs:
           AFTER: ${{ github.sha }}
         run: |
           set -Eeuo pipefail
-          ALL_SERVICES="tor,bisq,bisq2,unified-api,unified-snapshot,postgres-backup,dexmonitor,mm-controller,totp-api,fiat-controller"
+          ALL_SERVICES="tor,bisq,bisq2,unified-api,unified-snapshot,postgres-backup,dexmonitor,mm-controller,fiat-controller"
           ALL_MODULES="commons,dexUnifiedApi,dexMmController,dexMonitor,dexFiatController"
           ZERO="0000000000000000000000000000000000000000"
 
@@ -151,7 +151,7 @@ jobs:
                 {service:"postgres-backup", context:".", dockerfile:"dexUnifiedApi/Dockerfile.backup"},
                 {service:"dexmonitor",      context:".", dockerfile:"dexMonitor/Dockerfile"},
                 {service:"mm-controller",   context:"./dexMmController", dockerfile:"dexMmController/Dockerfile"},
-                {service:"totp-api",        context:"./dexFiatController/services/totp-api", dockerfile:"dexFiatController/services/totp-api/Dockerfile"},
+                # totp-api disabled (see docker-compose.yml / services/totp-api/Dockerfile)
                 {service:"fiat-controller",context:"./dexFiatController", dockerfile:"dexFiatController/Dockerfile"}
               ] | map(select(.service as $s | $want | index($s)))
             '
@@ -218,7 +218,7 @@ jobs:
               S=$(add_csv "$S" mm-controller); M=$(add_csv "$M" dexMmController); run_frontend=true
             fi
             if path_changed '^dexFiatController(/|$)'; then
-              S=$(add_csv "$S" fiat-controller); S=$(add_csv "$S" totp-api); M=$(add_csv "$M" dexFiatController); run_frontend=true
+              S=$(add_csv "$S" fiat-controller); M=$(add_csv "$M" dexFiatController); run_frontend=true
             fi
             if $run_frontend; then write_outputs "$S" "$M" "true"; else write_outputs "$S" "$M" "false"; fi
           }
@@ -457,9 +457,7 @@ jobs:
           - service: mm-controller
             context: .
             dockerfile: dexMmController/Dockerfile
-          - service: totp-api
-            context: ./dexFiatController/services/totp-api
-            dockerfile: dexFiatController/services/totp-api/Dockerfile
+          # totp-api disabled (see docker-compose.yml / services/totp-api/Dockerfile)
           - service: fiat-controller
             context: .
             dockerfile: dexFiatController/Dockerfile

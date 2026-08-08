@@ -362,6 +362,20 @@ func NewFixedEstimatorForTesting(exchange, dexExchange string, takerFeeFrac, wit
 	}
 }
 
+// NewHedgelessOnlyEstimatorForTesting models a deploy where every hedge venue is
+// unavailable: hedgefull Best fails, but AllowNoHedge still returns a spot route.
+func NewHedgelessOnlyEstimatorForTesting(exchange, dexExchange string, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC float64) *TradeCostEstimator {
+	est := NewFixedEstimatorForTesting(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
+	spotOnly := fixedCexCost(exchange, takerFeeFrac, withdrawalFeeBTC, nil)
+	est.cexCostOverride = func(in cextrading.Input) (cextrading.Selection, bool) {
+		if !in.AllowNoHedge {
+			return cextrading.Selection{}, false
+		}
+		return spotOnly(in)
+	}
+	return est
+}
+
 func NewFixedEstimatorWithHedgeForTesting(exchange, dexExchange string, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC, hedgeFeeBTC float64) *TradeCostEstimator {
 	est := NewFixedEstimatorForTesting(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
 	hedgeFn := func(in cextrading.Input) cextrading.HedgeBreakdown {
@@ -596,7 +610,8 @@ type CostBreakdown struct {
 	BTCAmount            float64              `json:"btc_amount"`             // trade size used for calculation
 	RouteCEX             string               `json:"route_cex"`              // chosen CEX for the cheapest route
 	RouteDEX             string               `json:"route_dex"`              // DEX of the evaluated offer
-	RouteMethod          string               `json:"route_method"`           // chosen settlement method for the cheapest route
+	RouteMethod          string               `json:"route_method"`           // chosen settlement method (onchain_direct|onchain_hub|onchain_swap)
+	RoutingProfile       string               `json:"routing_profile"`        // Direct_main2main | Hub_main2main | Swap_main2lightning
 	TradeDirection       string               `json:"trade_direction"`        // "bid" (buy CEX→sell DEX) or "ask" (buy DEX→sell CEX)
 	NumNetworkTxs        int                  `json:"num_network_txs"`        // on-chain transactions in the chosen route (1 direct/swap, 2 hub-wallet)
 	EstimatedProfitPct   float64              `json:"estimated_profit_pct"`   // net premium after costs as % of trade
@@ -605,9 +620,11 @@ type CostBreakdown struct {
 	CexTakerFeeBTC       float64              `json:"cex_taker_fee_btc"`      // CEX taker fee in BTC
 	WithdrawalFeePct     float64              `json:"withdrawal_fee_pct"`     // CEX BTC withdrawal fee as % of trade (0 for ask side)
 	WithdrawalFeeBTC     float64              `json:"withdrawal_fee_btc"`     // CEX BTC withdrawal fee in BTC (0 for ask side)
-	NetworkFeePct        float64              `json:"network_fee_pct"`        // settlement network fee as % of trade
-	NetworkFeeBTC        float64              `json:"network_fee_btc"`        // settlement network fee in BTC
-	NetworkFeeMethod     string               `json:"network_fee_method"`     // "onchain" or "lightning"
+	NetworkFeePct        float64              `json:"network_fee_pct"`        // on-chain miner fee as % of trade
+	NetworkFeeBTC        float64              `json:"network_fee_btc"`        // on-chain miner fee in BTC (excludes conversion)
+	RoutingFeeSumPct     float64              `json:"routing_fee_sum_pct"`    // on-chain + conversion as % of trade
+	RoutingFeeSumBTC     float64              `json:"routing_fee_sum_btc"`    // on-chain + conversion in BTC
+	NetworkFeeMethod     string               `json:"network_fee_method"`     // settlement method kind (same as RouteMethod)
 	NetworkFeeTier       string               `json:"network_fee_tier"`       // "economic", "standard", "fast", "express", "lightning"
 	NetworkFeeConfidence float64              `json:"network_fee_confidence"` // 0–1.0 estimate reliability
 	NetworkFeeDetail     *BTCNetworkFeeDetail `json:"network_fee_detail"`     // full onchain calc context; nil for Lightning
@@ -722,6 +739,10 @@ func (e *TradeCostEstimator) BreakdownWithConfirmations(btcAmount float64, dexEx
 // + hedge, chosen by the cextrading engine honoring excludedCEXes/coupledHedge), and
 // the static DEX platform fee.
 func (e *TradeCostEstimator) breakdown(btcAmount float64, refPriceEUR float64, dexExchange string, direction string, requiredConfirmations int, feeTier string, excludedSpotCEXes, excludedHedgeCEXes []string, coupledHedge bool, realDepositPct *float64) CostBreakdown {
+	return e.breakdownWithOptions(btcAmount, refPriceEUR, dexExchange, direction, requiredConfirmations, feeTier, excludedSpotCEXes, excludedHedgeCEXes, coupledHedge, realDepositPct, false)
+}
+
+func (e *TradeCostEstimator) breakdownWithOptions(btcAmount float64, refPriceEUR float64, dexExchange string, direction string, requiredConfirmations int, feeTier string, excludedSpotCEXes, excludedHedgeCEXes []string, coupledHedge bool, realDepositPct *float64, allowNoHedge bool) CostBreakdown {
 	if btcAmount <= 0 {
 		return CostBreakdown{}
 	}
@@ -746,6 +767,7 @@ func (e *TradeCostEstimator) breakdown(btcAmount float64, refPriceEUR float64, d
 		ExcludedSpotCEXes:  excludedSpotCEXes,
 		ExcludedHedgeCEXes: excludedHedgeCEXes,
 		CoupledHedge:       coupledHedge,
+		AllowNoHedge:       allowNoHedge,
 	})
 	if !ok {
 		return CostBreakdown{}
@@ -766,12 +788,14 @@ func (e *TradeCostEstimator) breakdown(btcAmount float64, refPriceEUR float64, d
 
 	totalBTC := takerBTC + withdrawalFee + networkFeeBTC + hedgeFeeBTC + dexBTC + conversionBTC
 	totalPct := totalBTC / btcAmount * 100
+	routingSumBTC := round8(networkFeeBTC + conversionBTC)
 
 	return CostBreakdown{
 		BTCAmount:            round8(btcAmount),
 		RouteCEX:             sel.CEX,
 		RouteDEX:             dexExchange,
 		RouteMethod:          string(cost.Method),
+		RoutingProfile:       ProfileForMethod(string(cost.Method)),
 		TradeDirection:       tradeDir,
 		NumNetworkTxs:        cost.NumOnchainTxs,
 		CexTakerFeePct:       pct(takerBTC),
@@ -780,6 +804,8 @@ func (e *TradeCostEstimator) breakdown(btcAmount float64, refPriceEUR float64, d
 		WithdrawalFeeBTC:     round8(withdrawalFee),
 		NetworkFeePct:        pct(networkFeeBTC),
 		NetworkFeeBTC:        round8(networkFeeBTC),
+		RoutingFeeSumPct:     pct(routingSumBTC),
+		RoutingFeeSumBTC:     routingSumBTC,
 		NetworkFeeMethod:     string(cost.Method),
 		NetworkFeeTier:       cost.Tier,
 		NetworkFeeConfidence: round4(cost.Confidence),
@@ -894,11 +920,14 @@ func DeriveHedgelessDoubleCollateral(bd CostBreakdown) CostBreakdown {
 	// replenishment: two on-chain transactions rather than one.
 	if strings.EqualFold(strings.TrimSpace(bd.RouteDEX), "bisq") && bd.TradeDirection == "bid" && bd.NumNetworkTxs == 1 {
 		out.RouteMethod = "onchain_hub"
+		out.RoutingProfile = RoutingProfileHubMain2Main
 		out.NumNetworkTxs = 2
 		out.NetworkFeeBTC = round8(bd.NetworkFeeBTC * 2)
 		out.NetworkFeePct = round4(out.NetworkFeeBTC / bd.BTCAmount * 100)
 		out.TotalCostBTC = round8(out.TotalCostBTC + bd.NetworkFeeBTC)
 	}
+	out.RoutingFeeSumBTC = RoutingFeeSumBTC(out)
+	out.RoutingFeeSumPct = round4(out.RoutingFeeSumBTC / bd.BTCAmount * 100)
 	if out.TotalCostBTC < 0 {
 		out.TotalCostBTC = 0
 	}
@@ -1017,6 +1046,15 @@ func (o *TradeRouteOptimizer) BestBreakdownFullWithExclusions(btcAmount float64,
 	// CEX (with its taker/withdrawal/hedge combo) is chosen inside breakdown via the
 	// cextrading engine.
 	return o.est.breakdown(btcAmount, refPriceEUR, dexExchange, direction, requiredConfirmations, feeTier, excludedSpotCEXes, excludedHedgeCEXes, coupledHedge, realDepositPct)
+}
+
+// BestBreakdownSpotOnlyWithExclusions prices the cheapest spot (+ withdrawal) route
+// even when every hedge venue is excluded. Callers use this for hedgeless mode.
+func (o *TradeRouteOptimizer) BestBreakdownSpotOnlyWithExclusions(btcAmount float64, refPriceEUR float64, dexExchange string, direction string, requiredConfirmations int, excludedSpotCEXes, excludedHedgeCEXes []string, feeTier string, coupledHedge bool, realDepositPct *float64) CostBreakdown {
+	if o == nil || o.est == nil || btcAmount <= 0 {
+		return CostBreakdown{}
+	}
+	return o.est.breakdownWithOptions(btcAmount, refPriceEUR, dexExchange, direction, requiredConfirmations, feeTier, excludedSpotCEXes, excludedHedgeCEXes, coupledHedge, realDepositPct, true)
 }
 
 func (o *TradeRouteOptimizer) ManualRouteOptionsForTrade(btcAmount float64, refPriceEUR float64, dexExchange string, direction string, requiredConfirmations int, excludedCEXes []string, feeTier string) ManualRouteOptions {

@@ -7,7 +7,8 @@ import (
 
 // SeedRows converts the built-in provider data (providers.go, banks.go,
 // crypto.go) into payment_methods table rows. It is used both to seed the
-// table on boot (dexUnifiedApi's SeedPaymentMethods, ON CONFLICT DO NOTHING)
+// table on boot (dexUnifiedApi's SeedPaymentMethods; skips names that already
+// exist or appear as aliases so operator degradations survive restarts)
 // and as the in-process fallback registry before the table has been loaded.
 //
 // Each provider's normalized aliases become one case-insensitive anchored

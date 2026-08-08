@@ -18,6 +18,9 @@ type Input struct {
 	ExcludedSpotCEXes  []string
 	ExcludedHedgeCEXes []string
 	CoupledHedge       bool // pin the hedge venue to the spot CEX where a pairing exists
+	// AllowNoHedge lets Best return a spot+withdrawal-only selection when every
+	// hedge venue is excluded. Used for hedgeless double-collateral pricing.
+	AllowNoHedge bool
 }
 
 // Selection is the cheapest CEX fee combo for an Input. BTC fields are raw
@@ -195,7 +198,10 @@ func (e *Engine) Best(in Input) (Selection, bool) {
 		}
 		hc, hedgeFound := e.bestEnabledHedge(in, cex, side, excludedHedge)
 		if !hedgeFound {
-			continue
+			if !in.AllowNoHedge {
+				continue
+			}
+			hc = hedgeCostDetails{}
 		}
 		takerBTC := in.BTCAmount * takerFrac
 		comboBTC := takerBTC + withdrawalBTC + hc.feeBTC
