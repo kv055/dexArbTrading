@@ -1,3 +1,5 @@
+# develop: test + build (validate images) + open develop→main PR
+# main:    test + build (push images to GHCR) + pre-deploy + deploy to VPS
 name: CI/CD
 
 on:
@@ -512,6 +514,46 @@ jobs:
             echo ""
             echo "_Run: [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})_"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  open-promote-pr:
+    name: Open develop → main PR
+    needs: [detect-changes, test-gate, build-and-push]
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/develop' &&
+      needs.test-gate.result == 'success' &&
+      (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Create or reuse promote PR
+        env:
+          # GITHUB_TOKEN cannot create PRs unless the repo setting
+          # "Allow GitHub Actions to create and approve pull requests" is on;
+          # GH_PAT is the same pattern as bisq-version-bump.
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -Eeuo pipefail
+          existing=$(gh pr list --repo "$REPO" --base main --head develop --state open --json url --jq '.[0].url // empty')
+          if [ -n "$existing" ]; then
+            echo "Open promote PR already exists: ${existing}"
+            exit 0
+          fi
+
+          body=$(printf 'Develop CI is green for `%s`. Merge this PR into `main` to promote.\n\nActions run: %s' "$SHA" "$RUN_URL")
+          url=$(gh pr create \
+            --repo "$REPO" \
+            --base main \
+            --head develop \
+            --title "Promote develop → main" \
+            --body "$body")
+          echo "Opened promote PR: ${url}"
 
   pre-deploy:
     name: Pre-deploy checks
