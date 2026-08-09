@@ -57,7 +57,7 @@ func (s *Store) Resolve(exchange string) (Credentials, error) {
 		       COALESCE(api_keys.passphrase, '')
 		FROM api_keys
 		JOIN accounts ON accounts.id = api_keys.account_id
-		WHERE LOWER(TRIM(accounts.provider)) = LOWER(TRIM($1))
+		WHERE LOWER(TRIM(accounts.provider::text)) = LOWER(TRIM($1))
 		  AND api_keys.is_active = TRUE
 		ORDER BY api_keys.updated_at DESC, api_keys.id DESC
 	`, provider)

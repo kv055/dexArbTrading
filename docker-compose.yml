@@ -429,7 +429,6 @@ services:
       # POSTGRES_HOST/PORT/DB/USER/PASSWORD (see resolveDatabaseURL in main.go),
       # so the bridge-network host is set here without re-stating credentials.
       - POSTGRES_HOST=postgres
-      - OPENCLAW_URL=
       # Internal traffic hits unified-api directly on the bridge network.
       # The /internal/ws/live_offers route is secret-gated (X-Internal-Secret),
       # not session-cookie-gated like the browser /ws/live_offers path — the
