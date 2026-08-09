@@ -27,6 +27,10 @@ type TradeChat interface {
 const defaultRelayPoll = 15 * time.Second
 const defaultRelayTTL = 48 * time.Hour
 
+// AutomatedPaymentRequestMarker identifies payment-details requests generated
+// by the trading application. Relays must never forward these as peer messages.
+const AutomatedPaymentRequestMarker = "[dexmm-payment-request:v1]"
+
 var relayHeader = regexp.MustCompile(`^\[([^\]]+)\s+#([^\]]+)\]`)
 
 // ActiveChat tracks one open trade chat relayed to Telegram.
@@ -35,6 +39,7 @@ type ActiveChat struct {
 	OrderID    string
 	Chat       TradeChat
 	Seen       map[string]struct{}
+	Outbound   map[string]struct{}
 	Registered time.Time
 }
 
@@ -48,9 +53,9 @@ func sessionKey(exchange, orderID string) string {
 // The outbound Telegram client is mutable at runtime via SetClient so the relay
 // picks up a hot-reloaded bot token/chat ID without a restart.
 type ChatRelay struct {
-	tg    *Client
-	tgMu  sync.RWMutex
-	mu    sync.RWMutex
+	tg     *Client
+	tgMu   sync.RWMutex
+	mu     sync.RWMutex
 	active map[string]*ActiveChat
 
 	pollInterval time.Duration
@@ -96,7 +101,9 @@ func (r *ChatRelay) WithPollInterval(d time.Duration) *ChatRelay {
 }
 
 // Register starts relaying chat for exchange/orderID using the given TradeChat transport.
-func (r *ChatRelay) Register(exchange, orderID string, chat TradeChat) {
+// knownOutbound records messages sent by this application before registration so
+// they are not forwarded back to Telegram as counterparty messages.
+func (r *ChatRelay) Register(exchange, orderID string, chat TradeChat, knownOutbound ...string) {
 	exchange = strings.TrimSpace(exchange)
 	orderID = strings.TrimSpace(orderID)
 	if exchange == "" || orderID == "" || chat == nil {
@@ -107,15 +114,19 @@ func (r *ChatRelay) Register(exchange, orderID string, chat TradeChat) {
 	defer r.mu.Unlock()
 	if existing, ok := r.active[key]; ok {
 		existing.Chat = chat
+		r.rememberOutboundLocked(existing, knownOutbound...)
 		return
 	}
-	r.active[key] = &ActiveChat{
+	active := &ActiveChat{
 		Exchange:   exchange,
 		OrderID:    orderID,
 		Chat:       chat,
 		Seen:       make(map[string]struct{}),
+		Outbound:   make(map[string]struct{}),
 		Registered: time.Now().UTC(),
 	}
+	r.rememberOutboundLocked(active, knownOutbound...)
+	r.active[key] = active
 	r.log.Info("telegram relay: registered chat", "exchange", exchange, "order_id", orderID)
 }
 
@@ -180,7 +191,10 @@ func (r *ChatRelay) pollChat(ctx context.Context, ac *ActiveChat) {
 	}
 	tg := r.client()
 	for _, m := range msgs {
-		if m.Outbound || strings.TrimSpace(m.Text) == "" {
+		if m.Outbound || strings.TrimSpace(m.Text) == "" || strings.Contains(m.Text, AutomatedPaymentRequestMarker) {
+			continue
+		}
+		if r.consumeOutbound(ac, m.Text) {
 			continue
 		}
 		fp := messageFingerprint(m)
@@ -218,6 +232,38 @@ func (r *ChatRelay) markSeen(ac *ActiveChat, fp string) {
 	ac.Seen[fp] = struct{}{}
 }
 
+func outboundKey(text string) string {
+	return strings.TrimSpace(text)
+}
+
+func (r *ChatRelay) rememberOutboundLocked(ac *ActiveChat, texts ...string) {
+	if ac.Outbound == nil {
+		ac.Outbound = make(map[string]struct{})
+	}
+	for _, text := range texts {
+		if key := outboundKey(text); key != "" {
+			ac.Outbound[key] = struct{}{}
+		}
+	}
+}
+
+func (r *ChatRelay) rememberOutbound(ac *ActiveChat, texts ...string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.rememberOutboundLocked(ac, texts...)
+}
+
+func (r *ChatRelay) consumeOutbound(ac *ActiveChat, text string) bool {
+	key := outboundKey(text)
+	if key == "" {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := ac.Outbound[key]
+	return ok
+}
+
 // FormatRelayMessage builds the Telegram body for an inbound trade-chat message.
 func FormatRelayMessage(exchange, orderID, sender, text string) string {
 	sender = strings.TrimSpace(sender)
@@ -243,6 +289,7 @@ func (r *ChatRelay) Reply(ctx context.Context, exchange, orderID, text string) e
 	if err := ac.Chat.SendMessage(ctx, ac.OrderID, text); err != nil {
 		return err
 	}
+	r.rememberOutbound(ac, text)
 	r.markSeen(ac, messageFingerprint(Message{Sender: "operator", Text: text, Outbound: true}))
 	return nil
 }
