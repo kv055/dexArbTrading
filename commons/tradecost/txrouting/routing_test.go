@@ -35,7 +35,7 @@ func TestChannelOpenAndSwapPerPaymentCosts(t *testing.T) {
 	assertFloat(t, p.swapPerPaymentCostSats(1_000_000), 4150)
 }
 
-func TestCrossoverSteadyStateAndStrategyFlip(t *testing.T) {
+func TestCrossoverIsInformationalAndStrategyStaysSubmarineSwap(t *testing.T) {
 	p := crossoverParams()
 	xo, ok := p.crossoverSteadyStateSats()
 	if !ok {
@@ -49,10 +49,10 @@ func TestCrossoverSteadyStateAndStrategyFlip(t *testing.T) {
 		t.Fatalf("below crossover strategy = %q, want submarine_swap", below.Strategy)
 	}
 	above := p.conversionBreakdown(0.03) // 3,000,000 sats
-	if above.Strategy != StrategyChannelOpen {
-		t.Fatalf("above crossover strategy = %q, want channel_open", above.Strategy)
+	if above.Strategy != StrategySubmarineSwap {
+		t.Fatalf("above crossover strategy = %q, want submarine_swap", above.Strategy)
 	}
-	assertFloat(t, above.FeeSumBTC, round8(p.channelOpenCostSats()/1e8))
+	assertFloat(t, above.FeeSumBTC, round8(p.swapPerPaymentCostSats(3_000_000)/1e8))
 }
 
 func TestParseBoltzMinerFeesNumberAndObject(t *testing.T) {
