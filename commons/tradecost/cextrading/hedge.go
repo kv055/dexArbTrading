@@ -203,7 +203,7 @@ func estimateBestHedgeCost(cache *cachedHedgeInput, cex string, btcAmount float6
 	best := hedgeCostDetails{}
 	found := false
 	for _, details := range options {
-		if !found || details.feeBTC < best.feeBTC {
+		if !found || details.feeBTC < best.feeBTC || (details.feeBTC == best.feeBTC && details.venue < best.venue) {
 			best = details
 			found = true
 		}

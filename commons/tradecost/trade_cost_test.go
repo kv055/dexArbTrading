@@ -441,14 +441,14 @@ func TestAbortCostFromBreakdownAskSideOnlyIncludesTwoBTCTransfers(t *testing.T) 
 	}
 }
 
-func TestTradeCostEstimatorAskSideLongHedgeClampsFundingCredit(t *testing.T) {
+func TestTradeCostEstimatorDoesNotProjectFundingWithoutEventDuration(t *testing.T) {
 	est := NewFixedEstimatorWithHedgeRatesForTesting("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.001, 0.002, 0.003)
 
 	bid := est.Breakdown(0.1, "bisq", "bid")
 	ask := est.Breakdown(0.1, "bisq", "ask")
 
-	assertFloat(t, bid.Hedge.FundingFeeBTC, 0.0003)
-	assertFloat(t, bid.Hedge.FeeSumBTC, 0.0006)
+	assertFloat(t, bid.Hedge.FundingFeeBTC, 0)
+	assertFloat(t, bid.Hedge.FeeSumBTC, 0.0003)
 	assertFloat(t, ask.Hedge.FundingFeeBTC, 0)
 	assertFloat(t, ask.Hedge.FeeSumBTC, 0.0003)
 	if ask.Hedge.Side != "long" {

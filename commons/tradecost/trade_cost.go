@@ -446,7 +446,10 @@ func NewFixedEstimatorWithHedgeRatesForTesting(exchange, dexExchange string, tak
 	est := NewFixedEstimatorForTesting(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
 	hedgeFn := func(in cextrading.Input) cextrading.HedgeBreakdown {
 		side := hedgeSideForTestDirection(in.Direction)
-		fundingCostRate := fundingRate
+		// Model the supplied funding rate as an eight-hour venue interval, just
+		// like production inputs. A zero holding duration therefore has no
+		// projected funding charge.
+		fundingCostRate := fundingRate * in.TransferMinutes / (8 * 60)
 		if side == "long" {
 			fundingCostRate = -fundingRate
 		}
@@ -798,10 +801,10 @@ func (e *TradeCostEstimator) breakdownWithOptions(btcAmount float64, refPriceEUR
 
 	networkFeeBTC := cost.NetworkFeeBTC
 	conversionBTC := cost.Conversion.FeeSumBTC
+	// Confirmation estimates are not a hedge holding-period model. Until the
+	// execution lifecycle supplies event timestamps, funding is deliberately
+	// unavailable/zero while open and close fees remain included.
 	transferMinutes := 0.0
-	if cost.Detail != nil && cost.Detail.SelectedFullConfirmationMinutes > 0 {
-		transferMinutes = float64(cost.Detail.SelectedFullConfirmationMinutes * cost.NumOnchainTxs)
-	}
 
 	// Pick the cheapest CEX fee combo. Ask side: BTC is deposited to the CEX, so no
 	// withdrawal fee (the cextrading engine side-gates it); bid side withdraws.
@@ -817,6 +820,11 @@ func (e *TradeCostEstimator) breakdownWithOptions(btcAmount float64, refPriceEUR
 	})
 	if !ok {
 		return CostBreakdown{}
+	}
+	// Retain the network arrival estimate as display metadata only. It was not
+	// supplied to hedge pricing and therefore cannot create a funding charge.
+	if cost.Detail != nil {
+		sel.Hedge.TransferMinutes = cost.Detail.SelectedFullConfirmationMinutes * cost.NumOnchainTxs
 	}
 
 	isBid := direction != "ask"

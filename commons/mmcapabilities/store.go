@@ -21,6 +21,7 @@ func (s *Store) loadAccounts(ctx context.Context) (map[string]accountResult, err
 		  ON k.account_id = a.id
 		 AND k.is_active = TRUE
 		WHERE a.category = 'CEX'
+		  AND a.is_active = TRUE
 		ORDER BY a.provider, a.id, k.id
 	`)
 	if err != nil {

@@ -224,7 +224,7 @@ func (e *Engine) Best(in Input) (Selection, bool) {
 		}
 		takerBTC := in.BTCAmount * takerFrac
 		comboBTC := takerBTC + withdrawalBTC + hc.feeBTC
-		if !found || comboBTC < best.ComboBTC {
+		if !found || comboBTC < best.ComboBTC || (comboBTC == best.ComboBTC && cex < best.CEX) {
 			best = Selection{
 				CEX:              cex,
 				TakerFeeFrac:     takerFrac,
@@ -286,7 +286,7 @@ func (e *Engine) bestEnabledHedge(in Input, spotCEX, side string, excluded map[s
 		if _, disabled := excluded[hedgeExchange(candidate.venue)]; disabled {
 			continue
 		}
-		if !found || candidate.feeBTC < best.feeBTC {
+		if !found || candidate.feeBTC < best.feeBTC || (candidate.feeBTC == best.feeBTC && candidate.venue < best.venue) {
 			best = candidate
 			found = true
 		}
