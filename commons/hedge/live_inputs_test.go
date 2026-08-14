@@ -2,6 +2,9 @@ package hedge
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -37,6 +40,13 @@ func TestFetchKrakenPerpInputs(t *testing.T) {
 		case "/derivatives/api/v3/feeschedules/volumes":
 			if req.Header.Get("APIKey") == "" || req.Header.Get("Authent") == "" {
 				t.Fatalf("expected Kraken auth headers")
+			}
+			nonce := req.Header.Get("Nonce")
+			hash := sha256.Sum256([]byte(nonce + "/api/v3/feeschedules/volumes"))
+			mac := hmac.New(sha512.New, []byte("supersecret"))
+			mac.Write(hash[:])
+			if got, want := req.Header.Get("Authent"), base64.StdEncoding.EncodeToString(mac.Sum(nil)); got != want {
+				t.Fatalf("Authent = %q, want signature for /api/v3/feeschedules/volumes", got)
 			}
 			return jsonResponse(t, http.StatusOK, map[string]any{
 				"result": "success",

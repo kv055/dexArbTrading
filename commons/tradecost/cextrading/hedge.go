@@ -1,6 +1,7 @@
 package cextrading
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sync"
@@ -19,21 +20,23 @@ func round2(v float64) float64 { return math.Round(v*1e2) / 1e2 }
 // ---------------------------------------------------------------------------
 
 type cachedHedgeInput struct {
-	mu       sync.Mutex
-	values   map[hedge.Venue]hedge.LivePerpInputs
-	fetched  map[hedge.Venue]time.Time
-	inflight map[hedge.Venue]chan struct{}
-	ttl      time.Duration
-	provider exchangecredentials.Provider
+	mu        sync.Mutex
+	values    map[hedge.Venue]hedge.LivePerpInputs
+	fetched   map[hedge.Venue]time.Time
+	inflight  map[hedge.Venue]chan struct{}
+	ttl       time.Duration
+	provider  exchangecredentials.Provider
+	feeReader *persistedFeeReader
 }
 
-func newCachedHedgeInput(ttl time.Duration, provider exchangecredentials.Provider) *cachedHedgeInput {
+func newCachedHedgeInput(ttl time.Duration, provider exchangecredentials.Provider, feeReader *persistedFeeReader) *cachedHedgeInput {
 	return &cachedHedgeInput{
-		values:   map[hedge.Venue]hedge.LivePerpInputs{},
-		fetched:  map[hedge.Venue]time.Time{},
-		inflight: map[hedge.Venue]chan struct{}{},
-		ttl:      ttl,
-		provider: provider,
+		values:    map[hedge.Venue]hedge.LivePerpInputs{},
+		fetched:   map[hedge.Venue]time.Time{},
+		inflight:  map[hedge.Venue]chan struct{}{},
+		ttl:       ttl,
+		provider:  provider,
+		feeReader: feeReader,
 	}
 }
 
@@ -63,7 +66,24 @@ func (c *cachedHedgeInput) get(venue hedge.Venue) (hedge.LivePerpInputs, error) 
 		inputs hedge.LivePerpInputs
 		err    error
 	)
-	if c.provider == nil {
+	if c.feeReader != nil {
+		fees, feeErr := c.feeReader.get(context.Background(), hedgeExchangeForVenue(venue))
+		if feeErr != nil {
+			err = feeErr
+		} else if !fees.hedgeAvailable(time.Now()) {
+			err = fmt.Errorf("persisted hedge fees missing or stale for %s", venue)
+		} else {
+			profile, profileErr := hedge.DefaultVenueProfile(venue)
+			if profileErr != nil {
+				err = profileErr
+			} else {
+				inputs = hedge.LivePerpInputs{Venue: string(venue), Instrument: profile.Instrument,
+					OpenFeeRate: fees.FuturesOpenTakerRate.Float64, CloseFeeRate: fees.FuturesCloseTakerRate.Float64,
+					FundingRate: fees.FuturesFundingRate.Float64, FundingInterval: time.Duration(fees.FundingIntervalSeconds.Int64) * time.Second,
+					FetchedAt: fees.FetchedAt.Time}
+			}
+		}
+	} else if c.provider == nil {
 		err = fmt.Errorf("database credential provider is not configured")
 	} else {
 		credentials, credentialsErr := c.provider(exchangeForHedgeVenue(venue))
@@ -73,7 +93,7 @@ func (c *cachedHedgeInput) get(venue hedge.Venue) (hedge.LivePerpInputs, error) 
 			inputs, err = hedge.FetchDefaultVenueInputs(venue, credentials)
 		}
 	}
-	if err != nil {
+	if err != nil && c.feeReader == nil {
 		inputs, err = hedge.FallbackVenueInputs(venue)
 	}
 
@@ -86,6 +106,19 @@ func (c *cachedHedgeInput) get(venue hedge.Venue) (hedge.LivePerpInputs, error) 
 	delete(c.inflight, venue)
 	c.mu.Unlock()
 	return inputs, err
+}
+
+func hedgeExchangeForVenue(venue hedge.Venue) string {
+	switch venue {
+	case hedge.VenueKrakenFutures:
+		return "kraken"
+	case hedge.VenueCoinbaseFutures:
+		return "coinbase"
+	case hedge.VenueBinanceFutures:
+		return "binance"
+	default:
+		return string(venue)
+	}
 }
 
 func exchangeForHedgeVenue(venue hedge.Venue) string {

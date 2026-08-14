@@ -1,9 +1,11 @@
 package cextrading
 
 import (
+	"context"
+	"database/sql"
 	"strings"
+	"time"
 
-	"commons/exchangecredentials"
 	"commons/hedge"
 )
 
@@ -71,47 +73,44 @@ type HedgeCostOption struct {
 // Engine ranks the active CEXes by their fee combo. The fee sources are function
 // fields so the optimizer can be unit-tested offline with deterministic inputs.
 type Engine struct {
-	cexes        []string
-	takerFrac    func(cex string) float64
-	withdrawBTC  func(cex string) float64
-	hedgeCost    func(cex string, btcAmount, refPriceEUR, transferMinutes float64, coupled bool, side string) hedgeCostDetails
-	hedgeOptions func(btcAmount, refPriceEUR, transferMinutes float64, side string) []hedgeCostDetails
+	cexes         []string
+	takerFrac     func(cex string) float64
+	withdrawBTC   func(cex string) float64
+	spotAvailable func(cex string, needsWithdrawal bool) bool
+	hedgeCost     func(cex string, btcAmount, refPriceEUR, transferMinutes float64, coupled bool, side string) hedgeCostDetails
+	hedgeOptions  func(btcAmount, refPriceEUR, transferMinutes float64, side string) []hedgeCostDetails
 }
 
-type cexFees struct {
-	taker      *takerFeeFetcher
-	withdrawal *withdrawalFeeFetcher
-}
-
-// NewEngine builds an Engine backed by database-credentialed live CEX fee
-// fetchers (with static fallbacks) and the perp hedge estimator.
-func NewEngine(providers ...exchangecredentials.Provider) *Engine {
-	var provider exchangecredentials.Provider
-	if len(providers) > 0 {
-		provider = providers[0]
-	}
+// NewEngine builds an Engine backed exclusively by persisted, exchange-derived
+// fee snapshots. A missing or stale snapshot makes that provider unavailable.
+func NewEngine(db *sql.DB) *Engine {
 	cexes := SupportedCEXes()
-	fetchers := make(map[string]*cexFees, len(cexes))
-	for _, c := range cexes {
-		fetchers[c] = &cexFees{
-			taker:      newTakerFeeFetcher(c, provider),
-			withdrawal: newWithdrawalFeeFetcher(c, provider),
-		}
+	reader := persistedFeeReader{db: db}
+	load := func(cex string) (PersistedFees, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return reader.get(ctx, cex)
 	}
-	cache := newCachedHedgeInput(feeTTL, provider)
+	cache := newCachedHedgeInput(feeTTL, nil, &reader)
 	return &Engine{
 		cexes: cexes,
 		takerFrac: func(cex string) float64 {
-			if f := fetchers[cex]; f != nil {
-				return f.taker.get()
+			fees, err := load(cex)
+			if err != nil || !fees.SpotTakerFeeRate.Valid {
+				return 0
 			}
-			return takerFeeFallbacks[cex]
+			return fees.SpotTakerFeeRate.Float64
 		},
 		withdrawBTC: func(cex string) float64 {
-			if f := fetchers[cex]; f != nil {
-				return f.withdrawal.get()
+			fees, err := load(cex)
+			if err != nil || !fees.BTCWithdrawalFeeBTC.Valid {
+				return 0
 			}
-			return withdrawalFallbacks[cex]
+			return fees.BTCWithdrawalFeeBTC.Float64
+		},
+		spotAvailable: func(cex string, needsWithdrawal bool) bool {
+			fees, err := load(cex)
+			return err == nil && fees.spotAvailable(time.Now(), needsWithdrawal)
 		},
 		hedgeCost: func(cex string, btcAmount, refPriceEUR, transferMinutes float64, coupled bool, side string) hedgeCostDetails {
 			return estimateBestHedgeCost(cache, cex, btcAmount, refPriceEUR, transferMinutes, coupled, side)
@@ -133,10 +132,17 @@ func (e *Engine) ManualOptions(in Input) ManualRouteOptions {
 	isBid := in.Direction != "sell"
 	for _, cex := range e.cexes {
 		_, disabled := excludedSpot[cex]
+		feesUnavailable := e.spotAvailable != nil && !e.spotAvailable(cex, isBid)
+		if feesUnavailable {
+			disabled = true
+		}
 		takerBTC := in.BTCAmount * e.takerFrac(cex)
 		spot := SpotTakerFeeOption{Exchange: cex, FeePct: round4(takerBTC / in.BTCAmount * 100), FeeBTC: round8(takerBTC), Disabled: disabled}
 		if disabled {
 			spot.DisabledReason = "CEX excluded in dashboard settings"
+			if feesUnavailable {
+				spot.DisabledReason = "CEX fee data is missing or stale"
+			}
 		}
 		options.SpotTakerFees = append(options.SpotTakerFees, spot)
 		withdrawBTC := 0.0
@@ -189,6 +195,9 @@ func (e *Engine) Best(in Input) (Selection, bool) {
 	found := false
 	for _, cex := range e.cexes {
 		if _, skip := excludedSpot[cex]; skip {
+			continue
+		}
+		if e.spotAvailable != nil && !e.spotAvailable(cex, isBid) {
 			continue
 		}
 		takerFrac := e.takerFrac(cex)

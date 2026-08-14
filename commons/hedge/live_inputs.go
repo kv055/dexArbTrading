@@ -183,12 +183,15 @@ func fetchKrakenFeeSchedules() (krakenFeeSchedulesResponse, error) {
 }
 
 func fetchKrakenFeeScheduleVolumes(apiKey, apiSecret string) (map[string]float64, error) {
-	path := "/derivatives/api/v3/feeschedules/volumes"
-	req, err := http.NewRequest(http.MethodGet, krakenFuturesAPIBase+path, nil)
+	const requestPath = "/derivatives/api/v3/feeschedules/volumes"
+	// Kraken Futures signs the API endpoint path, which omits the
+	// "/derivatives" URL prefix (for example, /api/v3/orderbook).
+	const signingPath = "/api/v3/feeschedules/volumes"
+	req, err := http.NewRequest(http.MethodGet, krakenFuturesAPIBase+requestPath, nil)
 	if err != nil {
 		return nil, err
 	}
-	signKrakenFuturesRequest(req, apiKey, apiSecret, path, "")
+	signKrakenFuturesRequest(req, apiKey, apiSecret, signingPath, "")
 
 	var out krakenFeeScheduleVolumesResponse
 	if err := doJSON(req, &out); err != nil {

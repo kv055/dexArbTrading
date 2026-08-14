@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"commons/exchangecredentials"
@@ -31,42 +32,33 @@ import (
 // feeTTL is the single refresh interval for all CEX fee components (taker + withdrawal).
 const feeTTL = 30 * time.Minute
 
-// withdrawalFallbacks are the static BTC on-chain withdrawal fees used when the live
-// exchange API is unavailable (no credentials, network error). Every routing method
-// withdraws on-chain, so a single per-CEX value suffices.
-var withdrawalFallbacks = map[string]float64{
-	"kraken":   0.00015,
-	"binance":  0.0000046,
-	"coinbase": 0.0,
-	"bitstamp": 0.0003,
-}
-
-// takerFeeFallbacks are the static taker fees (as fraction) used when the live
-// exchange API is unavailable or unsupported (e.g. Coinbase).
-var takerFeeFallbacks = map[string]float64{
-	"kraken":   0.0040,
-	"binance":  0.0010,
-	"coinbase": 0.0060,
-	"bitstamp": 0.0050,
-}
-
 // SupportedCEXes returns the canonical list of CEXes the cost model knows about.
 func SupportedCEXes() []string {
 	return mmcapabilities.CostSupportedProviderIDs()
 }
 
-// TakerFeeFallback returns the static taker fee fraction for an exchange.
-func TakerFeeFallback(exchange string) float64 {
-	return takerFeeFallbacks[exchange]
-}
-
-// WithdrawalFallback returns the static on-chain withdrawal fee (BTC) for an exchange.
-func WithdrawalFallback(exchange string) float64 {
-	return withdrawalFallbacks[exchange]
-}
-
 // httpClient is shared across all clearnet CEX fetchers.
 var httpClient = &http.Client{Timeout: 10 * time.Second}
+
+// Kraken rejects every nonce not strictly greater than the last one seen for a
+// key. The account-health client already uses microseconds, so millisecond
+// timestamps here were always behind it. Keep this process-local stream
+// monotonic as well as high resolution.
+var krakenNonce atomic.Int64
+
+func nextKrakenNonce() string {
+	now := time.Now().UnixMicro()
+	for {
+		previous := krakenNonce.Load()
+		next := previous + 1
+		if now > next {
+			next = now
+		}
+		if krakenNonce.CompareAndSwap(previous, next) {
+			return strconv.FormatInt(next, 10)
+		}
+	}
+}
 
 // ---------------------------------------------------------------------------
 // cachedFee — generic lazy-refresh cache for a single float64 fee value
@@ -168,12 +160,11 @@ func newWithdrawalFeeFetcher(exchange string, provider exchangecredentials.Provi
 // get returns the CEX's on-chain BTC withdrawal fee. Every routing method withdraws
 // on-chain, so there is a single fee per exchange.
 func (f *withdrawalFeeFetcher) get() float64 {
-	fallback := withdrawalFallbacks[f.exchange]
 	if f.cache == nil {
-		return fallback
+		return 0
 	}
 	label := fmt.Sprintf("%s onchain withdrawal fee BTC", f.exchange)
-	return f.cache.get(fallback, f.fetchLive, label)
+	return f.cache.get(0, f.fetchLive, label)
 }
 
 func (f *withdrawalFeeFetcher) fetchLive() (float64, error) {
@@ -186,7 +177,7 @@ func (f *withdrawalFeeFetcher) fetchLive() (float64, error) {
 	case "binance":
 		return f.fetchBinance()
 	case "coinbase":
-		return 0, nil
+		return 0, fmt.Errorf("coinbase withdrawal fee requires an address-specific estimate and is not available from these credentials")
 	case "bitstamp":
 		return f.fetchBitstamp()
 	default:
@@ -212,7 +203,7 @@ func (f *withdrawalFeeFetcher) refreshCredentials() error {
 
 func (f *withdrawalFeeFetcher) fetchKraken() (float64, error) {
 	const urlPath = "/0/private/WithdrawMethods"
-	nonce := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	nonce := nextKrakenNonce()
 	form := url.Values{"nonce": {nonce}, "asset": {"XBT"}}
 	encoded := form.Encode()
 
@@ -239,9 +230,9 @@ func (f *withdrawalFeeFetcher) fetchKraken() (float64, error) {
 	var result struct {
 		Error  []string `json:"error"`
 		Result []struct {
-			Asset   string `json:"asset"`
-			Network string `json:"network"`
-			Fee     string `json:"fee"`
+			Asset   string          `json:"asset"`
+			Network string          `json:"network"`
+			Fee     json.RawMessage `json:"fee"`
 		} `json:"result"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -256,10 +247,31 @@ func (f *withdrawalFeeFetcher) fetchKraken() (float64, error) {
 		}
 		network := strings.ToLower(m.Network)
 		if network == "bitcoin" || network == "btc" || strings.Contains(network, "segwit") {
-			return strconv.ParseFloat(m.Fee, 64)
+			return parseKrakenWithdrawalFee(m.Fee)
 		}
 	}
 	return 0, fmt.Errorf("kraken: onchain withdrawal method not found")
+}
+
+func parseKrakenWithdrawalFee(raw json.RawMessage) (float64, error) {
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return strconv.ParseFloat(text, 64)
+	}
+	var number float64
+	if err := json.Unmarshal(raw, &number); err == nil {
+		return number, nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return 0, fmt.Errorf("kraken withdrawal fee: decode %s: %w", string(raw), err)
+	}
+	for _, key := range []string{"fee", "amount", "withdrawal_fee"} {
+		if value, ok := object[key]; ok {
+			return parseKrakenWithdrawalFee(value)
+		}
+	}
+	return 0, fmt.Errorf("kraken withdrawal fee: unsupported response %s", string(raw))
 }
 
 func (f *withdrawalFeeFetcher) fetchBinance() (float64, error) {
@@ -359,7 +371,8 @@ func (f *withdrawalFeeFetcher) fetchBitstamp() (float64, error) {
 // ---------------------------------------------------------------------------
 //
 // Supported: Kraken (TradeVolume), Binance (tradeFee), Bitstamp (fees/trading).
-// Coinbase: no clean endpoint across API versions — static fallback only.
+// Coinbase requires Advanced Trade JWT credentials and is handled by the
+// persisted-snapshot refresher rather than this legacy key format.
 
 type takerFeeFetcher struct {
 	exchange  string
@@ -379,8 +392,7 @@ func newTakerFeeFetcher(exchange string, provider exchangecredentials.Provider) 
 
 func (f *takerFeeFetcher) get() float64 {
 	label := f.exchange + " taker fee fraction"
-	fallback := takerFeeFallbacks[f.exchange]
-	return f.cache.get(fallback, f.fetchLive, label)
+	return f.cache.get(0, f.fetchLive, label)
 }
 
 func (f *takerFeeFetcher) fetchLive() (float64, error) {
@@ -393,8 +405,7 @@ func (f *takerFeeFetcher) fetchLive() (float64, error) {
 	case "binance":
 		return f.fetchBinance()
 	case "coinbase":
-		// Coinbase has no stable single endpoint for user taker fee across API versions.
-		return 0, fmt.Errorf("coinbase taker fee not fetchable, using static fallback")
+		return 0, fmt.Errorf("coinbase taker fee requires Advanced Trade JWT credentials")
 	case "bitstamp":
 		return f.fetchBitstamp()
 	default:
@@ -423,7 +434,7 @@ func (f *takerFeeFetcher) refreshCredentials() error {
 // divided by 100 to produce a fraction.
 func (f *takerFeeFetcher) fetchKraken() (float64, error) {
 	const urlPath = "/0/private/TradeVolume"
-	nonce := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	nonce := nextKrakenNonce()
 	// Request fee schedule for the BTC/EUR pair.
 	form := url.Values{"nonce": {nonce}, "pair": {"XBTEUR"}}
 	encoded := form.Encode()
@@ -452,7 +463,7 @@ func (f *takerFeeFetcher) fetchKraken() (float64, error) {
 		Error  []string `json:"error"`
 		Result struct {
 			Fees map[string]struct {
-				Fee string `json:"fee"` // percent string, e.g. "0.26"
+				Fee json.RawMessage `json:"fee"` // percent string, e.g. "0.26"
 			} `json:"fees"`
 		} `json:"result"`
 	}
@@ -465,14 +476,39 @@ func (f *takerFeeFetcher) fetchKraken() (float64, error) {
 	// Kraken uses its internal pair name "XXBTZEUR" in the response.
 	for _, key := range []string{"XXBTZEUR", "XBTEUR"} {
 		if entry, ok := result.Result.Fees[key]; ok {
-			pct, err := strconv.ParseFloat(entry.Fee, 64)
+			pct, err := parseKrakenTakerFee(entry.Fee)
 			if err != nil {
-				return 0, fmt.Errorf("kraken: parse fee %q: %w", entry.Fee, err)
+				return 0, err
 			}
 			return pct / 100, nil // convert percent to fraction
 		}
 	}
 	return 0, fmt.Errorf("kraken: XBTEUR taker fee not found in TradeVolume response")
+}
+
+func parseKrakenTakerFee(raw json.RawMessage) (float64, error) {
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		pct, parseErr := strconv.ParseFloat(text, 64)
+		if parseErr != nil {
+			return 0, fmt.Errorf("kraken: parse taker fee %q: %w", text, parseErr)
+		}
+		return pct, nil
+	}
+	var number float64
+	if err := json.Unmarshal(raw, &number); err == nil {
+		return number, nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return 0, fmt.Errorf("kraken: decode taker fee %s: %w", string(raw), err)
+	}
+	for _, key := range []string{"fee", "taker", "rate"} {
+		if value, ok := object[key]; ok {
+			return parseKrakenTakerFee(value)
+		}
+	}
+	return 0, fmt.Errorf("kraken: unsupported taker fee response %s", string(raw))
 }
 
 // fetchBinance fetches the user's taker fee via GET /sapi/v1/asset/tradeFee.
@@ -494,12 +530,19 @@ func (f *takerFeeFetcher) fetchBinance() (float64, error) {
 	}
 	defer resp.Body.Close()
 
+	var raw json.RawMessage
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return 0, fmt.Errorf("binance: decode: %w", err)
+	}
+	if err := binanceResponseError(resp.StatusCode, raw); err != nil {
+		return 0, err
+	}
 	var entries []struct {
 		Symbol          string `json:"symbol"`
 		MakerCommission string `json:"makerCommission"`
 		TakerCommission string `json:"takerCommission"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+	if err := json.Unmarshal(raw, &entries); err != nil {
 		return 0, fmt.Errorf("binance: decode: %w", err)
 	}
 	for _, e := range entries {
@@ -508,6 +551,24 @@ func (f *takerFeeFetcher) fetchBinance() (float64, error) {
 		}
 	}
 	return 0, fmt.Errorf("binance: BTCUSDT taker fee not found")
+}
+
+func binanceResponseError(statusCode int, raw json.RawMessage) error {
+	var apiErr struct {
+		Code *int   `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if json.Unmarshal(raw, &apiErr) == nil && (apiErr.Code != nil || apiErr.Msg != "") {
+		code := 0
+		if apiErr.Code != nil {
+			code = *apiErr.Code
+		}
+		return fmt.Errorf("binance API %d: %s", code, apiErr.Msg)
+	}
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("binance HTTP %d: %s", statusCode, strings.TrimSpace(string(raw)))
+	}
+	return nil
 }
 
 // fetchBitstamp fetches the user's taker fee via POST /api/v2/fees/trading/.

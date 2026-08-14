@@ -1,6 +1,7 @@
 package tradecost
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -33,16 +34,6 @@ func DefaultBTCTradeSize() float64 {
 // SupportedCEXes returns the CEXes the cost model knows about (owned by cextrading).
 func SupportedCEXes() []string {
 	return cextrading.SupportedCEXes()
-}
-
-// TakerFeeFallback returns the static taker fee fraction for an exchange.
-func TakerFeeFallback(exchange string) float64 {
-	return cextrading.TakerFeeFallback(exchange)
-}
-
-// WithdrawalFallback returns the static on-chain withdrawal fee (BTC) for an exchange.
-func WithdrawalFallback(exchange string) float64 {
-	return cextrading.WithdrawalFallback(exchange)
 }
 
 // ---------------------------------------------------------------------------
@@ -224,8 +215,8 @@ func fetchRobosatsTakerFee() (float64, error) {
 // ---------------------------------------------------------------------------
 
 // TradeCostEstimator estimates the total cost of one CEX→DEX arbitrage cycle:
-//  1. CEX taker fee — fetched live from exchange API where available, static fallback
-//  2. CEX BTC withdrawal fee — fetched live from exchange API, static fallback
+//  1. persisted CEX taker fee
+//  2. persisted CEX BTC withdrawal fee
 //  3. Bitcoin on-chain network fee — congestion-adaptive, dynamic vsize, cached 5 min
 //  4. DEX platform fee — static per-exchange taker rate
 //
@@ -252,7 +243,20 @@ func NewTradeCostEstimator() *TradeCostEstimator {
 
 // NewTradeCostEstimatorWithCredentials builds an estimator whose authenticated
 // exchange fee lookups resolve credentials from the supplied database provider.
+// It is retained for source compatibility; CEX pricing now needs persisted fees.
 func NewTradeCostEstimatorWithCredentials(provider exchangecredentials.Provider) *TradeCostEstimator {
+	_ = provider // Kept for API compatibility; CEX prices now read persisted fees.
+	return newTradeCostEstimator(nil)
+}
+
+// NewTradeCostEstimatorWithPersistedFees builds an estimator that reads the
+// Unified API's exchange-derived fee snapshots. Missing or stale values are
+// excluded rather than replaced with static defaults.
+func NewTradeCostEstimatorWithPersistedFees(feeDB *sql.DB) *TradeCostEstimator {
+	return newTradeCostEstimator(feeDB)
+}
+
+func newTradeCostEstimator(feeDB *sql.DB) *TradeCostEstimator {
 	torClient, err := newTorHTTPClient()
 	if err != nil {
 		fmt.Printf("[TradeCost] Tor client unavailable, bitcoin fee fetcher will use direct HTTP: %v\n", err)
@@ -273,7 +277,7 @@ func NewTradeCostEstimatorWithCredentials(provider exchangecredentials.Provider)
 		btcPredictor:      predictor,
 		withdrawalTxShape: defaultCexProfile.txShape(),
 		txEngine:          routing.NewEngine(predictor),
-		cexEngine:         cextrading.NewEngine(provider),
+		cexEngine:         cextrading.NewEngine(feeDB),
 	}
 }
 

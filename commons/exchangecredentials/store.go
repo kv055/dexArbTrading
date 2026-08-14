@@ -40,12 +40,27 @@ func NewStore(db *sql.DB) *Store {
 // prefers a credential carrying a passphrase so the same resolver can serve
 // INTX futures operations.
 func (s *Store) Resolve(exchange string) (Credentials, error) {
+	credentials, err := s.ResolveAll(exchange)
+	if err != nil {
+		return Credentials{}, err
+	}
+	for _, credential := range credentials {
+		if !strings.EqualFold(exchange, "Coinbase") || credential.Passphrase != "" {
+			return credential, nil
+		}
+	}
+	return credentials[0], nil
+}
+
+// ResolveAll returns all active credential sets, newest first. Exchanges may
+// use distinct keys for spot and derivatives permissions.
+func (s *Store) ResolveAll(exchange string) ([]Credentials, error) {
 	if s == nil || s.db == nil {
-		return Credentials{}, errors.New("exchange credential database is not configured")
+		return nil, errors.New("exchange credential database is not configured")
 	}
 	provider := strings.TrimSpace(exchange)
 	if provider == "" {
-		return Credentials{}, errors.New("exchange provider is required")
+		return nil, errors.New("exchange provider is required")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
@@ -62,37 +77,32 @@ func (s *Store) Resolve(exchange string) (Credentials, error) {
 		ORDER BY api_keys.updated_at DESC, api_keys.id DESC
 	`, provider)
 	if err != nil {
-		return Credentials{}, fmt.Errorf("load active API keys for %s: %w", provider, err)
+		return nil, fmt.Errorf("load active API keys for %s: %w", provider, err)
 	}
 	defer rows.Close()
 
-	var first Credentials
+	var credentialsList []Credentials
 	for rows.Next() {
 		var encrypted Credentials
 		if err := rows.Scan(&encrypted.APIKey, &encrypted.APISecret, &encrypted.Passphrase); err != nil {
-			return Credentials{}, fmt.Errorf("scan active API key for %s: %w", provider, err)
+			return nil, fmt.Errorf("scan active API key for %s: %w", provider, err)
 		}
 		credentials, err := decrypt(encrypted)
 		if err != nil {
-			return Credentials{}, fmt.Errorf("decrypt active API key for %s: %w", provider, err)
+			return nil, fmt.Errorf("decrypt active API key for %s: %w", provider, err)
 		}
 		if credentials.APIKey == "" || credentials.APISecret == "" {
 			continue
 		}
-		if first.APIKey == "" {
-			first = credentials
-		}
-		if !strings.EqualFold(provider, "Coinbase") || credentials.Passphrase != "" {
-			return credentials, nil
-		}
+		credentialsList = append(credentialsList, credentials)
 	}
 	if err := rows.Err(); err != nil {
-		return Credentials{}, fmt.Errorf("iterate active API keys for %s: %w", provider, err)
+		return nil, fmt.Errorf("iterate active API keys for %s: %w", provider, err)
 	}
-	if first.APIKey != "" {
-		return first, nil
+	if len(credentialsList) > 0 {
+		return credentialsList, nil
 	}
-	return Credentials{}, fmt.Errorf("no active API credentials configured for %s", provider)
+	return nil, fmt.Errorf("no active API credentials configured for %s", provider)
 }
 
 func decrypt(encrypted Credentials) (Credentials, error) {
