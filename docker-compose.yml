@@ -234,6 +234,9 @@ services:
       - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
       - PRICE_PROVIDER=bisq_tor
       - SNAPSHOT_INTERVAL_MIN=1
+      # Failed source fetches retain their last confirmed offers for this grace;
+      # a successful snapshot still removes absent offers immediately.
+      - LIVE_OFFER_STALE_GRACE=5m
       - CLOSED_OFFER_ANALYSIS_GRACE_CYCLES=3
       # A full eight-currency pass can exceed three minutes while Tor-backed
       # sources time out. Keep the worker healthy throughout a valid pass.

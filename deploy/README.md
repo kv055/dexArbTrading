@@ -235,6 +235,11 @@ for repo in dexFiatController dexMmController dexMonitor dexUnifiedApi; do
 done
 ```
 
+The parent repository also installs a `post-checkout` hook. When the local dev
+stack is already running, checking out another branch compares the old and new
+commits and rebuilds only the affected dev services. It does nothing when the
+dev stack is stopped. Re-run `lefthook install` after pulling this hook change.
+
 **Secret protection before every commit:**
 
 Each repository's `pre-commit` hook inspects added, modified, and renamed staged
