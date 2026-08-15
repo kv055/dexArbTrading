@@ -161,7 +161,7 @@ func HedgeSideForDirection(direction string) string {
 }
 
 func hedgeSideForDirection(direction string) string {
-	if direction == "sell" {
+	if direction == "ask" {
 		return "long"
 	}
 	return "short"

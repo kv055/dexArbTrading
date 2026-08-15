@@ -39,11 +39,11 @@ const (
 	SideAsk Side = "ask" // we buy BTC on the DEX (BTC arrives at our own CEX deposit)
 )
 
-// SideForDirection maps a DEX offer direction ("buy"/"sell") to our trade side.
-// Anything other than "sell" is treated as the bid side, matching the rest of the
+// SideForDirection maps a canonical DEX offer direction to our trade side.
+// Anything other than "ask" is treated as the bid side, matching the rest of the
 // cost model.
 func SideForDirection(direction string) Side {
-	if direction == "sell" {
+	if direction == "ask" {
 		return SideAsk
 	}
 	return SideBid

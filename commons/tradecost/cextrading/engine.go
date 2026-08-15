@@ -15,7 +15,7 @@ type Input struct {
 	BTCAmount          float64
 	RefPriceEUR        float64  // CEX reference price; sizes the hedge position simulation (0 to skip)
 	TransferMinutes    float64  // from txrouting; drives the hedge funding-cost window
-	Direction          string   // DEX offer direction: "buy" (bid) or "sell" (ask)
+	Direction          string   // canonical DEX offer direction: "bid" or "ask"
 	ExcludedCEXes      []string // legacy: excludes both spot and hedge
 	ExcludedSpotCEXes  []string
 	ExcludedHedgeCEXes []string
@@ -129,7 +129,7 @@ func (e *Engine) ManualOptions(in Input) ManualRouteOptions {
 		return options
 	}
 	excludedSpot, excludedHedge := exclusionSets(in)
-	isBid := in.Direction != "sell"
+	isBid := in.Direction != "ask"
 	for _, cex := range e.cexes {
 		_, disabled := excludedSpot[cex]
 		feesUnavailable := e.spotAvailable != nil && !e.spotAvailable(cex, isBid)
@@ -188,7 +188,7 @@ func (e *Engine) Best(in Input) (Selection, bool) {
 		return Selection{}, false
 	}
 	excludedSpot, excludedHedge := exclusionSets(in)
-	isBid := in.Direction != "sell"
+	isBid := in.Direction != "ask"
 	side := hedgeSideForDirection(in.Direction)
 
 	best := Selection{}

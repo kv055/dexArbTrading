@@ -96,10 +96,10 @@ func TestMethodForMatrix(t *testing.T) {
 }
 
 func TestSideForDirection(t *testing.T) {
-	if SideForDirection("sell") != SideAsk {
+	if SideForDirection("ask") != SideAsk {
 		t.Fatal("sell should map to ask")
 	}
-	for _, d := range []string{"buy", "", "anything"} {
+	for _, d := range []string{"bid", "", "anything"} {
 		if SideForDirection(d) != SideBid {
 			t.Fatalf("%q should map to bid", d)
 		}

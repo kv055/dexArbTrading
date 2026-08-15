@@ -322,7 +322,7 @@ func fixedCexCost(exchange string, takerFeeFrac, withdrawalFeeBTC float64, hedge
 	return func(in cextrading.Input) (cextrading.Selection, bool) {
 		takerBTC := in.BTCAmount * takerFeeFrac
 		withdrawalBTC := 0.0
-		if in.Direction != "sell" {
+		if in.Direction != "ask" {
 			withdrawalBTC = withdrawalFeeBTC
 		}
 		sel := cextrading.Selection{
@@ -344,7 +344,7 @@ func fixedCexCost(exchange string, takerFeeFrac, withdrawalFeeBTC float64, hedge
 
 // hedgeSideForTestDirection mirrors cextrading's bid→short / ask→long mapping.
 func hedgeSideForTestDirection(direction string) string {
-	if direction == "sell" {
+	if direction == "ask" {
 		return "long"
 	}
 	return "short"
@@ -467,7 +467,7 @@ func (e *TradeCostEstimator) TakerFeeBTC(btcAmount float64) float64 {
 	if btcAmount <= 0 {
 		return 0
 	}
-	sel, _ := e.cexCost(cextrading.Input{BTCAmount: btcAmount, Direction: "buy"})
+	sel, _ := e.cexCost(cextrading.Input{BTCAmount: btcAmount, Direction: "bid"})
 	return sel.TakerFeeBTC
 }
 
@@ -479,7 +479,7 @@ func (e *TradeCostEstimator) DexFeeBTC(btcAmount float64, dexExchange string) fl
 }
 
 func (e *TradeCostEstimator) EstimateHedgeBreakdown(btcAmount float64, refPriceEUR float64, transferMinutes float64, coupledHedge bool) HedgeBreakdown {
-	return e.EstimateHedgeBreakdownForDirection(btcAmount, refPriceEUR, transferMinutes, coupledHedge, "buy")
+	return e.EstimateHedgeBreakdownForDirection(btcAmount, refPriceEUR, transferMinutes, coupledHedge, "bid")
 }
 
 func (e *TradeCostEstimator) EstimateHedgeBreakdownForDirection(btcAmount float64, refPriceEUR float64, transferMinutes float64, coupledHedge bool, direction string) HedgeBreakdown {
@@ -536,7 +536,7 @@ func resolveRequiredConfirmations(direction string, requested int) int {
 	if requested >= 1 && requested <= 6 {
 		return requested
 	}
-	if direction == "sell" {
+	if direction == "ask" {
 		return 4
 	}
 	return 2
@@ -558,10 +558,10 @@ func (e *TradeCostEstimator) CostPctWithConfirmations(btcAmount float64, dexExch
 		return 0
 	}
 	// CostPct uses the bid side (default), where a CEX withdrawal fee applies.
-	requiredConfirmations = resolveRequiredConfirmations("buy", requiredConfirmations)
+	requiredConfirmations = resolveRequiredConfirmations("bid", requiredConfirmations)
 	dexFeeFrac := e.getDexFeeFrac(dexExchange)
-	cost := e.routingCost(dexExchange, "buy", btcAmount, requiredConfirmations, "")
-	sel, ok := e.cexCost(cextrading.Input{BTCAmount: btcAmount, Direction: "buy"})
+	cost := e.routingCost(dexExchange, "bid", btcAmount, requiredConfirmations, "")
+	sel, ok := e.cexCost(cextrading.Input{BTCAmount: btcAmount, Direction: "bid"})
 	if !ok {
 		return 0
 	}
@@ -728,7 +728,7 @@ func Round2(v float64) float64 {
 }
 
 // Breakdown returns a full per-component cost breakdown for a given trade size, DEX, and offer direction.
-// direction should be the DEX offer direction: "buy" (bid side) or "sell" (ask side).
+// direction is the canonical DEX offer direction: "bid" or "ask".
 func (e *TradeCostEstimator) Breakdown(btcAmount float64, dexExchange string, direction string) CostBreakdown {
 	return e.BreakdownWithConfirmations(btcAmount, dexExchange, direction, 0)
 }
@@ -777,7 +777,7 @@ func (e *TradeCostEstimator) breakdownWithOptions(btcAmount float64, refPriceEUR
 		return CostBreakdown{}
 	}
 
-	isBid := direction != "sell"
+	isBid := direction != "ask"
 	tradeDir := "bid"
 	if !isBid {
 		tradeDir = "ask"
