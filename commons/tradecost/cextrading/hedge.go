@@ -71,7 +71,7 @@ func (c *cachedHedgeInput) get(venue hedge.Venue) (hedge.LivePerpInputs, error) 
 		if feeErr != nil {
 			err = feeErr
 		} else if !fees.hedgeAvailable(time.Now()) {
-			err = fmt.Errorf("persisted hedge fees missing or stale for %s", venue)
+			err = fmt.Errorf("persisted hedge fees are incomplete for %s", venue)
 		} else {
 			profile, profileErr := hedge.DefaultVenueProfile(venue)
 			if profileErr != nil {

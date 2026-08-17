@@ -1,9 +1,50 @@
 package cextrading
 
 import (
+	"database/sql"
 	"math"
 	"testing"
+	"time"
 )
+
+func TestBestUsesLastKnownKrakenFeesForHedgefullAndHedgeless(t *testing.T) {
+	now := time.Now()
+	fees := PersistedFees{
+		SpotTakerFeeRate:       sql.NullFloat64{Float64: 0.008, Valid: true},
+		BTCWithdrawalFeeBTC:    sql.NullFloat64{Float64: 0.000015, Valid: true},
+		FuturesOpenTakerRate:   sql.NullFloat64{Float64: 0.0005, Valid: true},
+		FuturesCloseTakerRate:  sql.NullFloat64{Float64: 0.0005, Valid: true},
+		FuturesFundingRate:     sql.NullFloat64{Float64: -0.00002, Valid: true},
+		FundingIntervalSeconds: sql.NullInt64{Int64: 14400, Valid: true},
+		FetchedAt:              sql.NullTime{Time: now.Add(-14 * time.Hour), Valid: true},
+	}
+	engine := &Engine{
+		cexes:         []string{"kraken"},
+		spotAvailable: func(string, bool) bool { return fees.spotAvailable(now, true) },
+		takerFrac:     func(string) float64 { return fees.SpotTakerFeeRate.Float64 },
+		withdrawBTC:   func(string) float64 { return fees.BTCWithdrawalFeeBTC.Float64 },
+		hedgeCost: func(string, float64, float64, float64, bool, string) hedgeCostDetails {
+			if !fees.hedgeAvailable(now) {
+				return hedgeCostDetails{}
+			}
+			return hedgeCostDetails{venue: "kraken_futures", feeBTC: 0.00001}
+		},
+	}
+
+	full, ok := engine.Best(Input{BTCAmount: 0.01, Direction: "bid"})
+	if !ok || full.CEX != "kraken" || full.Hedge.Venue != "kraken_futures" {
+		t.Fatalf("hedgefull selection = %+v, ok=%v", full, ok)
+	}
+	hedgeless, ok := engine.Best(Input{
+		BTCAmount:          0.01,
+		Direction:          "bid",
+		AllowNoHedge:       true,
+		ExcludedHedgeCEXes: []string{"kraken"},
+	})
+	if !ok || hedgeless.CEX != "kraken" || hedgeless.Hedge.Venue != "" {
+		t.Fatalf("hedgeless selection = %+v, ok=%v", hedgeless, ok)
+	}
+}
 
 func eq(t *testing.T, got, want float64) {
 	t.Helper()

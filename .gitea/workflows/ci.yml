@@ -87,6 +87,64 @@ jobs:
       - name: Scan root and submodule snapshot
         run: gitleaks dir . --config .gitleaks.toml --redact --no-banner
 
+  database-sql-integrity:
+    name: Database SQL immutability
+    needs: security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Fetch submodules from the Gitea mirror
+        run: |
+          host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
+          git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
+          git submodule update --init --recursive
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Reject changed database SQL history
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          zero=0000000000000000000000000000000000000000
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo "Manual run has no change range; skipping database SQL immutability check."
+            exit 0
+          fi
+          base="$BEFORE"; head="$AFTER"
+          if [ -z "$base" ] || [ "$base" = "$zero" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base=$(git rev-parse "${head}^" 2>/dev/null || true)
+          fi
+          [ -n "$base" ] || { echo "No usable base commit; refusing to skip database SQL immutability check." >&2; exit 1; }
+          old=$(git ls-tree "$base" dexUnifiedApi | awk '{print $3}')
+          new=$(git ls-tree "$head" dexUnifiedApi | awk '{print $3}')
+          [ -n "$old" ] && [ -n "$new" ] || { echo "Unable to resolve dexUnifiedApi submodule revisions." >&2; exit 1; }
+          [ "$old" != "$new" ] || { echo "dexUnifiedApi submodule is unchanged."; exit 0; }
+          git -C dexUnifiedApi fetch --no-tags origin "$old" "$new"
+
+          violations=()
+          while IFS=$'\t' read -r status first second; do
+            [ -n "$status" ] || continue
+            if [ "${status:0:1}" = A ] && [[ "$first" == db/migrations/*.sql ]] \
+              && [[ "${first##*/}" =~ ^[0-9]{14}_[a-z0-9_]+\.sql$ ]]; then
+              echo "allowed new migration: $first"
+              continue
+            fi
+            violations+=("$status $first${second:+ -> $second}")
+          done < <(git -C dexUnifiedApi diff --name-status --find-renames "$old" "$new" -- db/schema db/migrations)
+
+          if ((${#violations[@]})); then
+            printf 'ERROR: existing database SQL is immutable. Add only new timestamped migrations under db/migrations/.\n' >&2
+            printf '  %s\n' "${violations[@]}" >&2
+            exit 1
+          fi
+
   detect-changes:
     # Diff the push range and decide which tests and image builds run.
     name: Detect changed services
@@ -401,18 +459,20 @@ jobs:
 
   test-gate:
     name: Test gate
-    needs: [detect-changes, test-go, test-frontend, certificate-renewal-test]
+    needs: [database-sql-integrity, detect-changes, test-go, test-frontend, certificate-renewal-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Require successful or intentionally skipped tests
         env:
           DETECT_RESULT: ${{ needs.detect-changes.result }}
+          DATABASE_SQL_RESULT: ${{ needs.database-sql-integrity.result }}
           GO_RESULT: ${{ needs.test-go.result }}
           FRONTEND_RESULT: ${{ needs.test-frontend.result }}
           CERTIFICATE_RESULT: ${{ needs.certificate-renewal-test.result }}
         run: |
           set -Eeuo pipefail
+          [ "$DATABASE_SQL_RESULT" = success ]
           [ "$DETECT_RESULT" = success ]
           case "$GO_RESULT" in success|skipped) ;; *) exit 1;; esac
           case "$FRONTEND_RESULT" in success|skipped) ;; *) exit 1;; esac

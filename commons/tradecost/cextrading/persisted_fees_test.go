@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestPersistedFeesRequireFreshCompleteData(t *testing.T) {
+func TestPersistedFeesUseCompleteLastKnownData(t *testing.T) {
 	now := time.Now()
 	fees := PersistedFees{
 		SpotTakerFeeRate:       sql.NullFloat64{Float64: 0.001, Valid: true},
@@ -20,9 +20,12 @@ func TestPersistedFeesRequireFreshCompleteData(t *testing.T) {
 	if !fees.spotAvailable(now, true) || !fees.hedgeAvailable(now) {
 		t.Fatal("fresh complete fee snapshot should be usable")
 	}
-	fees.FetchedAt.Time = now.Add(-time.Hour - time.Nanosecond)
-	if fees.spotAvailable(now, true) || fees.hedgeAvailable(now) {
-		t.Fatal("one-hour-old snapshot must be stale")
+	fees.FetchedAt.Time = now.Add(-14 * time.Hour)
+	if !fees.spotAvailable(now, true) || !fees.hedgeAvailable(now) {
+		t.Fatal("complete last-known snapshot should remain usable")
+	}
+	if !fees.Stale(now) {
+		t.Fatal("old snapshot should still be reported as stale")
 	}
 	fees.FetchedAt.Time = now
 	fees.BTCWithdrawalFeeBTC.Valid = false
