@@ -24,6 +24,26 @@ func normalize(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+// CatalogLabelMatches reports whether raw is a payment_methods row's canonical
+// name or one of its operator aliases. The comparison is the Go counterpart of
+// the degrade/seed SQL: lower(trim(replace(..., '_', ' '))) with collapsed
+// whitespace.
+func CatalogLabelMatches(rowName string, aliasList []string, raw string) bool {
+	want := normalize(raw)
+	if want == "" {
+		return false
+	}
+	if normalize(rowName) == want {
+		return true
+	}
+	for _, alias := range aliasList {
+		if normalize(alias) == want {
+			return true
+		}
+	}
+	return false
+}
+
 // Canonicalize splits one raw payment-method label into its canonical atoms.
 func (r *Registry) Canonicalize(raw string) []string {
 	trimmed := strings.TrimSpace(raw)

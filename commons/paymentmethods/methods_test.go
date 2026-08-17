@@ -5,6 +5,27 @@ import (
 	"testing"
 )
 
+func TestCatalogLabelMatches(t *testing.T) {
+	aliases := []string{"SEPA Instant", "sepa_instant"}
+	tests := []struct {
+		raw  string
+		want bool
+	}{
+		{"SEPA", true},
+		{"sepa", true},
+		{"SEPA Instant", true},
+		{"sepa_instant", true},
+		{"  Sepa Instant  ", true},
+		{"Revolut", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := CatalogLabelMatches("SEPA", aliases, tt.raw); got != tt.want {
+			t.Errorf("CatalogLabelMatches(SEPA, aliases, %q) = %v, want %v", tt.raw, got, tt.want)
+		}
+	}
+}
+
 func TestCanonicalize(t *testing.T) {
 	tests := []struct {
 		raw  string
