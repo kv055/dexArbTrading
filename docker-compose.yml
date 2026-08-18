@@ -500,6 +500,11 @@ services:
     # Bridge network: reachable from sibling containers at https://lnd:8080.
     # The TLS cert must include the "lnd" SAN (added below); see the one-time
     # cert-regeneration note in the README / migration comment before first up.
+    # Public DNS only on this service: LND does not resolve sibling compose
+    # names, and Docker's 127.0.0.11 has timed out Lightning Labs lookups.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     volumes:
       - lnd-data:/root/.lnd
     ports:
@@ -518,10 +523,16 @@ services:
       - --bitcoin.active
       - --bitcoin.mainnet
       - --bitcoin.node=neutrino
+      # addpeer (not connect): persist known compact-filter hosts and still
+      # allow discovery. neutrino.connect is exclusive and disables outbound
+      # seeking. maxpeers/banduration are unused on LND 0.18.4.
       - --neutrino.addpeer=btcd-mainnet.lightning.computer
       - --neutrino.addpeer=neutrino.noderunner.wtf
       - --neutrino.addpeer=node.eldamar.icu
       - --neutrino.addpeer=btcd.lnolymp.us
+      - --neutrino.addpeer=btcd0.lightning.engineering
+      - --neutrino.addpeer=bb1.breez.technology
+      - --neutrino.addpeer=node.blixtwallet.com
       - --fee.url=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json
       - --restlisten=0.0.0.0:8080
       - --rpclisten=0.0.0.0:10009
@@ -531,8 +542,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: '0.5'
+          memory: 1G
+          cpus: '1.0'
     restart: unless-stopped
 
   # Maddy mail services are disabled for now. Keep this configuration here so

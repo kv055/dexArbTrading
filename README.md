@@ -101,6 +101,39 @@ Important root settings:
 
 The service-specific READMEs explain their own environment variables and runtime responsibilities.
 
+## LND Neutrino sync
+
+The Compose `lnd` service uses `--bitcoin.node=neutrino` (no local bitcoind). `lncli getinfo` `block_height` is the Neutrino **header** tip. `synced_to_chain` stays false until the wallet rescan (`LNWL`) catches up to that tip. Magma LSP orders stay disabled until `synced_to_chain` is true.
+
+`num_peers` / `uris` on `getinfo` are **Lightning** peers, not Neutrino peers. Both stay empty until LND reaches `SERVER_ACTIVE`.
+
+The `lnd` healthcheck only hits `/v1/state`. A healthy container is not a synced node.
+
+Watch these log lines, in order, after an LND start:
+
+1. `LNWL: Started rescan ...`
+2. `LNWL: Rescanned through block ...` (when the rescan spans more than the start height)
+3. `LNWL: Finished rescan for 1 address ...`
+4. `LTND: Chain backend is fully synced ...`
+
+BTCN `Processed 1 block` at tip does **not** mean the wallet rescan finished.
+
+```bash
+docker compose exec -T lnd lncli getinfo \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["synced_to_chain"], d["block_height"])'
+```
+
+Restart discipline:
+
+| Action | Effect |
+|--------|--------|
+| Rebuild `mm-controller` / `dexmonitor` only | Does not recreate `lnd` — preferred for app changes. |
+| `docker compose stop` / `down` (no `-v`) | Volume kept. The next LND start re-runs a near-tip wallet rescan (often 1–4 hours). |
+| Recreate `lnd` (`up -d lnd` after a compose/image change) | Restarts that rescan cycle. Avoid unless LND config or image changed. |
+| `docker compose down -v` | Deletes `dexarbtrading_lnd-data` and forces a full Neutrino resync. Never use this to “unstick” sync. |
+
+After changing LND flags, run `docker compose up -d lnd` only and wait for `Chain backend is fully synced` before expecting Magma to enable. Do not copy the `lnd` service `dns:` block onto other services — it replaces Docker DNS and those services need sibling hostnames.
+
 ## Database And Backups
 
 `dexUnifiedApi` owns schema setup and application role creation. The Compose stack starts a `postgres-backup` sidecar that runs `pg_dump -Fc`, validates the archive with `pg_restore --list`, keeps local files in the `postgres-backups` volume, and optionally uploads with `rclone`.
