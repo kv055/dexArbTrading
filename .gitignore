@@ -29,3 +29,6 @@ test-results/
 
 # Local git worktrees (isolation for in-progress edits)
 .worktrees/
+
+# opencode local state
+.opencode/
