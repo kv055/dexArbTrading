@@ -67,6 +67,29 @@ services:
           cpus: '0.5'
     restart: unless-stopped
 
+  # LND's bitcoind RPC client resolves its host before dialing, so it cannot
+  # consume a .onion hostname directly. This bridge presents a Docker-local TCP
+  # endpoint and delegates onion resolution and transport to Tor via SOCKS5.
+  bitcoind-rpc-proxy:
+    logging: *default-logging
+    image: dexarbtrading-bitcoind-rpc-proxy:local
+    build:
+      context: ./deploy/bitcoind-rpc-proxy
+      dockerfile: Dockerfile
+    depends_on:
+      tor:
+        condition: service_healthy
+    environment:
+      - UPSTREAM_URL=http://${LND_BITCOIND_RPCHOST}:${LND_BITCOIND_RPCPORT:-8332}/
+      - TOR_SOCKS_ADDR=tor:9050
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8332/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
   bisq:
     logging: *default-logging
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-bisq:${BISQ_IMAGE_TAG:-${IMAGE_TAG:-latest}}
@@ -440,6 +463,14 @@ services:
       - OFFER_PREMIUM_WSS_URL=ws://unified-api:5010/internal/ws/live_offers?cex=kraken
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - LND_HOST=https://lnd:8080
+      # The manual LND health check uses this same in-network proxy and credentials
+      # as LND, so it validates the actual configured pruned Bitcoin Core node.
+      - LND_BITCOIND_RPC_URL=http://bitcoind-rpc-proxy:8332
+      - LND_BITCOIND_RPCUSER=${LND_BITCOIND_RPCUSER}
+      - LND_BITCOIND_RPCPASS=${LND_BITCOIND_RPCPASS}
+      # One-shot operator escape hatch to create a separate empty wallet while
+      # retaining recovery material for a previous wallet in Postgres.
+      - LND_INIT_FRESH=${LND_INIT_FRESH:-false}
       - APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY:-}
       - LND_MACAROON_PATH=/lnd/data/chain/bitcoin/mainnet/admin.macaroon
       - LND_TLS_CERT_PATH=/lnd/tls.cert
@@ -476,7 +507,7 @@ services:
       # containers use http://mm-controller:5001, not this publish.
       - "127.0.0.1:5001:5001"
     volumes:
-      - lnd-data:/lnd:ro
+      - lnd-data-fresh:/lnd:ro
       # - ./dexMmController/secrets/lnd_seed_mnemonic:/run/secrets/lnd_seed_mnemonic:ro
       # - ./dexMmController/secrets/lnd_aezeed_passphrase:/run/secrets/lnd_aezeed_passphrase:ro
     healthcheck:
@@ -506,7 +537,12 @@ services:
       - 1.1.1.1
       - 8.8.8.8
     volumes:
-      - lnd-data:/root/.lnd
+      - lnd-data-fresh:/root/.lnd
+    depends_on:
+      tor:
+        condition: service_healthy
+      bitcoind-rpc-proxy:
+        condition: service_healthy
     ports:
       # Loopback only, for host-side lncli / debugging. Sibling containers use
       # the docker DNS name (lnd:8080 / lnd:10009), not these publishes.
@@ -522,17 +558,15 @@ services:
     command:
       - --bitcoin.active
       - --bitcoin.mainnet
-      - --bitcoin.node=neutrino
-      # addpeer (not connect): persist known compact-filter hosts and still
-      # allow discovery. neutrino.connect is exclusive and disables outbound
-      # seeking. maxpeers/banduration are unused on LND 0.18.4.
-      - --neutrino.addpeer=btcd-mainnet.lightning.computer
-      - --neutrino.addpeer=neutrino.noderunner.wtf
-      - --neutrino.addpeer=node.eldamar.icu
-      - --neutrino.addpeer=btcd.lnolymp.us
-      - --neutrino.addpeer=btcd0.lightning.engineering
-      - --neutrino.addpeer=bb1.breez.technology
-      - --neutrino.addpeer=node.blixtwallet.com
+      - --bitcoin.node=bitcoind
+      - --bitcoind.rpchost=bitcoind-rpc-proxy:8332
+      - --bitcoind.rpcuser=${LND_BITCOIND_RPCUSER}
+      - --bitcoind.rpcpass=${LND_BITCOIND_RPCPASS}
+      # RPC polling avoids exposing a separate ZMQ endpoint through Tor.
+      - --bitcoind.rpcpolling
+      - --bitcoind.pruned-node-max-peers=4
+      - --tor.active
+      - --tor.socks=tor:9050
       - --fee.url=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json
       - --restlisten=0.0.0.0:8080
       - --rpclisten=0.0.0.0:10009
@@ -934,6 +968,9 @@ volumes:
   maddy-data:
   maddy-backups:
   lnd-data:
+  # The prior lnd-data volume is intentionally retained for recovery. New
+  # wallet initialization uses this isolated volume.
+  lnd-data-fresh:
   prometheus-data:
   grafana-data:
   loki-data:

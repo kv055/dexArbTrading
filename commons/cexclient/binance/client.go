@@ -16,8 +16,10 @@ const defaultTimeout = 20 * time.Second
 // Options configures official SDK clients. Retries are always disabled because
 // MM Controller owns reconciliation of potentially mutating requests.
 type Options struct {
-	BaseURL string
-	Timeout time.Duration
+	BaseURL             string
+	WebsocketAPIBaseURL string
+	WebsocketStreamsURL string
+	Timeout             time.Duration
 }
 
 func configuration(apiKey, apiSecret string, opts Options) *common.ConfigurationRestAPI {
@@ -46,5 +48,47 @@ func NewWallet(apiKey, apiSecret string, opts Options) *wallet.BinanceWalletClie
 }
 
 func NewFutures(apiKey, apiSecret string, opts Options) *futures.BinanceDerivativesTradingUsdsFuturesClient {
-	return futures.NewBinanceDerivativesTradingUsdsFuturesClient(futures.WithRestAPI(configuration(apiKey, apiSecret, opts)))
+	wsAPIBaseURL := strings.TrimRight(opts.WebsocketAPIBaseURL, "/")
+	if wsAPIBaseURL == "" {
+		wsAPIBaseURL = common.DerivativesTradingUsdsFuturesWebsocketApiProdUrl
+	}
+	wsAPIOptions := []common.ConfigurationWebsocketApiOption{
+		common.WithWsApiKey(apiKey),
+		common.WithWsApiSecret(apiSecret),
+		common.WithWsTimeout(timeout(opts)),
+	}
+	wsAPIOptions = append(wsAPIOptions, common.WithWsAPIBasePath(wsAPIBaseURL))
+	wsStreamBaseURL := strings.TrimRight(opts.WebsocketStreamsURL, "/")
+	if wsStreamBaseURL == "" {
+		wsStreamBaseURL = common.DerivativesTradingUsdsFuturesWebsocketStreamsProdUrl
+	}
+	wsStreamOptions := []common.ConfigurationWebsocketStreamsOption{
+		common.WithWsStreamsBasePath(wsStreamBaseURL),
+	}
+	return futures.NewBinanceDerivativesTradingUsdsFuturesClient(
+		futures.WithRestAPI(configuration(apiKey, apiSecret, opts)),
+		futures.WithWebsocketAPI(common.NewConfigurationWebsocketApi(wsAPIOptions...)),
+		futures.WithWebsocketStreams(common.NewConfigurationWebsocketStreams(wsStreamOptions...)),
+	)
+}
+
+// NewFuturesCombinedStreams creates the official SDK transport for Binance's
+// legacy combined-stream endpoint. The generated futures facade splits market
+// and user-data streams across separate paths, while this connector needs both
+// streams on one connection.
+func NewFuturesCombinedStreams(opts Options) (*common.WebsocketStreams, error) {
+	baseURL := strings.TrimRight(opts.WebsocketStreamsURL, "/")
+	if baseURL == "" {
+		baseURL = common.DerivativesTradingUsdsFuturesWebsocketStreamsProdUrl
+	}
+	return common.NewWebsocketStreams(common.NewConfigurationWebsocketStreams(
+		common.WithWsStreamsBasePath(baseURL + "/stream"),
+	))
+}
+
+func timeout(opts Options) time.Duration {
+	if opts.Timeout > 0 {
+		return opts.Timeout
+	}
+	return defaultTimeout
 }
