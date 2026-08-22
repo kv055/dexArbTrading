@@ -75,6 +75,10 @@ func WrapError(operation string, mutating bool, err error) error {
 		fillFromSDKMessage(out, msg)
 	}
 
+	// Extract the short exchange code/msg from every error shape that embeds a
+	// response body (e.g. 401 -2015 IP/key rejections), never the raw body.
+	fillFromSDKMessage(out, err.Error())
+
 	if out.HTTPStatus == 0 {
 		out.HTTPStatus = parseHTTPStatus(err.Error())
 	}
