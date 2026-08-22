@@ -109,6 +109,8 @@ deploy/provision/dbeaver-sync.sh
 
 Import it via DBeaver: **File → Import → DBeaver → Project**, then select `deploy/provision/dbeaver-out/dexarb-vps.dbp`. It imports as a separate project (`dexArbTrading-vps-import`) with the password bundled. The import always creates a new project, so to re-import after an IP change, delete the existing `dexArbTrading-vps-import` project first.
 
+The script also writes `deploy/provision/dbeaver-out/tabularis-dexarb-vps.json` — the same connection as a Tabularis import payload. Import via Tabularis: **Connections page → Import dropup → Tabularis JSON**. Re-importing merges by id, so regenerating and re-importing after an IP change updates the connection in place (no duplicates). Note: like Tabularis' own exports, this JSON contains the DB password in plaintext; it lives in the gitignored output directory with 600 perms.
+
 ---
 
 ### Manual steps (alternative)
