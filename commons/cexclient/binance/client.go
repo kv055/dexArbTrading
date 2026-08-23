@@ -48,6 +48,13 @@ func NewWallet(apiKey, apiSecret string, opts Options) *wallet.BinanceWalletClie
 }
 
 func NewFutures(apiKey, apiSecret string, opts Options) *futures.BinanceDerivativesTradingUsdsFuturesClient {
+	// The shared REST configuration defaults to https://api.binance.com (spot).
+	// USDⓈ-M futures endpoints only exist on fapi.binance.com; sending them to
+	// the spot host yields an empty 403 from the edge.
+	baseURL := strings.TrimRight(opts.BaseURL, "/")
+	if baseURL == "" {
+		baseURL = common.DerivativesTradingUsdsFuturesRestApiProdUrl
+	}
 	wsAPIBaseURL := strings.TrimRight(opts.WebsocketAPIBaseURL, "/")
 	if wsAPIBaseURL == "" {
 		wsAPIBaseURL = common.DerivativesTradingUsdsFuturesWebsocketApiProdUrl
@@ -66,7 +73,12 @@ func NewFutures(apiKey, apiSecret string, opts Options) *futures.BinanceDerivati
 		common.WithWsStreamsBasePath(wsStreamBaseURL),
 	}
 	return futures.NewBinanceDerivativesTradingUsdsFuturesClient(
-		futures.WithRestAPI(configuration(apiKey, apiSecret, opts)),
+		futures.WithRestAPI(configuration(apiKey, apiSecret, Options{
+			BaseURL:             baseURL,
+			WebsocketAPIBaseURL: opts.WebsocketAPIBaseURL,
+			WebsocketStreamsURL: opts.WebsocketStreamsURL,
+			Timeout:             opts.Timeout,
+		})),
 		futures.WithWebsocketAPI(common.NewConfigurationWebsocketApi(wsAPIOptions...)),
 		futures.WithWebsocketStreams(common.NewConfigurationWebsocketStreams(wsStreamOptions...)),
 	)

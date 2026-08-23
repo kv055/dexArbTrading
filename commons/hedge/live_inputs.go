@@ -271,7 +271,10 @@ type krakenHistoricalFundingResponse struct {
 func fetchKrakenLatestFundingRate(symbol string) (float64, error) {
 	var out krakenHistoricalFundingResponse
 	client := krakenclient.NewFutures("", "", krakenclient.FuturesOptions{BaseURL: krakenFuturesAPIBase, Client: hedgeHTTPClient})
-	if err := client.Request(context.Background(), http.MethodGet, "/derivatives/api/v3/historical-funding-rates", false, map[string]string{"symbol": symbol}, nil, &out); err != nil {
+	// The SDK's query encoder only understands map[string]any; a
+	// map[string]string silently encodes to an empty query and the endpoint
+	// answers 400 BAD_REQUEST.
+	if err := client.Request(context.Background(), http.MethodGet, "/derivatives/api/v3/historical-funding-rates", false, map[string]any{"symbol": symbol}, nil, &out); err != nil {
 		return 0, fmt.Errorf("kraken futures funding: %w", err)
 	}
 	if len(out.Rates) == 0 {
