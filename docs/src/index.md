@@ -6,7 +6,7 @@ services in this repository.
 ## Modules
 
 - [API documentation](api-documentation.md) explains the combined Swagger UI,
-  service-owned specifications, and route-catalog maturity model.
+  service-owned source contracts, generated bundles, and drift checks.
 
 - [dexMonitor](dexMonitor/README.md) documents the monitoring API, live-offer views,
   account health proxying, statistics, and trading-account management code.
@@ -17,14 +17,22 @@ services in this repository.
   exchange clients, wallet bridge, account health checks, and related
   orchestration code.
 
-Serve locally through Docker:
+Build the documentation image once:
 
 ```bash
-docker compose --profile docs up docs
+docker build -f docs/Dockerfile.docs -t dexarbtrading-docs .
 ```
 
-Validate the wiki build through Docker:
+Serve the wiki locally:
 
 ```bash
-docker compose run --rm docs build -f /workspace/docs/mkdocs.yml --strict
+docker run --rm -p 127.0.0.1:8000:8000 -v "$PWD:/workspace:ro" \
+  dexarbtrading-docs serve -f /workspace/docs/mkdocs.yml --dev-addr=0.0.0.0:8000
+```
+
+Validate the wiki build:
+
+```bash
+docker run --rm -v "$PWD:/workspace:ro" dexarbtrading-docs \
+  build -f /workspace/docs/mkdocs.yml --strict
 ```

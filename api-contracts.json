@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "contracts": [
+    {
+      "id": "unified-public",
+      "service": "dexUnifiedApi",
+      "audience": "public",
+      "source": "dexUnifiedApi/api/public.openapi.yaml",
+      "bundle": "api-docs/specs/dex-unified-api/public.openapi.yaml",
+      "migrationState": "validated-legacy"
+    },
+    {
+      "id": "unified-internal",
+      "service": "dexUnifiedApi",
+      "audience": "internal",
+      "source": "dexUnifiedApi/api/internal.openapi.yaml",
+      "bundle": "api-docs/specs/dex-unified-api/internal.openapi.yaml",
+      "migrationState": "validated-legacy"
+    },
+    {
+      "id": "fiat-public",
+      "service": "dexFiatController",
+      "audience": "public",
+      "source": "dexFiatController/api/public.openapi.yaml",
+      "bundle": "api-docs/specs/dex-fiat-controller/public.openapi.yaml",
+      "migrationState": "validated-legacy"
+    },
+    {
+      "id": "fiat-internal",
+      "service": "dexFiatController",
+      "audience": "internal",
+      "source": "dexFiatController/api/internal.openapi.yaml",
+      "bundle": "api-docs/specs/dex-fiat-controller/internal.openapi.yaml",
+      "migrationState": "validated-legacy"
+    },
+    {
+      "id": "mm-public",
+      "service": "dexMmController",
+      "audience": "public",
+      "source": "dexMmController/api/public.openapi.yaml",
+      "bundle": "api-docs/specs/dex-mm-controller/public.openapi.yaml",
+      "migrationState": "validated-legacy"
+    },
+    {
+      "id": "mm-internal",
+      "service": "dexMmController",
+      "audience": "internal",
+      "source": "dexMmController/api/internal.openapi.yaml",
+      "bundle": "api-docs/specs/dex-mm-controller/internal.openapi.yaml",
+      "migrationState": "validated-legacy"
+    },
+    {
+      "id": "monitor-public",
+      "service": "dexMonitor",
+      "audience": "public",
+      "source": "dexMonitor/api/public.openapi.yaml",
+      "bundle": "api-docs/specs/dex-monitor/public.openapi.yaml",
+      "migrationState": "validated-legacy"
+    },
+    {
+      "id": "bisqstats-public",
+      "service": "dexMonitor",
+      "audience": "public",
+      "source": "dexMonitor/api/bisqstats.public.openapi.yaml",
+      "bundle": "api-docs/specs/dex-monitor/bisqstats.public.openapi.yaml",
+      "migrationState": "validated-legacy"
+    }
+  ],
+  "operationalRoutes": {
+    "dexUnifiedApi": ["GET /metrics"],
+    "dexMmController": ["GET /metrics"],
+    "dexMonitor": ["GET /metrics"],
+    "dexFiatController": ["GET /metrics", "* /{path...}"]
+  }
+}

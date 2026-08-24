@@ -24,6 +24,7 @@ site/
 test-results/
 .scannerwork/
 .env.sonar
+tools/openapi/node_modules/
 # Claude Code
 .claude/
 

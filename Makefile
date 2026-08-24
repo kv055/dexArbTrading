@@ -18,7 +18,8 @@ DEADCODE_VERSION := v0.48.0
 
 .DEFAULT_GOAL := help
 .PHONY: help staging-up staging-wait staging-down staging-logs staging-rebuild staging-ps staging-env-check \
-	prune docker-reclaim sonar-up sonar-scan sonar-down sonar-reset compose-validate backend-tools backend-check
+	prune docker-reclaim sonar-up sonar-scan sonar-down sonar-reset compose-validate backend-tools backend-check \
+	api-install api-bundle api-lint api-route-check api-generate api-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -78,6 +79,26 @@ backend-tools: ## Install pinned backend maintainability tools under /tmp
 
 backend-check: ## Test, vet, lint, and report dead backend Go code in every module
 	@BACKEND_TOOLS_DIR=$(BACKEND_TOOLS_DIR) bash scripts/backend-check.sh
+
+api-install: ## Install the pinned OpenAPI toolchain
+	npm --prefix tools/openapi ci
+	npm --prefix dexMonitor/react-frontend ci
+	go -C tools/openapi mod download
+
+api-bundle: ## Build self-contained OpenAPI bundles for generators and Swagger
+	node tools/openapi/contracts.mjs bundle
+
+api-lint: ## Bundle and lint every OpenAPI contract
+	node tools/openapi/contracts.mjs lint
+
+api-route-check: ## Compare registered runtime routes with source contracts
+	node tools/openapi/contracts.mjs route-check
+
+api-generate: ## Regenerate committed Go and TypeScript API artifacts
+	node tools/openapi/contracts.mjs generate
+
+api-check: ## Verify OpenAPI lint, route coverage, and committed generated artifacts
+	node tools/openapi/contracts.mjs check
 
 prune: ## Drop stale remote refs and delete local branches already merged into develop
 	@git fetch origin --prune

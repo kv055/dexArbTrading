@@ -1,0 +1,78 @@
+openapi: 3.1.0
+info:
+  title: dexMonitor bisqstats HTTP API
+  version: 1.0.0
+  description: Handwritten source-of-truth contract for this runtime.
+  contact:
+    name: dexArbTrading maintainers
+    url: https://github.com/kv055/dexArbTrading
+servers:
+  - url: http://localhost:9997
+tags:
+  - name: health
+  - name: trade-stats
+paths:
+  /api/trade-stats:
+    get:
+      operationId: getApiTradeStats
+      tags:
+        - trade-stats
+      summary: GET /api/trade-stats
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          description: Error response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/plain:
+              schema:
+                type: string
+      description: GET /api/trade-stats
+      security: []
+  /health:
+    get:
+      operationId: getHealth
+      tags:
+        - health
+      summary: GET /health
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        default:
+          description: Error response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/plain:
+              schema:
+                type: string
+      description: GET /health
+      security: []
+components:
+  schemas:
+    Health:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+        checks:
+          type: object
+          additionalProperties: true
+      additionalProperties: true

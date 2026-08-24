@@ -1,0 +1,85 @@
+openapi: 3.1.0
+info:
+  title: dexMmController public API
+  version: 1.0.0
+  description: Externally or browser-facing contract. This handwritten specification is the source of truth.
+  contact:
+    name: dexArbTrading maintainers
+    url: https://github.com/kv055/dexArbTrading
+servers:
+  - url: http://localhost:5001
+tags:
+  - name: telegram-webhook
+  - name: webhooks
+paths:
+  /api/webhooks/dex-release:
+    post:
+      operationId: postApiWebhooksDexRelease
+      tags:
+        - webhooks
+      summary: POST /api/webhooks/dex-release
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '202':
+          description: DEX release queued
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          description: Error response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/plain:
+              schema:
+                type: string
+      description: POST /api/webhooks/dex-release
+      security:
+        - bearerWebhook: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+  /telegram-webhook:
+    post:
+      operationId: postTelegramWebhook
+      tags:
+        - telegram-webhook
+      summary: POST /telegram-webhook
+      responses:
+        '200':
+          description: Telegram update accepted with no response body
+        default:
+          description: Telegram update rejected with no response body
+      description: POST /telegram-webhook
+      security:
+        - telegramSecret: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+components:
+  securitySchemes:
+    bearerWebhook:
+      type: http
+      scheme: bearer
+    telegramSecret:
+      type: apiKey
+      in: header
+      name: X-Telegram-Bot-Api-Secret-Token

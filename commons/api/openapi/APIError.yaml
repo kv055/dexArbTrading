@@ -1,0 +1,13 @@
+type: object
+required:
+  - error
+properties:
+  error:
+    type: string
+  code:
+    type: string
+  provider:
+    type: string
+  operation:
+    type: string
+additionalProperties: false

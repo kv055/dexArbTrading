@@ -377,6 +377,39 @@ jobs:
       - name: Validate compose topology
         run: bash scripts/compose-validate.sh
 
+  openapi:
+    name: OpenAPI source-of-truth check
+    needs: security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            tools/openapi/package-lock.json
+            dexMonitor/react-frontend/package-lock.json
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: tools/openapi/go.mod
+          cache-dependency-path: tools/openapi/go.sum
+
+      - name: Install pinned generators
+        run: make api-install
+
+      - name: Audit generator dependencies
+        working-directory: tools/openapi
+        run: npm audit --audit-level=moderate
+
+      - name: Verify contracts and committed generated artifacts
+        run: make api-check
+
   test-frontend:
     name: Frontend tests
     needs: detect-changes
@@ -399,10 +432,6 @@ jobs:
           cache-dependency-path: dexMonitor/react-frontend/package-lock.json
 
       - run: npm ci
-
-      - name: Verify OpenAPI route catalogs
-        working-directory: .
-        run: python3 scripts/openapi-route-catalogs.py --check
 
       - name: Verify generated API contracts
         run: npm run check:api-contract
@@ -457,7 +486,7 @@ jobs:
 
   test-gate:
     name: Test gate
-    needs: [database-sql-integrity, detect-changes, test-go, test-frontend, certificate-renewal-test]
+    needs: [database-sql-integrity, detect-changes, openapi, test-go, test-frontend, certificate-renewal-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -467,11 +496,13 @@ jobs:
           DATABASE_SQL_RESULT: ${{ needs.database-sql-integrity.result }}
           GO_RESULT: ${{ needs.test-go.result }}
           FRONTEND_RESULT: ${{ needs.test-frontend.result }}
+          OPENAPI_RESULT: ${{ needs.openapi.result }}
           CERTIFICATE_RESULT: ${{ needs.certificate-renewal-test.result }}
         run: |
           set -Eeuo pipefail
           [ "$DATABASE_SQL_RESULT" = success ]
           [ "$DETECT_RESULT" = success ]
+          [ "$OPENAPI_RESULT" = success ]
           case "$GO_RESULT" in success|skipped) ;; *) exit 1;; esac
           case "$FRONTEND_RESULT" in success|skipped) ;; *) exit 1;; esac
           [ "$CERTIFICATE_RESULT" = success ]
