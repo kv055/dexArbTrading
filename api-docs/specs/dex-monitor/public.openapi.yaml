@@ -470,6 +470,160 @@ paths:
       x-raw-reason: The dashboard deliberately preserves the upstream MM controller status, headers, and body.
       security:
         - dashboardSession: []
+  /api/mm-controller/bisq/wallet/balances:
+    get:
+      operationId: getApiMmControllerBisqWalletBalances
+      tags:
+        - raw
+      summary: GET /api/mm-controller/bisq/wallet/balances
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          description: Error response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/plain:
+              schema:
+                type: string
+      description: GET /api/mm-controller/bisq/wallet/balances
+      x-raw-reason: The dashboard deliberately preserves the upstream MM controller status, headers, and body.
+      security:
+        - dashboardSession: []
+  /api/mm-controller/bisq/wallet/addresses:
+    get:
+      operationId: getApiMmControllerBisqWalletAddresses
+      tags:
+        - raw
+      summary: GET /api/mm-controller/bisq/wallet/addresses
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          description: Error response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/plain:
+              schema:
+                type: string
+      description: GET /api/mm-controller/bisq/wallet/addresses
+      x-raw-reason: The dashboard deliberately preserves the upstream MM controller status, headers, and body.
+      security:
+        - dashboardSession: []
+  /api/mm-controller/bisq/wallet/transactions:
+    get:
+      operationId: getApiMmControllerBisqWalletTransactions
+      tags:
+        - raw
+      summary: GET /api/mm-controller/bisq/wallet/transactions
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          description: Error response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/plain:
+              schema:
+                type: string
+      description: GET /api/mm-controller/bisq/wallet/transactions
+      x-raw-reason: The dashboard deliberately preserves the upstream MM controller status, headers, and body.
+      security:
+        - dashboardSession: []
+  /api/mm-controller/bisq/wallet/withdraw:
+    post:
+      operationId: postApiMmControllerBisqWalletWithdraw
+      tags:
+        - raw
+      summary: POST /api/mm-controller/bisq/wallet/withdraw
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          description: Error response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/plain:
+              schema:
+                type: string
+      description: POST /api/mm-controller/bisq/wallet/withdraw
+      x-raw-reason: The dashboard deliberately preserves the upstream MM controller status, headers, and body.
+      security:
+        - dashboardSession: []
+  /api/mm-controller/bisq/wallet/unlock:
+    post:
+      operationId: postApiMmControllerBisqWalletUnlock
+      tags:
+        - raw
+      summary: POST /api/mm-controller/bisq/wallet/unlock
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        default:
+          description: Error response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/plain:
+              schema:
+                type: string
+      description: POST /api/mm-controller/bisq/wallet/unlock
+      x-raw-reason: The dashboard deliberately preserves the upstream MM controller status, headers, and body.
+      security:
+        - dashboardSession: []
   /api/mm-controller/cex/pre-trade-check:
     post:
       operationId: proxyRunCexPreTradeCheck
@@ -1432,8 +1586,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
         default:
           description: Error response
           content:
@@ -1465,8 +1621,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
         default:
           description: Error response
           content:
@@ -1519,8 +1677,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
         default:
           description: Error response
           content:
@@ -1634,8 +1794,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
         default:
           description: Error response
           content:
@@ -1755,8 +1917,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
         default:
           description: Error response
           content:

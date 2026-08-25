@@ -5551,13 +5551,13 @@ type GetApiPastOffersResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiPastOffersResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiPastOffersResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -5599,13 +5599,13 @@ type GetApiPastOffersIdLifecycleResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiPastOffersIdLifecycleResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiPastOffersIdLifecycleResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -5695,13 +5695,13 @@ type GetApiPastProfitableOrdersResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiPastProfitableOrdersResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiPastProfitableOrdersResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -5887,13 +5887,13 @@ type GetApiSnapshotLogResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiSnapshotLogResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiSnapshotLogResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -6079,13 +6079,13 @@ type GetApiTradingAccountsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiTradingAccountsResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiTradingAccountsResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -9409,7 +9409,7 @@ func ParseGetApiPastOffersResponse(rsp *http.Response) (*GetApiPastOffersRespons
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -9445,7 +9445,7 @@ func ParseGetApiPastOffersIdLifecycleResponse(rsp *http.Response) (*GetApiPastOf
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -9517,7 +9517,7 @@ func ParseGetApiPastProfitableOrdersResponse(rsp *http.Response) (*GetApiPastPro
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -9661,7 +9661,7 @@ func ParseGetApiSnapshotLogResponse(rsp *http.Response) (*GetApiSnapshotLogRespo
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -9805,7 +9805,7 @@ func ParseGetApiTradingAccountsResponse(rsp *http.Response) (*GetApiTradingAccou
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

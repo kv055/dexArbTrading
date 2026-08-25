@@ -491,6 +491,12 @@ type PostApiAccountsHealthCheckJSONBody map[string]interface{}
 // PostApiBisqPaymentAccountsJSONBody defines parameters for PostApiBisqPaymentAccounts.
 type PostApiBisqPaymentAccountsJSONBody map[string]interface{}
 
+// PostApiBisqWalletUnlockJSONBody defines parameters for PostApiBisqWalletUnlock.
+type PostApiBisqWalletUnlockJSONBody map[string]interface{}
+
+// PostApiBisqWalletWithdrawJSONBody defines parameters for PostApiBisqWalletWithdraw.
+type PostApiBisqWalletWithdrawJSONBody map[string]interface{}
+
 // TrackCexWithdrawalParams defines parameters for TrackCexWithdrawal.
 type TrackCexWithdrawalParams struct {
 	Provider        string  `form:"provider" json:"provider"`
@@ -542,6 +548,12 @@ type PostApiAccountsHealthCheckJSONRequestBody PostApiAccountsHealthCheckJSONBod
 
 // PostApiBisqPaymentAccountsJSONRequestBody defines body for PostApiBisqPaymentAccounts for application/json ContentType.
 type PostApiBisqPaymentAccountsJSONRequestBody PostApiBisqPaymentAccountsJSONBody
+
+// PostApiBisqWalletUnlockJSONRequestBody defines body for PostApiBisqWalletUnlock for application/json ContentType.
+type PostApiBisqWalletUnlockJSONRequestBody PostApiBisqWalletUnlockJSONBody
+
+// PostApiBisqWalletWithdrawJSONRequestBody defines body for PostApiBisqWalletWithdraw for application/json ContentType.
+type PostApiBisqWalletWithdrawJSONRequestBody PostApiBisqWalletWithdrawJSONBody
 
 // RunCexPreTradeCheckJSONRequestBody defines body for RunCexPreTradeCheck for application/json ContentType.
 type RunCexPreTradeCheckJSONRequestBody = CexPreTradeCheckRequest
@@ -929,6 +941,49 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/bisq/payment-methods/{id}/form (the `GetApiBisqPaymentMethodsIdForm` operationId).
 	GetApiBisqPaymentMethodsIdForm(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetApiBisqWalletAddresses GET /api/bisq/wallet/addresses
+	//
+	// Corresponds with GET /api/bisq/wallet/addresses (the `GetApiBisqWalletAddresses` operationId).
+	GetApiBisqWalletAddresses(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetApiBisqWalletBalances GET /api/bisq/wallet/balances
+	//
+	// Corresponds with GET /api/bisq/wallet/balances (the `GetApiBisqWalletBalances` operationId).
+	GetApiBisqWalletBalances(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetApiBisqWalletTransactions GET /api/bisq/wallet/transactions
+	//
+	// Corresponds with GET /api/bisq/wallet/transactions (the `GetApiBisqWalletTransactions` operationId).
+	GetApiBisqWalletTransactions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostApiBisqWalletUnlockWithBody POST /api/bisq/wallet/unlock
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/bisq/wallet/unlock (the `PostApiBisqWalletUnlock` operationId).
+	PostApiBisqWalletUnlockWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostApiBisqWalletUnlock POST /api/bisq/wallet/unlock
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/bisq/wallet/unlock (the `PostApiBisqWalletUnlock` operationId).
+	PostApiBisqWalletUnlock(ctx context.Context, body PostApiBisqWalletUnlockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostApiBisqWalletWithdrawWithBody POST /api/bisq/wallet/withdraw
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/bisq/wallet/withdraw (the `PostApiBisqWalletWithdraw` operationId).
+	PostApiBisqWalletWithdrawWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostApiBisqWalletWithdraw POST /api/bisq/wallet/withdraw
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/bisq/wallet/withdraw (the `PostApiBisqWalletWithdraw` operationId).
+	PostApiBisqWalletWithdraw(ctx context.Context, body PostApiBisqWalletWithdrawJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetApiCexBalances GET /api/cex/balances
 	//
@@ -1399,6 +1454,119 @@ func (c *Client) GetApiBisqPaymentMethods(ctx context.Context, reqEditors ...Req
 // Corresponds with GET /api/bisq/payment-methods/{id}/form (the `GetApiBisqPaymentMethodsIdForm` operationId).
 func (c *Client) GetApiBisqPaymentMethodsIdForm(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetApiBisqPaymentMethodsIdFormRequest(c.Server, id)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetApiBisqWalletAddresses GET /api/bisq/wallet/addresses
+//
+// Corresponds with GET /api/bisq/wallet/addresses (the `GetApiBisqWalletAddresses` operationId).
+func (c *Client) GetApiBisqWalletAddresses(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetApiBisqWalletAddressesRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetApiBisqWalletBalances GET /api/bisq/wallet/balances
+//
+// Corresponds with GET /api/bisq/wallet/balances (the `GetApiBisqWalletBalances` operationId).
+func (c *Client) GetApiBisqWalletBalances(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetApiBisqWalletBalancesRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetApiBisqWalletTransactions GET /api/bisq/wallet/transactions
+//
+// Corresponds with GET /api/bisq/wallet/transactions (the `GetApiBisqWalletTransactions` operationId).
+func (c *Client) GetApiBisqWalletTransactions(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetApiBisqWalletTransactionsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostApiBisqWalletUnlockWithBody POST /api/bisq/wallet/unlock
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/bisq/wallet/unlock (the `PostApiBisqWalletUnlock` operationId).
+func (c *Client) PostApiBisqWalletUnlockWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostApiBisqWalletUnlockRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostApiBisqWalletUnlock POST /api/bisq/wallet/unlock
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/bisq/wallet/unlock (the `PostApiBisqWalletUnlock` operationId).
+func (c *Client) PostApiBisqWalletUnlock(ctx context.Context, body PostApiBisqWalletUnlockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostApiBisqWalletUnlockRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostApiBisqWalletWithdrawWithBody POST /api/bisq/wallet/withdraw
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/bisq/wallet/withdraw (the `PostApiBisqWalletWithdraw` operationId).
+func (c *Client) PostApiBisqWalletWithdrawWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostApiBisqWalletWithdrawRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostApiBisqWalletWithdraw POST /api/bisq/wallet/withdraw
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/bisq/wallet/withdraw (the `PostApiBisqWalletWithdraw` operationId).
+func (c *Client) PostApiBisqWalletWithdraw(ctx context.Context, body PostApiBisqWalletWithdrawJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostApiBisqWalletWithdrawRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2537,6 +2705,167 @@ func NewGetApiBisqPaymentMethodsIdFormRequest(server string, id string) (*http.R
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewGetApiBisqWalletAddressesRequest constructs an http.Request for the GetApiBisqWalletAddresses method
+func NewGetApiBisqWalletAddressesRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/bisq/wallet/addresses")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetApiBisqWalletBalancesRequest constructs an http.Request for the GetApiBisqWalletBalances method
+func NewGetApiBisqWalletBalancesRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/bisq/wallet/balances")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetApiBisqWalletTransactionsRequest constructs an http.Request for the GetApiBisqWalletTransactions method
+func NewGetApiBisqWalletTransactionsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/bisq/wallet/transactions")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPostApiBisqWalletUnlockRequest calls the generic PostApiBisqWalletUnlock builder with application/json body
+func NewPostApiBisqWalletUnlockRequest(server string, body PostApiBisqWalletUnlockJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostApiBisqWalletUnlockRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPostApiBisqWalletUnlockRequestWithBody constructs an http.Request for the PostApiBisqWalletUnlock method, with any body, and a specified content type
+func NewPostApiBisqWalletUnlockRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/bisq/wallet/unlock")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewPostApiBisqWalletWithdrawRequest calls the generic PostApiBisqWalletWithdraw builder with application/json body
+func NewPostApiBisqWalletWithdrawRequest(server string, body PostApiBisqWalletWithdrawJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostApiBisqWalletWithdrawRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPostApiBisqWalletWithdrawRequestWithBody constructs an http.Request for the PostApiBisqWalletWithdraw method, with any body, and a specified content type
+func NewPostApiBisqWalletWithdrawRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/bisq/wallet/withdraw")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -4075,6 +4404,55 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/bisq/payment-methods/{id}/form (the `GetApiBisqPaymentMethodsIdForm` operationId).
 	GetApiBisqPaymentMethodsIdFormWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetApiBisqPaymentMethodsIdFormResponse, error)
 
+	// GetApiBisqWalletAddressesWithResponse GET /api/bisq/wallet/addresses
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/bisq/wallet/addresses (the `GetApiBisqWalletAddresses` operationId).
+	GetApiBisqWalletAddressesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetApiBisqWalletAddressesResponse, error)
+
+	// GetApiBisqWalletBalancesWithResponse GET /api/bisq/wallet/balances
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/bisq/wallet/balances (the `GetApiBisqWalletBalances` operationId).
+	GetApiBisqWalletBalancesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetApiBisqWalletBalancesResponse, error)
+
+	// GetApiBisqWalletTransactionsWithResponse GET /api/bisq/wallet/transactions
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/bisq/wallet/transactions (the `GetApiBisqWalletTransactions` operationId).
+	GetApiBisqWalletTransactionsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetApiBisqWalletTransactionsResponse, error)
+
+	// PostApiBisqWalletUnlockWithBodyWithResponse POST /api/bisq/wallet/unlock
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/bisq/wallet/unlock (the `PostApiBisqWalletUnlock` operationId).
+	PostApiBisqWalletUnlockWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostApiBisqWalletUnlockResponse, error)
+
+	// PostApiBisqWalletUnlockWithResponse POST /api/bisq/wallet/unlock
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/bisq/wallet/unlock (the `PostApiBisqWalletUnlock` operationId).
+	PostApiBisqWalletUnlockWithResponse(ctx context.Context, body PostApiBisqWalletUnlockJSONRequestBody, reqEditors ...RequestEditorFn) (*PostApiBisqWalletUnlockResponse, error)
+
+	// PostApiBisqWalletWithdrawWithBodyWithResponse POST /api/bisq/wallet/withdraw
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/bisq/wallet/withdraw (the `PostApiBisqWalletWithdraw` operationId).
+	PostApiBisqWalletWithdrawWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostApiBisqWalletWithdrawResponse, error)
+
+	// PostApiBisqWalletWithdrawWithResponse POST /api/bisq/wallet/withdraw
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/bisq/wallet/withdraw (the `PostApiBisqWalletWithdraw` operationId).
+	PostApiBisqWalletWithdrawWithResponse(ctx context.Context, body PostApiBisqWalletWithdrawJSONRequestBody, reqEditors ...RequestEditorFn) (*PostApiBisqWalletWithdrawResponse, error)
+
 	// GetApiCexBalancesWithResponse GET /api/cex/balances
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -4770,6 +5148,246 @@ func (r GetApiBisqPaymentMethodsIdFormResponse) ContentType() string {
 	return ""
 }
 
+type GetApiBisqWalletAddressesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *map[string]interface{}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetApiBisqWalletAddressesResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetApiBisqWalletAddressesResponse) GetJSONDefault() *map[string]interface{} {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetApiBisqWalletAddressesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetApiBisqWalletAddressesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetApiBisqWalletAddressesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetApiBisqWalletAddressesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetApiBisqWalletBalancesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *map[string]interface{}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetApiBisqWalletBalancesResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetApiBisqWalletBalancesResponse) GetJSONDefault() *map[string]interface{} {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetApiBisqWalletBalancesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetApiBisqWalletBalancesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetApiBisqWalletBalancesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetApiBisqWalletBalancesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetApiBisqWalletTransactionsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *map[string]interface{}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetApiBisqWalletTransactionsResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetApiBisqWalletTransactionsResponse) GetJSONDefault() *map[string]interface{} {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetApiBisqWalletTransactionsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetApiBisqWalletTransactionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetApiBisqWalletTransactionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetApiBisqWalletTransactionsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PostApiBisqWalletUnlockResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *map[string]interface{}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PostApiBisqWalletUnlockResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PostApiBisqWalletUnlockResponse) GetJSONDefault() *map[string]interface{} {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PostApiBisqWalletUnlockResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PostApiBisqWalletUnlockResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostApiBisqWalletUnlockResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PostApiBisqWalletUnlockResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PostApiBisqWalletWithdrawResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *map[string]interface{}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PostApiBisqWalletWithdrawResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PostApiBisqWalletWithdrawResponse) GetJSONDefault() *map[string]interface{} {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PostApiBisqWalletWithdrawResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PostApiBisqWalletWithdrawResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostApiBisqWalletWithdrawResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PostApiBisqWalletWithdrawResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetApiCexBalancesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4822,13 +5440,13 @@ type GetApiCexDepositAddressesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiCexDepositAddressesResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiCexDepositAddressesResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -4987,13 +5605,13 @@ type GetApiCexSpotTradesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiCexSpotTradesResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiCexSpotTradesResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -5104,13 +5722,13 @@ type GetApiCexWithdrawalAddressesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiCexWithdrawalAddressesResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiCexWithdrawalAddressesResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -5605,13 +6223,13 @@ type GetApiLndLspChannelMagmaOffersResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiLndLspChannelMagmaOffersResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiLndLspChannelMagmaOffersResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -5653,13 +6271,13 @@ type GetApiLndLspChannelMagmaOrdersResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiLndLspChannelMagmaOrdersResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiLndLspChannelMagmaOrdersResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -5900,13 +6518,13 @@ type GetApiLndSubmarineSwapsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiLndSubmarineSwapsResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiLndSubmarineSwapsResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -7036,6 +7654,97 @@ func (c *ClientWithResponses) GetApiBisqPaymentMethodsIdFormWithResponse(ctx con
 	return ParseGetApiBisqPaymentMethodsIdFormResponse(rsp)
 }
 
+// GetApiBisqWalletAddressesWithResponse GET /api/bisq/wallet/addresses
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/bisq/wallet/addresses (the `GetApiBisqWalletAddresses` operationId).
+func (c *ClientWithResponses) GetApiBisqWalletAddressesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetApiBisqWalletAddressesResponse, error) {
+	rsp, err := c.GetApiBisqWalletAddresses(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetApiBisqWalletAddressesResponse(rsp)
+}
+
+// GetApiBisqWalletBalancesWithResponse GET /api/bisq/wallet/balances
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/bisq/wallet/balances (the `GetApiBisqWalletBalances` operationId).
+func (c *ClientWithResponses) GetApiBisqWalletBalancesWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetApiBisqWalletBalancesResponse, error) {
+	rsp, err := c.GetApiBisqWalletBalances(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetApiBisqWalletBalancesResponse(rsp)
+}
+
+// GetApiBisqWalletTransactionsWithResponse GET /api/bisq/wallet/transactions
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/bisq/wallet/transactions (the `GetApiBisqWalletTransactions` operationId).
+func (c *ClientWithResponses) GetApiBisqWalletTransactionsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetApiBisqWalletTransactionsResponse, error) {
+	rsp, err := c.GetApiBisqWalletTransactions(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetApiBisqWalletTransactionsResponse(rsp)
+}
+
+// PostApiBisqWalletUnlockWithBodyWithResponse POST /api/bisq/wallet/unlock
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/bisq/wallet/unlock (the `PostApiBisqWalletUnlock` operationId).
+func (c *ClientWithResponses) PostApiBisqWalletUnlockWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostApiBisqWalletUnlockResponse, error) {
+	rsp, err := c.PostApiBisqWalletUnlockWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostApiBisqWalletUnlockResponse(rsp)
+}
+
+// PostApiBisqWalletUnlockWithResponse POST /api/bisq/wallet/unlock
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/bisq/wallet/unlock (the `PostApiBisqWalletUnlock` operationId).
+func (c *ClientWithResponses) PostApiBisqWalletUnlockWithResponse(ctx context.Context, body PostApiBisqWalletUnlockJSONRequestBody, reqEditors ...RequestEditorFn) (*PostApiBisqWalletUnlockResponse, error) {
+	rsp, err := c.PostApiBisqWalletUnlock(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostApiBisqWalletUnlockResponse(rsp)
+}
+
+// PostApiBisqWalletWithdrawWithBodyWithResponse POST /api/bisq/wallet/withdraw
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/bisq/wallet/withdraw (the `PostApiBisqWalletWithdraw` operationId).
+func (c *ClientWithResponses) PostApiBisqWalletWithdrawWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostApiBisqWalletWithdrawResponse, error) {
+	rsp, err := c.PostApiBisqWalletWithdrawWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostApiBisqWalletWithdrawResponse(rsp)
+}
+
+// PostApiBisqWalletWithdrawWithResponse POST /api/bisq/wallet/withdraw
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/bisq/wallet/withdraw (the `PostApiBisqWalletWithdraw` operationId).
+func (c *ClientWithResponses) PostApiBisqWalletWithdrawWithResponse(ctx context.Context, body PostApiBisqWalletWithdrawJSONRequestBody, reqEditors ...RequestEditorFn) (*PostApiBisqWalletWithdrawResponse, error) {
+	rsp, err := c.PostApiBisqWalletWithdraw(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostApiBisqWalletWithdrawResponse(rsp)
+}
+
 // GetApiCexBalancesWithResponse GET /api/cex/balances
 //
 // Returns a wrapper object for the known response body format(s).
@@ -8006,6 +8715,186 @@ func ParseGetApiBisqPaymentMethodsIdFormResponse(rsp *http.Response) (*GetApiBis
 	return response, nil
 }
 
+// ParseGetApiBisqWalletAddressesResponse parses an HTTP response from a GetApiBisqWalletAddressesWithResponse call
+func ParseGetApiBisqWalletAddressesResponse(rsp *http.Response) (*GetApiBisqWalletAddressesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetApiBisqWalletAddressesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	case true:
+		// Content-type (text/plain) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParseGetApiBisqWalletBalancesResponse parses an HTTP response from a GetApiBisqWalletBalancesWithResponse call
+func ParseGetApiBisqWalletBalancesResponse(rsp *http.Response) (*GetApiBisqWalletBalancesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetApiBisqWalletBalancesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	case true:
+		// Content-type (text/plain) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParseGetApiBisqWalletTransactionsResponse parses an HTTP response from a GetApiBisqWalletTransactionsWithResponse call
+func ParseGetApiBisqWalletTransactionsResponse(rsp *http.Response) (*GetApiBisqWalletTransactionsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetApiBisqWalletTransactionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	case true:
+		// Content-type (text/plain) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParsePostApiBisqWalletUnlockResponse parses an HTTP response from a PostApiBisqWalletUnlockWithResponse call
+func ParsePostApiBisqWalletUnlockResponse(rsp *http.Response) (*PostApiBisqWalletUnlockResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostApiBisqWalletUnlockResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	case true:
+		// Content-type (text/plain) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParsePostApiBisqWalletWithdrawResponse parses an HTTP response from a PostApiBisqWalletWithdrawWithResponse call
+func ParsePostApiBisqWalletWithdrawResponse(rsp *http.Response) (*PostApiBisqWalletWithdrawResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostApiBisqWalletWithdrawResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	case true:
+		// Content-type (text/plain) unsupported
+
+	}
+
+	return response, nil
+}
+
 // ParseGetApiCexBalancesResponse parses an HTTP response from a GetApiCexBalancesWithResponse call
 func ParseGetApiCexBalancesResponse(rsp *http.Response) (*GetApiCexBalancesResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -8057,7 +8946,7 @@ func ParseGetApiCexDepositAddressesResponse(rsp *http.Response) (*GetApiCexDepos
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -8183,7 +9072,7 @@ func ParseGetApiCexSpotTradesResponse(rsp *http.Response) (*GetApiCexSpotTradesR
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -8273,7 +9162,7 @@ func ParseGetApiCexWithdrawalAddressesResponse(rsp *http.Response) (*GetApiCexWi
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -8651,7 +9540,7 @@ func ParseGetApiLndLspChannelMagmaOffersResponse(rsp *http.Response) (*GetApiLnd
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -8687,7 +9576,7 @@ func ParseGetApiLndLspChannelMagmaOrdersResponse(rsp *http.Response) (*GetApiLnd
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -8874,7 +9763,7 @@ func ParseGetApiLndSubmarineSwapsResponse(rsp *http.Response) (*GetApiLndSubmari
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
