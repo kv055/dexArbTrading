@@ -91,21 +91,37 @@ function generateLegacyBridge(contract, locations, packageName) {
   if (!methods.length) throw new Error(`${contract.id}: generated StrictServerInterface has no operations`);
 
   const spec = parse(fs.readFileSync(path.join(root, contract.source), 'utf8'));
-  let responseProbe;
+  const responseProbes = [];
+  let defaultResponseProbe;
   for (const [routePath, pathItem] of Object.entries(spec.paths ?? {})) {
     for (const [method, operation] of Object.entries(pathItem)) {
       if (!['get', 'put', 'post', 'delete', 'patch'].includes(method)) continue;
-      if (operation.responses?.['200']?.content?.['application/json'] && operation.responses?.default?.content?.['text/plain']) {
-        responseProbe = {
+      if (operation.tags?.includes('raw')) continue;
+      const success = Object.entries(operation.responses ?? {}).find(([status, response]) =>
+        /^2\d\d$/.test(status) && response?.content?.['application/json']?.schema
+      );
+      if (success) {
+        responseProbes.push({
+          method: method.toUpperCase(),
+          path: routePath.replaceAll(/\{[^}]+\}/g, '1'),
+          status: Number(success[0]),
+          operationId: operation.operationId,
+        });
+      }
+      if (!defaultResponseProbe && operation.responses?.default?.content?.['text/plain']) {
+        defaultResponseProbe = {
           method: method.toUpperCase(),
           path: routePath.replaceAll(/\{[^}]+\}/g, '1'),
         };
-        break;
       }
     }
-    if (responseProbe) break;
   }
-  if (!responseProbe) throw new Error(`${contract.id}: no JSON success/text default operation available for bridge tests`);
+  if (!responseProbes.length || !defaultResponseProbe) {
+    throw new Error(`${contract.id}: no JSON success/text default operation available for bridge tests`);
+  }
+  const responseProbeCases = responseProbes.map((probe) =>
+    `\t\t{name: ${JSON.stringify(probe.operationId)}, method: ${JSON.stringify(probe.method)}, path: ${JSON.stringify(probe.path)}, status: ${probe.status}},`
+  ).join('\n');
 
   const responseTypes = methods.map((method) => `
 type legacy${method.name}Response struct {
@@ -284,24 +300,36 @@ import (
 \t"testing"
 )
 
-func TestLegacyStrictServerRejectsContractViolation(t *testing.T) {
-\tserver, err := newLegacyStrictServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-\t\tw.Header().Set("Content-Type", "application/json")
-\t\tw.WriteHeader(http.StatusOK)
-\t\t_, _ = w.Write([]byte("null"))
-\t}))
-\tif err != nil {
-\t\tt.Fatalf("newLegacyStrictServer() error = %v", err)
+func TestLegacyStrictServerRejectsContractViolationForEveryJSONSuccess(t *testing.T) {
+\ttests := []struct {
+\t\tname   string
+\t\tmethod string
+\t\tpath   string
+\t\tstatus int
+\t}{
+${responseProbeCases}
 \t}
-\trequest := httptest.NewRequest("${responseProbe.method}", "${responseProbe.path}", nil)
-\tresponse := httptest.NewRecorder()
+\tfor _, test := range tests {
+\t\tt.Run(test.name, func(t *testing.T) {
+\t\t\tserver, err := newLegacyStrictServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+\t\t\t\tw.Header().Set("Content-Type", "application/json")
+\t\t\t\tw.WriteHeader(test.status)
+\t\t\t\t_, _ = w.Write([]byte("null"))
+\t\t\t}))
+\t\t\tif err != nil {
+\t\t\t\tt.Fatalf("newLegacyStrictServer() error = %v", err)
+\t\t\t}
+\t\t\trequest := httptest.NewRequest(test.method, test.path, nil)
+\t\t\tresponse := httptest.NewRecorder()
 
-\terr = server.serveLegacy(response, &legacyRequest{request: request})
-\tif err == nil || !strings.Contains(err.Error(), "violates generated OpenAPI contract") {
-\t\tt.Fatalf("serveLegacy() error = %v, want contract violation", err)
-\t}
-\tif response.Body.Len() != 0 || response.Header().Get("Content-Type") != "" {
-\t\tt.Fatalf("invalid response leaked to client: headers = %v, body = %q", response.Header(), response.Body.String())
+\t\t\terr = server.serveLegacy(response, &legacyRequest{request: request})
+\t\t\tif err == nil || !strings.Contains(err.Error(), "violates generated OpenAPI contract") {
+\t\t\t\tt.Fatalf("serveLegacy() error = %v, want contract violation", err)
+\t\t\t}
+\t\t\tif response.Body.Len() != 0 || response.Header().Get("Content-Type") != "" {
+\t\t\t\tt.Fatalf("invalid response leaked to client: headers = %v, body = %q", response.Header(), response.Body.String())
+\t\t\t}
+\t\t})
 \t}
 }
 
@@ -314,7 +342,7 @@ func TestLegacyStrictServerPassesValidDefaultResponse(t *testing.T) {
 \tif err != nil {
 \t\tt.Fatalf("newLegacyStrictServer() error = %v", err)
 \t}
-\trequest := httptest.NewRequest("${responseProbe.method}", "${responseProbe.path}", nil)
+\trequest := httptest.NewRequest("${defaultResponseProbe.method}", "${defaultResponseProbe.path}", nil)
 \tresponse := httptest.NewRecorder()
 
 \tif err := server.serveLegacy(response, &legacyRequest{request: request}); err != nil {
@@ -334,7 +362,7 @@ func TestLegacyStrictServerPassesValidJSONDefaultResponse(t *testing.T) {
 \tif err != nil {
 \t\tt.Fatalf("newLegacyStrictServer() error = %v", err)
 \t}
-\trequest := httptest.NewRequest("${responseProbe.method}", "${responseProbe.path}", nil)
+\trequest := httptest.NewRequest("${defaultResponseProbe.method}", "${defaultResponseProbe.path}", nil)
 \tresponse := httptest.NewRecorder()
 
 \tif err := server.serveLegacy(response, &legacyRequest{request: request}); err != nil {

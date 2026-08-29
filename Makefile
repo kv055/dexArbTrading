@@ -19,7 +19,7 @@ DEADCODE_VERSION := v0.48.0
 .DEFAULT_GOAL := help
 .PHONY: help staging-up staging-wait staging-down staging-logs staging-rebuild staging-ps staging-env-check \
 	prune docker-reclaim sonar-up sonar-scan sonar-down sonar-reset compose-validate backend-tools backend-check \
-	api-install api-bundle api-lint api-route-check api-generate api-check
+	api-install api-bundle api-lint api-route-check api-generate api-check api-contract-test
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -99,6 +99,13 @@ api-generate: ## Regenerate committed Go and TypeScript API artifacts
 
 api-check: ## Verify OpenAPI lint, route coverage, and committed generated artifacts
 	node tools/openapi/contracts.mjs check
+
+api-contract-test: ## Exercise registered handlers through generated OpenAPI validators
+	@for module in dexUnifiedApi dexMmController dexMonitor dexFiatController; do \
+		echo "==> $$module OpenAPI contract tests"; \
+		(cd $$module && GOCACHE=/tmp/dexarb-openapi-gocache/$$module \
+			go test ./... -run 'OpenAPI|ResponseValidation|LegacyStrictServer'); \
+	done
 
 prune: ## Drop stale remote refs and delete local branches already merged into develop
 	@git fetch origin --prune

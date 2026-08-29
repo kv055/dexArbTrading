@@ -410,6 +410,9 @@ jobs:
       - name: Verify contracts and committed generated artifacts
         run: make api-check
 
+      - name: Exercise registered handlers against contracts
+        run: make api-contract-test
+
   test-frontend:
     name: Frontend tests
     needs: detect-changes

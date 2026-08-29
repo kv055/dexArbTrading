@@ -16,6 +16,16 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// LifecyclePoint defines model for LifecyclePoint.
+type LifecyclePoint struct {
+	NetPremiumPct *float32 `json:"net_premium_pct,omitempty"`
+	Price         float32  `json:"price"`
+	Time          string   `json:"time"`
+}
+
+// LiveOffer Enriched live DEX offer returned by the unified routing book.
+type LiveOffer map[string]interface{}
+
 // PutApiCexPermissionsProviderJSONBody defines parameters for PutApiCexPermissionsProvider.
 type PutApiCexPermissionsProviderJSONBody map[string]interface{}
 
@@ -628,13 +638,13 @@ type GetApiLiveOffersResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]LiveOffer
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiLiveOffersResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiLiveOffersResponse) GetJSON200() *[]LiveOffer {
 	return r.JSON200
 }
 
@@ -676,13 +686,13 @@ type GetApiLiveOffersIdLifecycleResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]LifecyclePoint
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiLiveOffersIdLifecycleResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiLiveOffersIdLifecycleResponse) GetJSON200() *[]LifecyclePoint {
 	return r.JSON200
 }
 
@@ -994,7 +1004,7 @@ func ParseGetApiLiveOffersResponse(rsp *http.Response) (*GetApiLiveOffersRespons
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []LiveOffer
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -1030,7 +1040,7 @@ func ParseGetApiLiveOffersIdLifecycleResponse(rsp *http.Response) (*GetApiLiveOf
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []LifecyclePoint
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

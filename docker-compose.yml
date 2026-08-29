@@ -459,12 +459,6 @@ services:
       # POSTGRES_HOST/PORT/DB/USER/PASSWORD (see resolveDatabaseURL in main.go),
       # so the bridge-network host is set here without re-stating credentials.
       - POSTGRES_HOST=postgres
-      # Internal traffic hits unified-api directly on the bridge network.
-      # The /internal/ws/live_offers route is secret-gated (X-Internal-Secret),
-      # not session-cookie-gated like the browser /ws/live_offers path — the
-      # premium-offer watcher is a service-to-service caller with no cookie.
-      # INTERNAL_API_SECRET must match unified-api's (root .env).
-      - OFFER_PREMIUM_WSS_URL=ws://unified-api:5010/internal/ws/live_offers?cex=kraken
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - LND_HOST=https://lnd:8080
       # The manual LND health check uses this same in-network proxy and credentials
