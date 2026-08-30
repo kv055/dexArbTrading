@@ -261,6 +261,10 @@ services:
       # a successful snapshot still removes absent offers immediately.
       - LIVE_OFFER_STALE_GRACE=5m
       - CLOSED_OFFER_ANALYSIS_GRACE_CYCLES=3
+      # Drop order_lifecycle rows older than this many days. 0 disables the
+      # sweep. Batched with a per-cycle time budget so a 47M-row backlog drains
+      # across several snapshot passes instead of stalling one cycle.
+      - LIFECYCLE_RETENTION_DAYS=${LIFECYCLE_RETENTION_DAYS:-30}
       # A full eight-currency pass can exceed three minutes while Tor-backed
       # sources time out. Keep the worker healthy throughout a valid pass.
       - SNAPSHOT_HEALTH_MAX_AGE_SEC=900

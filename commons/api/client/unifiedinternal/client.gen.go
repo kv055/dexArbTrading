@@ -1148,6 +1148,9 @@ func ParsePostInternalLiveOffersResponse(rsp *http.Response) (*PostInternalLiveO
 		}
 		response.JSON200 = &dest
 
+	case rsp.StatusCode == 202:
+		break // No content-type
+
 	case rsp.StatusCode == 204:
 		break // No content-type
 
