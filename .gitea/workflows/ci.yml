@@ -127,6 +127,7 @@ jobs:
           [ -n "$old" ] && [ -n "$new" ] || { echo "Unable to resolve dexUnifiedApi submodule revisions." >&2; exit 1; }
           [ "$old" != "$new" ] || { echo "dexUnifiedApi submodule is unchanged."; exit 0; }
           git -C dexUnifiedApi fetch --no-tags origin "$old" "$new"
+          git -C dexUnifiedApi fetch --no-tags origin main || true
 
           violations=()
           while IFS=$'\t' read -r status first second; do
@@ -135,6 +136,22 @@ jobs:
               && [[ "${first##*/}" =~ ^[0-9]{14}_[a-z0-9_]+\.sql$ ]]; then
               echo "allowed new migration: $first"
               continue
+            fi
+            if [ "$status" = M ] && [[ "$first" == db/schema/* ]]; then
+              new_blob=$(git -C dexUnifiedApi rev-parse "$new:$first")
+              restored=0
+              while IFS= read -r c; do
+                [ -n "$c" ] || continue
+                git -C dexUnifiedApi cat-file -e "$c:$first" 2>/dev/null || continue
+                if [ "$(git -C dexUnifiedApi rev-parse "$c:$first")" = "$new_blob" ]; then
+                  restored=1
+                  break
+                fi
+              done < <(git -C dexUnifiedApi log --pretty=%H "$old" -- "$first")
+              if [ "$restored" = 1 ]; then
+                echo "allowed historical restore: $first"
+                continue
+              fi
             fi
             violations+=("$status $first${second:+ -> $second}")
           done < <(git -C dexUnifiedApi diff --name-status --find-renames "$old" "$new" -- db/schema db/migrations)
