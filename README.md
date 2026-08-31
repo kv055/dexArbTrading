@@ -11,7 +11,6 @@ The repository is organized as a parent deployment repo with several component r
 - `dexMonitor` serves the React dashboard plus monitor-facing REST and WebSocket APIs.
 - `dexMmController` tracks arbitrage transactions, wallet addresses, account health, premium offers, LND wallet access, and DEX offer execution.
 - `dexFiatController` automates fiat account monitoring and payment notification forwarding for PayPal, Wise, and Revolut.
-- `dexMmTradingLogicHummingBot` contains the Hummingbot strategy/controller code used for CEX-side BTC execution and withdrawal experiments.
 - `commons` is a shared Go module for price feeds, trade-cost calculation, hedge modelling, and Bitcoin fee analysis.
 - `deploy` contains the VPS webhook deploy helper.
 
@@ -27,7 +26,7 @@ At runtime the stack centers on Postgres:
 6. `dexFiatController` reads connector credentials from the shared database, monitors fiat services, and forwards payment events to `dexUnifiedApi`.
 7. `postgres-backup` periodically creates compressed logical backups and uploads them with `rclone`.
 
-External dependencies include Tor, Bisq, LND, optional Hummingbot/OpenClaw services, CEX APIs, and fiat-provider web sessions.
+External dependencies include Tor, Bisq, LND, optional OpenClaw services, CEX APIs, and fiat-provider web sessions.
 
 ## Repository Layout
 
@@ -40,7 +39,6 @@ External dependencies include Tor, Bisq, LND, optional Hummingbot/OpenClaw servi
 +-- dexMonitor/                     # Dashboard server and React frontend
 +-- dexMmController/                # Transaction, wallet, account-health, and offer execution service
 +-- dexFiatController/              # Fiat connector automation and TOTP helper service
-+-- dexMmTradingLogicHummingBot/    # Hummingbot strategy/controller code
 +-- nginx/                          # Local reverse proxy for dashboard/API
 +-- deploy/                     # Webhook-based deployment scripts
 ```

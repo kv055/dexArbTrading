@@ -186,6 +186,9 @@ jobs:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_REF: ${{ github.event.ref }}
         run: |
           set -Eeuo pipefail
           ALL_SERVICES="tor,bisq,bisq2,unified-api,unified-snapshot,postgres-backup,dexmonitor,mm-controller,fiat-controller"
@@ -299,6 +302,20 @@ jobs:
           }
 
           if [ "${EVENT:-}" = "workflow_dispatch" ]; then emit_all "manual trigger -> build all"; exit 0; fi
+
+          # A prior main commit can pass review but fail before deployment. If
+          # the next main push only builds its immediate Git diff, images from
+          # the failed release are silently inherited forever. Production
+          # promotions are infrequent enough that rebuilding every service is
+          # preferable to a version-skewed release marked healthy.
+          if [ "${EVENT:-}" = "push" ] && {
+            [ "${REF:-}" = "refs/heads/main" ] ||
+            [ "${REF_NAME:-}" = "main" ] ||
+            [ "${EVENT_REF:-}" = "refs/heads/main" ];
+          }; then
+            emit_all "main push -> build all services for a coherent release"
+            exit 0
+          fi
 
           if [ "${EVENT:-}" = "pull_request" ]; then BASE="${PR_BASE:-}"; HEAD="${PR_HEAD:-}"
           else BASE="${BEFORE:-}"; HEAD="${AFTER:-}"; fi

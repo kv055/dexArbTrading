@@ -25,7 +25,7 @@ $EDITOR deploy/provision/terraform/terraform.tfvars
 deploy/provision/run.sh [--key ~/.ssh/your_key] [--edge-mode production|development]
 ```
 
-This creates a **cx33** server (4 vCPU, 8 GB RAM, 80 GB disk, Debian 12) in `hel1` (Helsinki), configures it with Docker CE and the `deploy` user, clones the repo to `/opt/dexArbTrading`, and writes all 11 GitHub repository secrets. The next push to `main` deploys the full compose stack automatically — including auto-generating nginx's self-signed TLS cert on the VPS (no manual cert step; see [monitoring/README.md](monitoring/README.md#access)).
+This creates a **cx33** server (4 vCPU, 8 GB RAM, 80 GB disk, Debian 12) in `hel1` (Helsinki), configures it with Docker CE and the `deploy` user, clones a thin parent-repository checkout to `/opt/dexArbTrading`, and writes all 11 GitHub repository secrets. The next push to `main` deploys the full compose stack automatically — including auto-generating nginx's self-signed TLS cert on the VPS (no manual cert step; see [monitoring/README.md](monitoring/README.md#access)).
 
 The script is idempotent — safe to re-run if it fails partway through.
 
@@ -139,11 +139,10 @@ SERVER_IP=$(terraform output -raw server_ip)
 cd deploy/provision/ansible
 sed "s/SERVER_IP/$SERVER_IP/" inventory.ini.tpl > inventory.ini
 ansible-playbook -i inventory.ini playbook.yml \
-  --private-key ~/.ssh/your_key \
-  --extra-vars "gh_pat=<your-GH_PAT>"
+  --private-key ~/.ssh/your_key
 ```
 
-Ansible installs Docker CE, adds the `deploy` user to the `docker` group, configures log rotation, and clones the repo (including private submodules) to `/opt/dexArbTrading`. The `gh_pat` extra-var is required for the submodule clone to authenticate.
+Ansible installs Docker CE, adds the `deploy` user to the `docker` group, configures log rotation, and clones only the parent production repo to `/opt/dexArbTrading`. Service source remains in CI; the VPS pulls pre-built images and keeps submodule worktrees deinitialized.
 
 ### 3 — Wire up CI/CD
 

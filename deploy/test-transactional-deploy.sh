@@ -16,11 +16,13 @@ git -C "$fake_repo" init -q
 git -C "$fake_repo" config user.name "deploy-test"
 git -C "$fake_repo" config user.email "deploy-test@example.invalid"
 mkdir -p "$fake_repo/deploy/nginx"
+mkdir -p "$fake_repo/dexMonitor"
 touch "$fake_repo/docker-compose.yml"
+printf 'previous\n' >"$fake_repo/dexMonitor/build-input"
 printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$1" >>"${MOCK_CERT_LOG:?}"\n' \
   >"$fake_repo/deploy/nginx/letsencrypt.sh"
 chmod +x "$fake_repo/deploy/nginx/letsencrypt.sh"
-git -C "$fake_repo" add docker-compose.yml deploy/nginx/letsencrypt.sh
+git -C "$fake_repo" add docker-compose.yml deploy/nginx/letsencrypt.sh dexMonitor/build-input
 git -C "$fake_repo" commit -qm "previous"
 previous_sha="$(git -C "$fake_repo" rev-parse HEAD)"
 printf '%s\n' "$previous_sha" >"$fake_repo/.deployed_sha"
@@ -115,6 +117,23 @@ grep -q "^UNIFIED_SNAPSHOT_IMAGE_TAG=$candidate_sha$" \
   "$fake_repo/.deploy/releases/$candidate_sha/images.env"
 grep -q "^UNIFIED_SNAPSHOT_IMAGE_TAG=$previous_sha$" \
   "$fake_repo/.deploy/releases/$previous_sha/images.env"
+
+# A service omitted after its last active image's build inputs changed must be
+# rejected before Compose can report a misleading healthy deployment.
+printf 'stale monitor image\n' >"$fake_repo/dexMonitor/build-input"
+git -C "$fake_repo" add dexMonitor/build-input
+git -C "$fake_repo" commit -qm "omit changed monitor"
+omitted_monitor_sha="$(git -C "$fake_repo" rev-parse HEAD)"
+stage="$(make_stage "$omitted_monitor_sha" omitted-monitor)"
+if "$deployer" \
+  --repo-dir "$fake_repo" \
+  --sha "$omitted_monitor_sha" \
+  --env-bundle "$stage/env" \
+  --changed-services ""; then
+  echo "expected stale omitted monitor image to be rejected" >&2
+  exit 1
+fi
+git -C "$fake_repo" checkout -q --detach "$candidate_sha"
 
 printf 'frontend\n' >"$fake_repo/release-marker"
 git -C "$fake_repo" add release-marker

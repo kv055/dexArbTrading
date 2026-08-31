@@ -195,6 +195,7 @@ jobs:
           AFTER: ${{ github.sha }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          REF: ${{ github.ref }}
         run: |
           set -Eeuo pipefail
           ALL_SERVICES="tor,bisq,bisq2,unified-api,unified-snapshot,postgres-backup,dexmonitor,mm-controller,fiat-controller"
@@ -308,6 +309,14 @@ jobs:
           }
 
           if [ "${EVENT:-}" = "workflow_dispatch" ]; then emit_all "manual trigger -> build all"; exit 0; fi
+
+          # Never inherit per-service image tags across production releases.
+          # A skipped/failed deployment can otherwise make the next push's
+          # immediate diff smaller than the cumulative undeployed change.
+          if [ "${EVENT:-}" = "push" ] && [ "${REF:-}" = "refs/heads/main" ]; then
+            emit_all "main push -> build all services for a coherent release"
+            exit 0
+          fi
 
           if [ "${EVENT:-}" = "pull_request" ]; then BASE="${PR_BASE:-}"; HEAD="${PR_HEAD:-}"
           else BASE="${BEFORE:-}"; HEAD="${AFTER:-}"; fi

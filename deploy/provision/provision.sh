@@ -125,7 +125,6 @@ for i in {1..30}; do
   sleep 2
 done
 
-GH_PAT_VALUE="$(grep '^GH_PAT=' "$REPO_ROOT/.env" | cut -d= -f2- || true)"
 GODADDY_PAT_VALUE="$(grep '^GODADDY_PAT=' "$REPO_ROOT/.env" | cut -d= -f2- || true)"
 PUBLIC_HOSTNAME_VALUE="$(grep '^PUBLIC_HOSTNAME=' "$REPO_ROOT/.env" | cut -d= -f2- || true)"
 LETSENCRYPT_EMAIL_VALUE="$(grep '^LETSENCRYPT_EMAIL=' "$REPO_ROOT/.env" | cut -d= -f2- || true)"
@@ -133,7 +132,7 @@ PUBLIC_HOSTNAME_VALUE="${PUBLIC_HOSTNAME_VALUE:-dexmonitor.live}"
 ANSIBLE_ARGS=(
   -i "$INVENTORY" playbook.yml
   --private-key "$SSH_PRIVATE_KEY"
-  --extra-vars "gh_pat=$GH_PAT_VALUE godaddy_pat=$GODADDY_PAT_VALUE public_hostname=$PUBLIC_HOSTNAME_VALUE letsencrypt_email=$LETSENCRYPT_EMAIL_VALUE edge_mode=$EDGE_MODE"
+  --extra-vars "godaddy_pat=$GODADDY_PAT_VALUE public_hostname=$PUBLIC_HOSTNAME_VALUE letsencrypt_email=$LETSENCRYPT_EMAIL_VALUE edge_mode=$EDGE_MODE"
 )
 if "$DNS_ONLY"; then
   ANSIBLE_ARGS+=(--tags dns)
