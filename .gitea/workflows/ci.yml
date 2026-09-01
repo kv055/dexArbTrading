@@ -5,7 +5,7 @@
 # only this runs.
 #
 # develop: test + build (push images to Gitea registry) + open develop→main PR
-# main:    test + build (push images to GHCR) + pre-deploy + deploy to VPS
+# main:    skip tests; build (push images to GHCR) + pre-deploy + deploy to VPS
 name: ci
 
 on:
@@ -359,7 +359,9 @@ jobs:
   test-go:
     name: Go tests (${{ matrix.module }})
     needs: detect-changes
-    if: needs.detect-changes.outputs.test_modules != ''
+    if: |
+      needs.detect-changes.outputs.deploy_main != 'true' &&
+      needs.detect-changes.outputs.test_modules != ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -413,7 +415,9 @@ jobs:
     # no longer applies is only caught deep inside the from-source bisq build.
     name: Bisq patches apply cleanly
     needs: detect-changes
-    if: contains(needs.detect-changes.outputs.changes, 'bisq')
+    if: |
+      needs.detect-changes.outputs.deploy_main != 'true' &&
+      contains(needs.detect-changes.outputs.changes, 'bisq')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -444,7 +448,8 @@ jobs:
 
   openapi:
     name: OpenAPI source-of-truth check
-    needs: security
+    needs: [security, detect-changes]
+    if: needs.detect-changes.outputs.deploy_main != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -487,7 +492,9 @@ jobs:
   test-frontend:
     name: Frontend tests
     needs: detect-changes
-    if: needs.detect-changes.outputs.run_frontend == 'true'
+    if: |
+      needs.detect-changes.outputs.deploy_main != 'true' &&
+      needs.detect-changes.outputs.run_frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -525,7 +532,8 @@ jobs:
 
   certificate-renewal-test:
     name: Certificate renewal regression tests
-    needs: security
+    needs: [security, detect-changes]
+    if: needs.detect-changes.outputs.deploy_main != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -549,10 +557,10 @@ jobs:
           set -Eeuo pipefail
           [ "$DATABASE_SQL_RESULT" = success ]
           [ "$DETECT_RESULT" = success ]
-          [ "$OPENAPI_RESULT" = success ]
+          case "$OPENAPI_RESULT" in success|skipped) ;; *) exit 1;; esac
           case "$GO_RESULT" in success|skipped) ;; *) exit 1;; esac
           case "$FRONTEND_RESULT" in success|skipped) ;; *) exit 1;; esac
-          [ "$CERTIFICATE_RESULT" = success ]
+          case "$CERTIFICATE_RESULT" in success|skipped) ;; *) exit 1;; esac
 
   build-and-push:
     name: Build & push ${{ matrix.service }}

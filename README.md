@@ -151,14 +151,14 @@ Dropbox can be used by switching `PG_BACKUP_RCLONE_REMOTE` and providing the Dro
 
 `main` is the protected production branch — it is never pushed to directly. Changes reach
 prod by promoting `develop` → `main` via a reviewed PR (see [Branching & environments](#branching--environments)).
-Each merge to `main` triggers the fully automated VPS deploy via GitHub Actions:
+Each merge to `main` triggers the fully automated VPS deploy. Tests already ran on
+`develop`; the promotion skips Go, frontend, OpenAPI, cert, and Bisq-patch jobs and:
 
-1. **Tests** — Go tests run for all modules; frontend lints, builds, and runs Playwright e2e tests.
-2. **Build & push** — Docker images for all services are built and pushed to GHCR tagged with `:latest` and `:<sha>`.
-3. **Pre-deploy checks** — the runner SSHes into the VPS to verify docker, compose, disk space, and memory are healthy.
-4. **Decrypt & upload secrets** — each `.env.enc` (committed, encrypted) is decrypted on the CI runner using private keys from GitHub Secrets, then SCPed to the VPS as a plain `.env` file.
-5. **Deploy** — `docker-compose.yml` is pushed to the VPS and `deploy/redeploy.sh` is invoked over SSH, which pulls new images and restarts the stack.
-6. **Smoke tests** — the runner hits `/health` endpoints to confirm the stack came up.
+1. **Build & push** — Docker images for all services are built and pushed to GHCR tagged with `:latest` and `:<sha>`.
+2. **Pre-deploy checks** — the runner SSHes into the VPS to verify docker, compose, disk space, and memory are healthy.
+3. **Decrypt & upload secrets** — each `.env.enc` (committed, encrypted) is decrypted on the CI runner using private keys from GitHub Secrets, then SCPed to the VPS as a plain `.env` file.
+4. **Deploy** — `docker-compose.yml` is pushed to the VPS and `deploy/redeploy.sh` is invoked over SSH, which pulls new images and restarts the stack.
+5. **Smoke tests** — the runner hits `/health` endpoints to confirm the stack came up.
 
 See `deploy/README.md` for required GitHub Secrets, the one-time VPS setup, and the dotenvx secrets management workflow.
 
@@ -178,7 +178,7 @@ Rules of the road:
   bypassable with `--no-verify`; server-side GitHub branch protection (PR + green checks,
   non-bypassable) would require GitHub Pro or a public repo.
 - Day-to-day: branch off `develop` → open a PR into `develop` → CI validates → squash-merge.
-- Ship to prod: open a PR `develop` → `main`; the merge rebuilds images and deploys.
+- Ship to prod: open a PR `develop` → `main`; the merge rebuilds GHCR images and deploys (tests are not re-run).
 - The automated Bisq version bump follows the same path — it opens a PR into `develop` (not
   `main`); review and merge it once CI is green.
 - Branches are cleaned up automatically: GitHub deletes a PR's head branch on merge, a weekly
