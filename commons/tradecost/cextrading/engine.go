@@ -84,6 +84,12 @@ type Engine struct {
 // NewEngine builds an Engine backed exclusively by persisted, exchange-derived
 // fee snapshots. A missing or stale snapshot makes that provider unavailable.
 func NewEngine(db *sql.DB) *Engine {
+	return NewEngineWithWithdrawalResolver(db, nil)
+}
+
+// NewEngineWithWithdrawalResolver allows a congestion-aware reserve to replace
+// the persisted Coinbase floor/observation at pricing time.
+func NewEngineWithWithdrawalResolver(db *sql.DB, resolver func(cex string, persisted float64) float64) *Engine {
 	cexes := SupportedCEXes()
 	reader := persistedFeeReader{db: db}
 	load := func(cex string) (PersistedFees, error) {
@@ -106,7 +112,11 @@ func NewEngine(db *sql.DB) *Engine {
 			if err != nil || !fees.BTCWithdrawalFeeBTC.Valid {
 				return 0
 			}
-			return fees.BTCWithdrawalFeeBTC.Float64
+			value := fees.BTCWithdrawalFeeBTC.Float64
+			if resolver != nil {
+				value = resolver(cex, value)
+			}
+			return value
 		},
 		spotAvailable: func(cex string, needsWithdrawal bool) bool {
 			fees, err := load(cex)

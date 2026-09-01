@@ -7,12 +7,11 @@
 #   1. cp deploy/provision/gitea/.env.gitea.example deploy/provision/gitea/.env.gitea
 #   2. fill it in, then: bash deploy/provision/gitea/setup-gitea.sh
 #
-# PREREQUISITE (first time only): this script logs in AS the unprivileged
-# HOMESERVER_SSH_USER (gitea-runner) to deploy/start the runner, so that user must
-# already exist on the homeserver. Run the one-time bootstrap first:
+# PREREQUISITE: this script logs in AS HOMESERVER_SSH_USER (umbrel on Umbrel OS)
+# to deploy/start the runner. That account must have docker + lingering — run:
 #   bash deploy/provision/gitea/provision-runner-user.sh
-# It creates gitea-runner (sudo via HOMESERVER_ADMIN_SSH_USER) and authorizes the
-# same SSH key the admin account uses.
+# On Umbrel OS use the stock umbrel user (OS-image uid). Do not create a
+# dedicated overlay user; Rugix discards those on unclean reboot.
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -215,7 +214,7 @@ echo "  wrote $RUNNER_ENV (registration token, mode 600)"
 # ---------------------------------------------------------------------------
 log "Deploying runner to homeserver"
 
-: "${HOMESERVER_SSH_USER:?HOMESERVER_SSH_USER not set in .env.gitea}"
+: "${HOMESERVER_SSH_USER:=umbrel}"
 : "${HOMESERVER_SSH_HOST:?HOMESERVER_SSH_HOST not set in .env.gitea}"
 : "${HOMESERVER_RUNNER_DIR:=~/gitea-runner}"
 

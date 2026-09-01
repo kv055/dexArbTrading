@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -268,7 +269,7 @@ func newTradeCostEstimator(feeDB *sql.DB) *TradeCostEstimator {
 	} else {
 		fmt.Println("[TradeCost] mempool fee data bootstrapped")
 	}
-	return &TradeCostEstimator{
+	estimator := &TradeCostEstimator{
 		dexFees: map[string]*cachedFee{
 			"bisq":     newCachedFee(feeTTL),
 			"robosats": newCachedFee(feeTTL),
@@ -277,8 +278,49 @@ func newTradeCostEstimator(feeDB *sql.DB) *TradeCostEstimator {
 		btcPredictor:      predictor,
 		withdrawalTxShape: defaultCexProfile.txShape(),
 		txEngine:          routing.NewEngine(predictor),
-		cexEngine:         cextrading.NewEngine(feeDB),
 	}
+	estimator.cexEngine = cextrading.NewEngineWithWithdrawalResolver(feeDB, estimator.resolveWithdrawalReserve)
+	return estimator
+}
+
+const defaultCoinbaseWithdrawalReserveFloorSat int64 = 10_000
+
+func coinbaseReserveConfig() (int64, float64) {
+	floor := defaultCoinbaseWithdrawalReserveFloorSat
+	if parsed, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("COINBASE_WITHDRAW_RESERVE_FLOOR_SAT")), 10, 64); err == nil && parsed > 0 {
+		floor = parsed
+	}
+	multiplier := 2.0
+	if parsed, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv("COINBASE_WITHDRAW_RESERVE_MULTIPLIER")), 64); err == nil && parsed > 0 {
+		multiplier = parsed
+	}
+	return floor, multiplier
+}
+
+func (e *TradeCostEstimator) resolveWithdrawalReserve(cex string, persisted float64) float64 {
+	if !strings.EqualFold(cex, "coinbase") {
+		return persisted
+	}
+	floorSat, multiplier := coinbaseReserveConfig()
+	reserve := math.Max(persisted, float64(floorSat)/1e8)
+	if e == nil || e.btcPredictor == nil {
+		return reserve
+	}
+	_, _, _, express, err := e.btcPredictor.GetSimpleFeeEstimate()
+	if err != nil {
+		return reserve
+	}
+	recommendation, err := e.btcPredictor.EstimateCustomFee(2, 2, "P2WPKH", express)
+	if err != nil {
+		return reserve
+	}
+	return math.Max(reserve, recommendation.TotalFeeBTC*multiplier)
+}
+
+// CoinbaseWithdrawalReserve returns the exact conservative value used by route
+// pricing and its source label for operational status responses.
+func (e *TradeCostEstimator) CoinbaseWithdrawalReserve(persisted float64) (float64, string) {
+	return e.resolveWithdrawalReserve("coinbase", persisted), "conservative_combined"
 }
 
 // fixedRoutingCost returns a deterministic, offline routing.Cost for tests: each

@@ -1,21 +1,14 @@
 package cextrading
 
 import (
-	"crypto/ecdsa"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
+	"commons/coinbaseauth"
 	"commons/exchangecredentials"
 )
 
@@ -60,68 +53,5 @@ func fetchCoinbaseAdvancedSpotTakerRate(credentials exchangecredentials.Credenti
 }
 
 func buildCoinbaseAdvancedJWT(keyName, privateKey, method, path string) (string, error) {
-	key, err := parseCoinbaseAdvancedKey(privateKey)
-	if err != nil {
-		return "", err
-	}
-	now := time.Now().Unix()
-	nonce := make([]byte, 16)
-	if _, err := rand.Read(nonce); err != nil {
-		return "", fmt.Errorf("coinbase advanced JWT nonce: %w", err)
-	}
-	header := map[string]any{"alg": "ES256", "typ": "JWT", "kid": keyName, "nonce": fmt.Sprintf("%x", nonce)}
-	payload := map[string]any{
-		"iss": "cdp", "sub": keyName, "nbf": now, "exp": now + 120,
-		"uri": strings.ToUpper(method) + " api.coinbase.com" + path,
-	}
-	encode := func(value any) (string, error) {
-		raw, err := json.Marshal(value)
-		if err != nil {
-			return "", err
-		}
-		return base64.RawURLEncoding.EncodeToString(raw), nil
-	}
-	head, err := encode(header)
-	if err != nil {
-		return "", err
-	}
-	claims, err := encode(payload)
-	if err != nil {
-		return "", err
-	}
-	unsigned := head + "." + claims
-	digest := sha256.Sum256([]byte(unsigned))
-	r, s, err := ecdsa.Sign(rand.Reader, key, digest[:])
-	if err != nil {
-		return "", fmt.Errorf("coinbase advanced JWT sign: %w", err)
-	}
-	signature := append(padCoinbaseJWTInt(r, 32), padCoinbaseJWTInt(s, 32)...)
-	return unsigned + "." + base64.RawURLEncoding.EncodeToString(signature), nil
-}
-
-func parseCoinbaseAdvancedKey(raw string) (*ecdsa.PrivateKey, error) {
-	normalized := strings.ReplaceAll(strings.TrimSpace(raw), `\n`, "\n")
-	block, _ := pem.Decode([]byte(normalized))
-	if block == nil {
-		return nil, fmt.Errorf("coinbase advanced JWT: decode EC private key PEM")
-	}
-	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
-		return key, nil
-	}
-	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("coinbase advanced JWT: parse private key: %w", err)
-	}
-	key, ok := parsed.(*ecdsa.PrivateKey)
-	if !ok {
-		return nil, fmt.Errorf("coinbase advanced JWT: private key is not ECDSA")
-	}
-	return key, nil
-}
-
-func padCoinbaseJWTInt(value *big.Int, width int) []byte {
-	out := make([]byte, width)
-	encoded := value.Bytes()
-	copy(out[width-len(encoded):], encoded)
-	return out
+	return coinbaseauth.BuildJWT(keyName, privateKey, method, "api.coinbase.com", path)
 }

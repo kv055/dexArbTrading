@@ -33,3 +33,22 @@ func TestPersistedFeesUseCompleteLastKnownData(t *testing.T) {
 		t.Fatal("bid route must require a stored withdrawal fee")
 	}
 }
+
+func TestPersistedFeesDirectionAvailabilityUsesIndependentComponents(t *testing.T) {
+	now := time.Now()
+	fees := PersistedFees{
+		SpotTakerFeeRate: sql.NullFloat64{Float64: 0.001, Valid: true},
+		SpotFetchedAt:    sql.NullTime{Time: now, Valid: true},
+	}
+	if !fees.spotAvailable(now, false) {
+		t.Fatal("ask should need only spot fees")
+	}
+	if fees.spotAvailable(now, true) {
+		t.Fatal("bid should require a withdrawal reserve")
+	}
+	fees.BTCWithdrawalFeeBTC = sql.NullFloat64{Float64: 0.0001, Valid: true}
+	fees.WithdrawalFetchedAt = sql.NullTime{Time: now, Valid: true}
+	if !fees.spotAvailable(now, true) {
+		t.Fatal("bid should be ready with spot and withdrawal components")
+	}
+}

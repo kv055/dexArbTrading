@@ -159,6 +159,44 @@ curl $CA -H "$H" "$B/datasources"
 Datasource uids are stable: `prometheus`, `loki`, `tempo`. Rotate or revoke the
 token in Grafana → Administration → Service accounts → `agent-readonly`.
 
+## Agent MCP access
+
+[grafana/mcp-grafana](https://github.com/grafana/mcp-grafana) is a local stdio
+MCP server that calls the same Grafana API as the curl recipes above. Grafana
+OSS has no `/mcp` route; this wrapper does not add a compose service (a later
+HTTP sidecar can sit beside it without changing the script).
+
+**Prerequisites**
+
+- Monitoring stack up (`make staging-up`, or grafana + nginx + Prometheus/Loki/Tempo).
+  `dev-server.sh` does **not** start Grafana.
+- `GRAFANA_AGENT_TOKEN` minted (step 1 above) and present in the repo-root `.env`.
+- [`uv`](https://docs.astral.sh/uv/) (`uvx mcp-grafana`) or a `mcp-grafana` binary on `PATH`.
+
+**Cursor** (user MCP — `.cursor/` is gitignored, so this is not project config):
+
+```json
+{
+  "mcpServers": {
+    "grafana": {
+      "command": "/absolute/path/to/dexArbTrading/deploy/monitoring/grafana/run-mcp.sh"
+    }
+  }
+}
+```
+
+[`grafana/run-mcp.sh`](grafana/run-mcp.sh) reads `GRAFANA_AGENT_TOKEN` from `.env`,
+maps it to `GRAFANA_SERVICE_ACCOUNT_TOKEN`, defaults `GRAFANA_URL` to
+`https://localhost/grafana`, and runs `mcp-grafana --disable-write`. If
+`deploy/nginx/certs/server.crt` exists it is passed as `--tls-ca-file`; otherwise
+the script warns and uses `--tls-skip-verify`. Override `GRAFANA_URL` or
+`GRAFANA_AGENT_TOKEN` in the environment; existing values win over `.env`.
+
+The Viewer token cannot mutate Grafana. Write tools are disabled. First-class
+queries are PromQL and Loki/LogQL plus dashboard search/summaries. Tempo
+TraceQL and raw Postgres SQL are **not** first-class — use the curl recipes
+above (uids `tempo`, `postgres-dexarb`).
+
 ## Adding a Scrape Target
 
 Add a new job to [prometheus.yml](prometheus.yml):

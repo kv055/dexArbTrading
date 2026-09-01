@@ -21,6 +21,29 @@ type LiveFeeSnapshot struct {
 	FetchedAt              time.Time
 }
 
+// FetchLiveSpotTakerRate refreshes only the spot component, so a withdrawal or
+// hedge outage cannot erase the component's own success timestamp.
+func FetchLiveSpotTakerRate(exchange string, credentials exchangecredentials.Credentials) (float64, error) {
+	exchange = strings.ToLower(strings.TrimSpace(exchange))
+	if credentials.APIKey == "" || credentials.APISecret == "" {
+		return 0, fmt.Errorf("%s API credentials are not configured", exchange)
+	}
+	if exchange == "coinbase" {
+		return fetchCoinbaseAdvancedSpotTakerRate(credentials)
+	}
+	return (&takerFeeFetcher{exchange: exchange, apiKey: credentials.APIKey, apiSecret: credentials.APISecret}).fetchLiveWithCredentials()
+}
+
+// FetchLiveWithdrawalFee refreshes exchange-reported withdrawal fees. Coinbase
+// intentionally uses observed sends plus a mempool reserve instead.
+func FetchLiveWithdrawalFee(exchange string, credentials exchangecredentials.Credentials) (float64, error) {
+	exchange = strings.ToLower(strings.TrimSpace(exchange))
+	if credentials.APIKey == "" || credentials.APISecret == "" {
+		return 0, fmt.Errorf("%s API credentials are not configured", exchange)
+	}
+	return (&withdrawalFeeFetcher{exchange: exchange, apiKey: credentials.APIKey, apiSecret: credentials.APISecret}).fetchLiveWithCredentials()
+}
+
 // FetchLiveFeeSnapshot obtains fees without applying any fallback. Bitstamp is
 // spot-only, so its futures fields are nil.
 func FetchLiveFeeSnapshot(exchange string, credentials exchangecredentials.Credentials) (LiveFeeSnapshot, error) {

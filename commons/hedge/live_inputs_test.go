@@ -128,9 +128,9 @@ func TestFetchCoinbaseFuturesInputs(t *testing.T) {
 		t.Fatalf("FetchCoinbaseFuturesInputs returned error: %v", err)
 	}
 
-	assertFloatClose(t, got.OpenFeeRate, 0.0004)
-	assertFloatClose(t, got.CloseFeeRate, 0.0004)
-	assertFloatClose(t, got.FundingRate, 0.0003)
+	assertFloatClose(t, got.OpenFeeRate, 0.000004)
+	assertFloatClose(t, got.CloseFeeRate, 0.000004)
+	assertFloatClose(t, got.FundingRate, 0.000003)
 	if got.FundingInterval != 8*time.Hour {
 		t.Fatalf("funding interval = %s, want 8h", got.FundingInterval)
 	}

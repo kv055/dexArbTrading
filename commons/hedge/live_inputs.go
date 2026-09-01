@@ -304,7 +304,9 @@ func fetchCoinbasePerpTakerRate(apiKey, apiSecret, passphrase string) (float64, 
 	}
 	for _, row := range out {
 		if strings.EqualFold(row.InstrumentType, "PERP") {
-			return row.TakerFeeRate, nil
+			// INTX documents fee rates in percentage points (0.04 means 0.04%).
+			// The rest of the cost engine uses decimal fractions.
+			return row.TakerFeeRate / 100, nil
 		}
 	}
 	return 0, fmt.Errorf("coinbase futures fee rates: no PERP tier found")
@@ -343,7 +345,8 @@ func fetchCoinbaseInstrumentFunding(instrument string) (float64, time.Duration, 
 		intervalNS = int64(intervalF)
 	}
 
-	return fundingRate, time.Duration(intervalNS), nil
+	// predicted_funding uses the same percentage-point convention as fee-rates.
+	return fundingRate / 100, time.Duration(intervalNS), nil
 }
 
 func signCoinbaseINTXRequest(req *http.Request, apiKey, apiSecret, passphrase, path, body string) {

@@ -130,6 +130,13 @@ type ClientInterface interface {
 	// Corresponds with GET /api/live_offers (the `GetApiLiveOffers` operationId).
 	GetApiLiveOffers(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// GetApiLiveOffersCounts Live offer counts by fiat
+	//
+	// Counts currently live offers that have a positive raw premium, grouped by fiat currency.
+	//
+	// Corresponds with GET /api/live_offers/counts (the `GetApiLiveOffersCounts` operationId).
+	GetApiLiveOffersCounts(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetApiLiveOffersIdLifecycle GET /api/live_offers/{id}/lifecycle
 	//
 	// Corresponds with GET /api/live_offers/{id}/lifecycle (the `GetApiLiveOffersIdLifecycle` operationId).
@@ -200,6 +207,23 @@ func (c *Client) PutApiCexPermissionsProvider(ctx context.Context, provider stri
 // Corresponds with GET /api/live_offers (the `GetApiLiveOffers` operationId).
 func (c *Client) GetApiLiveOffers(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetApiLiveOffersRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetApiLiveOffersCounts Live offer counts by fiat
+//
+// Counts currently live offers that have a positive raw premium, grouped by fiat currency.
+//
+// Corresponds with GET /api/live_offers/counts (the `GetApiLiveOffersCounts` operationId).
+func (c *Client) GetApiLiveOffersCounts(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetApiLiveOffersCountsRequest(c.Server)
 	if err != nil {
 		return nil, err
 	}
@@ -339,6 +363,33 @@ func NewGetApiLiveOffersRequest(server string) (*http.Request, error) {
 	}
 
 	operationPath := fmt.Sprintf("/api/live_offers")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetApiLiveOffersCountsRequest constructs an http.Request for the GetApiLiveOffersCounts method
+func NewGetApiLiveOffersCountsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/live_offers/counts")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -516,6 +567,15 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/live_offers (the `GetApiLiveOffers` operationId).
 	GetApiLiveOffersWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetApiLiveOffersResponse, error)
 
+	// GetApiLiveOffersCountsWithResponse Live offer counts by fiat
+	//
+	// Counts currently live offers that have a positive raw premium, grouped by fiat currency.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/live_offers/counts (the `GetApiLiveOffersCounts` operationId).
+	GetApiLiveOffersCountsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetApiLiveOffersCountsResponse, error)
+
 	// GetApiLiveOffersIdLifecycleWithResponse GET /api/live_offers/{id}/lifecycle
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -676,6 +736,58 @@ func (r GetApiLiveOffersResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetApiLiveOffersResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetApiLiveOffersCountsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		RawPremium map[string]int `json:"raw_premium"`
+	}
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *map[string]interface{}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetApiLiveOffersCountsResponse) GetJSON200() *struct {
+	RawPremium map[string]int `json:"raw_premium"`
+} {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetApiLiveOffersCountsResponse) GetJSONDefault() *map[string]interface{} {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetApiLiveOffersCountsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetApiLiveOffersCountsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetApiLiveOffersCountsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetApiLiveOffersCountsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -878,6 +990,21 @@ func (c *ClientWithResponses) GetApiLiveOffersWithResponse(ctx context.Context, 
 	return ParseGetApiLiveOffersResponse(rsp)
 }
 
+// GetApiLiveOffersCountsWithResponse Live offer counts by fiat
+//
+// Counts currently live offers that have a positive raw premium, grouped by fiat currency.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/live_offers/counts (the `GetApiLiveOffersCounts` operationId).
+func (c *ClientWithResponses) GetApiLiveOffersCountsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetApiLiveOffersCountsResponse, error) {
+	rsp, err := c.GetApiLiveOffersCounts(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetApiLiveOffersCountsResponse(rsp)
+}
+
 // GetApiLiveOffersIdLifecycleWithResponse GET /api/live_offers/{id}/lifecycle
 //
 // Returns a wrapper object for the known response body format(s).
@@ -1005,6 +1132,44 @@ func ParseGetApiLiveOffersResponse(rsp *http.Response) (*GetApiLiveOffersRespons
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest []LiveOffer
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	case true:
+		// Content-type (text/plain) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParseGetApiLiveOffersCountsResponse parses an HTTP response from a GetApiLiveOffersCountsWithResponse call
+func ParseGetApiLiveOffersCountsResponse(rsp *http.Response) (*GetApiLiveOffersCountsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetApiLiveOffersCountsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			RawPremium map[string]int `json:"raw_premium"`
+		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
