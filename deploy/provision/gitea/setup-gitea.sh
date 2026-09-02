@@ -181,9 +181,9 @@ GITEA_REGISTRY_URL_VALUE="$GITEA_INTERNAL_URL" \
 # container-routable host, matching the REGISTRY_URL secret the build job logs in to.
 REGISTRY_HOST="${GITEA_INTERNAL_URL#*://}"
 cat > "$SCRIPT_DIR/daemon.json" <<EOF
-{"insecure-registries": ["$REGISTRY_HOST"]}
+{"insecure-registries": ["$REGISTRY_HOST"], "mtu": 1492}
 EOF
-echo "  wrote $SCRIPT_DIR/daemon.json (insecure-registries: $REGISTRY_HOST)"
+echo "  wrote $SCRIPT_DIR/daemon.json (insecure-registries: $REGISTRY_HOST, mtu: 1492)"
 
 # ---------------------------------------------------------------------------
 # 6. Runner registration token + act-runner.env
