@@ -134,8 +134,17 @@ jobs:
           new=$(git ls-tree "$head" dexUnifiedApi | awk '{print $3}')
           [ -n "$old" ] && [ -n "$new" ] || { echo "Unable to resolve dexUnifiedApi submodule revisions." >&2; exit 1; }
           [ "$old" != "$new" ] || { echo "dexUnifiedApi submodule is unchanged."; exit 0; }
-          git -C dexUnifiedApi fetch --no-tags origin "$old" "$new"
+          # SQL immutability was introduced with this dexUnifiedApi revision.
+          # Older target branches may include the pre-policy schema squash in
+          # their PR diff, so begin enforcement at the known-good boundary.
+          sql_history_baseline=12fbf354ed04922471acafd6af1f017a7402c611
+          git -C dexUnifiedApi fetch --no-tags origin "$old" "$new" "$sql_history_baseline"
           git -C dexUnifiedApi fetch --no-tags origin main || true
+          if git -C dexUnifiedApi merge-base --is-ancestor "$old" "$sql_history_baseline" \
+            && git -C dexUnifiedApi merge-base --is-ancestor "$sql_history_baseline" "$new"; then
+            echo "Using SQL immutability baseline $sql_history_baseline (target revision $old predates enforcement)."
+            old="$sql_history_baseline"
+          fi
 
           violations=()
           while IFS=$'\t' read -r status first second; do

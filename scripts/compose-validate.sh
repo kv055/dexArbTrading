@@ -119,8 +119,7 @@ assert_contains "mm-controller BISQ_GRPC_HOST=bisq:9998"         "BISQ_GRPC_HOST
 assert_contains "mm-controller POSTGRES_HOST=postgres"           "POSTGRES_HOST: postgres"
 assert_contains "mm-controller LND_HOST=https://lnd:8080"        "LND_HOST: https://lnd:8080"
 assert_contains "mm-controller TOR_PROXY_URL=socks5h://tor:9050" "TOR_PROXY_URL: socks5h://tor:9050"
-assert_contains "mm-controller WS via unified-api DNS (internal route)" "OFFER_PREMIUM_WSS_URL: ws://unified-api:5010/internal/ws/live_offers?cex=kraken"
-assert_in_service "mm-controller INTERNAL_API_SECRET wired (secret-gated WS)" "mm-controller" "INTERNAL_API_SECRET:"
+assert_in_service "mm-controller INTERNAL_API_SECRET wired (protected API)" "mm-controller" "INTERNAL_API_SECRET:"
 
 # lnd's cert must include the docker DNS name so https://lnd:8080 verifies.
 assert_contains "lnd TLS cert includes lnd SAN" "--tlsextradomain=lnd"
