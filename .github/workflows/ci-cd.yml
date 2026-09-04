@@ -557,6 +557,7 @@ jobs:
     name: Build & push ${{ matrix.service }}
     needs: [detect-changes, test-gate]
     if: |
+      always() &&
       needs.detect-changes.result == 'success' &&
       needs.test-gate.result == 'success' &&
       needs.detect-changes.outputs.changes != ''
@@ -695,7 +696,7 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       needs.test-gate.result == 'success' &&
-      (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
+      needs.build-and-push.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
