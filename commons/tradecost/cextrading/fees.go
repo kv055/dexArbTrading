@@ -4,24 +4,28 @@
 // exchanges, honoring the user's CEX activation/deactivation (ExcludedCEXes) and
 // hedge coupling (CoupledHedge) choices. It is the CEX-side counterpart to the
 // txrouting package and must NOT import tradecost (that would cycle).
+//
+// Transport policy: Kraken and Binance requests go through the shared official
+// SDK connectors in commons/cexclient (nonce handling, signing, error mapping).
+// Bitstamp and Coinbase remain hand-signed here because no official Go SDK
+// exists for those APIs.
 package cextrading
 
 import (
-	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"crypto/sha512"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	binanceclient "commons/cexclient/binance"
+	krakenclient "commons/cexclient/kraken"
 	"commons/exchangecredentials"
 	"commons/mmcapabilities"
 
@@ -31,42 +35,30 @@ import (
 // feeTTL is the single refresh interval for all CEX fee components (taker + withdrawal).
 const feeTTL = 30 * time.Minute
 
-// withdrawalFallbacks are the static BTC on-chain withdrawal fees used when the live
-// exchange API is unavailable (no credentials, network error). Every routing method
-// withdraws on-chain, so a single per-CEX value suffices.
-var withdrawalFallbacks = map[string]float64{
-	"kraken":   0.00015,
-	"binance":  0.0000046,
-	"coinbase": 0.0,
-	"bitstamp": 0.0003,
-}
-
-// takerFeeFallbacks are the static taker fees (as fraction) used when the live
-// exchange API is unavailable or unsupported (e.g. Coinbase).
-var takerFeeFallbacks = map[string]float64{
-	"kraken":   0.0040,
-	"binance":  0.0010,
-	"coinbase": 0.0060,
-	"bitstamp": 0.0050,
-}
-
 // SupportedCEXes returns the canonical list of CEXes the cost model knows about.
 func SupportedCEXes() []string {
 	return mmcapabilities.CostSupportedProviderIDs()
 }
 
-// TakerFeeFallback returns the static taker fee fraction for an exchange.
-func TakerFeeFallback(exchange string) float64 {
-	return takerFeeFallbacks[exchange]
-}
-
-// WithdrawalFallback returns the static on-chain withdrawal fee (BTC) for an exchange.
-func WithdrawalFallback(exchange string) float64 {
-	return withdrawalFallbacks[exchange]
-}
-
 // httpClient is shared across all clearnet CEX fetchers.
 var httpClient = &http.Client{Timeout: 10 * time.Second}
+
+// krakenClientOptions and binanceClientOptions build the official-SDK connector
+// options used by the fee fetchers below. They are variables so tests can route
+// the connectors at a deterministic local backend without touching call sites.
+var (
+	krakenClientOptions  = func() krakenclient.Options { return krakenclient.Options{Timeout: httpClient.Timeout} }
+	binanceClientOptions = func() binanceclient.Options { return binanceclient.Options{Timeout: httpClient.Timeout} }
+)
+
+// krakenSpotPOST executes an authenticated Kraken Spot request through the
+// shared official SDK connector. Nonce generation (microsecond monotonic stream)
+// and invalid-nonce recovery live in commons/cexclient/kraken; both fee
+// endpoints below are read-only, so a rejected nonce is retried there.
+func krakenSpotPOST(apiKey, apiSecret, operation, path string, body map[string]any) ([]byte, error) {
+	client := krakenclient.New(apiKey, apiSecret, krakenClientOptions())
+	return client.PrivatePOST(context.Background(), operation, path, body)
+}
 
 // ---------------------------------------------------------------------------
 // cachedFee — generic lazy-refresh cache for a single float64 fee value
@@ -168,12 +160,11 @@ func newWithdrawalFeeFetcher(exchange string, provider exchangecredentials.Provi
 // get returns the CEX's on-chain BTC withdrawal fee. Every routing method withdraws
 // on-chain, so there is a single fee per exchange.
 func (f *withdrawalFeeFetcher) get() float64 {
-	fallback := withdrawalFallbacks[f.exchange]
 	if f.cache == nil {
-		return fallback
+		return 0
 	}
 	label := fmt.Sprintf("%s onchain withdrawal fee BTC", f.exchange)
-	return f.cache.get(fallback, f.fetchLive, label)
+	return f.cache.get(0, f.fetchLive, label)
 }
 
 func (f *withdrawalFeeFetcher) fetchLive() (float64, error) {
@@ -186,7 +177,7 @@ func (f *withdrawalFeeFetcher) fetchLive() (float64, error) {
 	case "binance":
 		return f.fetchBinance()
 	case "coinbase":
-		return 0, nil
+		return 0, fmt.Errorf("coinbase withdrawal fee requires an address-specific estimate and is not available from these credentials")
 	case "bitstamp":
 		return f.fetchBitstamp()
 	default:
@@ -211,40 +202,21 @@ func (f *withdrawalFeeFetcher) refreshCredentials() error {
 }
 
 func (f *withdrawalFeeFetcher) fetchKraken() (float64, error) {
-	const urlPath = "/0/private/WithdrawMethods"
-	nonce := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	form := url.Values{"nonce": {nonce}, "asset": {"XBT"}}
-	encoded := form.Encode()
-
-	sha256Sum := sha256.Sum256([]byte(nonce + encoded))
-	hmacMsg := append([]byte(urlPath), sha256Sum[:]...)
-	secret, err := base64.StdEncoding.DecodeString(f.apiSecret)
+	raw, err := krakenSpotPOST(f.apiKey, f.apiSecret, "WithdrawMethods", "/0/private/WithdrawMethods",
+		map[string]any{"asset": "XBT"})
 	if err != nil {
-		return 0, fmt.Errorf("kraken: invalid api secret: %w", err)
+		return 0, err
 	}
-	mac := hmac.New(sha512.New, secret)
-	mac.Write(hmacMsg)
-
-	req, _ := http.NewRequest(http.MethodPost, "https://api.kraken.com"+urlPath, bytes.NewBufferString(encoded))
-	req.Header.Set("API-Key", f.apiKey)
-	req.Header.Set("API-Sign", base64.StdEncoding.EncodeToString(mac.Sum(nil)))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("kraken: %w", err)
-	}
-	defer resp.Body.Close()
 
 	var result struct {
 		Error  []string `json:"error"`
 		Result []struct {
-			Asset   string `json:"asset"`
-			Network string `json:"network"`
-			Fee     string `json:"fee"`
+			Asset   string          `json:"asset"`
+			Network string          `json:"network"`
+			Fee     json.RawMessage `json:"fee"`
 		} `json:"result"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return 0, fmt.Errorf("kraken: decode: %w", err)
 	}
 	if len(result.Error) > 0 {
@@ -256,58 +228,54 @@ func (f *withdrawalFeeFetcher) fetchKraken() (float64, error) {
 		}
 		network := strings.ToLower(m.Network)
 		if network == "bitcoin" || network == "btc" || strings.Contains(network, "segwit") {
-			return strconv.ParseFloat(m.Fee, 64)
+			return parseKrakenWithdrawalFee(m.Fee)
 		}
 	}
 	return 0, fmt.Errorf("kraken: onchain withdrawal method not found")
 }
 
+func parseKrakenWithdrawalFee(raw json.RawMessage) (float64, error) {
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return strconv.ParseFloat(text, 64)
+	}
+	var number float64
+	if err := json.Unmarshal(raw, &number); err == nil {
+		return number, nil
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return 0, fmt.Errorf("kraken withdrawal fee: decode %s: %w", string(raw), err)
+	}
+	for _, key := range []string{"fee", "amount", "withdrawal_fee"} {
+		if value, ok := object[key]; ok {
+			return parseKrakenWithdrawalFee(value)
+		}
+	}
+	return 0, fmt.Errorf("kraken withdrawal fee: unsupported response %s", string(raw))
+}
+
+// fetchBinance fetches the on-chain BTC withdrawal fee via the official Wallet
+// SDK (GET /sapi/v1/capital/config/getall) and picks the BTC network
+// (btc/bitcoin/isDefault).
 func (f *withdrawalFeeFetcher) fetchBinance() (float64, error) {
-	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	qs := "timestamp=" + timestamp
-	mac := hmac.New(sha256.New, []byte(f.apiSecret))
-	mac.Write([]byte(qs))
-
-	req, _ := http.NewRequest(http.MethodGet,
-		"https://api.binance.com/sapi/v1/capital/config/getall?"+qs+"&signature="+hex.EncodeToString(mac.Sum(nil)), nil)
-	req.Header.Set("X-MBX-APIKEY", f.apiKey)
-
-	resp, err := httpClient.Do(req)
+	client := binanceclient.NewWallet(f.apiKey, f.apiSecret, binanceClientOptions())
+	resp, err := client.RestApi.CapitalAPI.AllCoinsInformation(context.Background()).Execute()
 	if err != nil {
-		return 0, fmt.Errorf("binance: %w", err)
+		return 0, binanceclient.WrapError("CapitalConfigGetAll", false, err)
 	}
-	defer resp.Body.Close()
-
-	var raw json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return 0, fmt.Errorf("binance: decode: %w", err)
-	}
-	var errObj struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-	}
-	if json.Unmarshal(raw, &errObj) == nil && errObj.Code != 0 {
-		return 0, fmt.Errorf("binance API %d: %s", errObj.Code, errObj.Msg)
-	}
-	var coins []struct {
-		Coin        string `json:"coin"`
-		NetworkList []struct {
-			Network     string `json:"network"`
-			IsDefault   bool   `json:"isDefault"`
-			WithdrawFee string `json:"withdrawFee"`
-		} `json:"networkList"`
-	}
-	if err := json.Unmarshal(raw, &coins); err != nil {
-		return 0, fmt.Errorf("binance: decode coins: %w", err)
-	}
-	for _, coin := range coins {
-		if coin.Coin != "BTC" {
+	for _, coin := range resp.Data.Items {
+		if coin.GetCoin() != "BTC" {
 			continue
 		}
-		for _, net := range coin.NetworkList {
-			network := strings.ToLower(net.Network)
-			if network == "btc" || network == "bitcoin" || net.IsDefault {
-				return strconv.ParseFloat(net.WithdrawFee, 64)
+		for _, net := range coin.GetNetworkList() {
+			network := strings.ToLower(net.GetNetwork())
+			if network == "btc" || network == "bitcoin" || net.GetIsDefault() {
+				fee := net.GetWithdrawFee()
+				if fee == "" {
+					return 0, fmt.Errorf("binance: BTC %s network reports no withdrawal fee", net.GetNetwork())
+				}
+				return strconv.ParseFloat(fee, 64)
 			}
 		}
 	}
@@ -359,7 +327,8 @@ func (f *withdrawalFeeFetcher) fetchBitstamp() (float64, error) {
 // ---------------------------------------------------------------------------
 //
 // Supported: Kraken (TradeVolume), Binance (tradeFee), Bitstamp (fees/trading).
-// Coinbase: no clean endpoint across API versions — static fallback only.
+// Coinbase requires Advanced Trade JWT credentials and is handled by the
+// persisted-snapshot refresher rather than this legacy key format.
 
 type takerFeeFetcher struct {
 	exchange  string
@@ -379,8 +348,7 @@ func newTakerFeeFetcher(exchange string, provider exchangecredentials.Provider) 
 
 func (f *takerFeeFetcher) get() float64 {
 	label := f.exchange + " taker fee fraction"
-	fallback := takerFeeFallbacks[f.exchange]
-	return f.cache.get(fallback, f.fetchLive, label)
+	return f.cache.get(0, f.fetchLive, label)
 }
 
 func (f *takerFeeFetcher) fetchLive() (float64, error) {
@@ -393,8 +361,7 @@ func (f *takerFeeFetcher) fetchLive() (float64, error) {
 	case "binance":
 		return f.fetchBinance()
 	case "coinbase":
-		// Coinbase has no stable single endpoint for user taker fee across API versions.
-		return 0, fmt.Errorf("coinbase taker fee not fetchable, using static fallback")
+		return 0, fmt.Errorf("coinbase taker fee requires Advanced Trade JWT credentials")
 	case "bitstamp":
 		return f.fetchBitstamp()
 	default:
@@ -422,41 +389,21 @@ func (f *takerFeeFetcher) refreshCredentials() error {
 // The API returns the fee as a percent string (e.g. "0.26" = 0.26%), which is
 // divided by 100 to produce a fraction.
 func (f *takerFeeFetcher) fetchKraken() (float64, error) {
-	const urlPath = "/0/private/TradeVolume"
-	nonce := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	// Request fee schedule for the BTC/EUR pair.
-	form := url.Values{"nonce": {nonce}, "pair": {"XBTEUR"}}
-	encoded := form.Encode()
-
-	sha256Sum := sha256.Sum256([]byte(nonce + encoded))
-	hmacMsg := append([]byte(urlPath), sha256Sum[:]...)
-	secret, err := base64.StdEncoding.DecodeString(f.apiSecret)
+	raw, err := krakenSpotPOST(f.apiKey, f.apiSecret, "TradeVolume", "/0/private/TradeVolume",
+		map[string]any{"pair": "XBTEUR"})
 	if err != nil {
-		return 0, fmt.Errorf("kraken: invalid api secret: %w", err)
+		return 0, err
 	}
-	mac := hmac.New(sha512.New, secret)
-	mac.Write(hmacMsg)
-
-	req, _ := http.NewRequest(http.MethodPost, "https://api.kraken.com"+urlPath, bytes.NewBufferString(encoded))
-	req.Header.Set("API-Key", f.apiKey)
-	req.Header.Set("API-Sign", base64.StdEncoding.EncodeToString(mac.Sum(nil)))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("kraken: %w", err)
-	}
-	defer resp.Body.Close()
 
 	var result struct {
 		Error  []string `json:"error"`
 		Result struct {
 			Fees map[string]struct {
-				Fee string `json:"fee"` // percent string, e.g. "0.26"
+				Fee json.RawMessage `json:"fee"` // percent string, e.g. "0.26"
 			} `json:"fees"`
 		} `json:"result"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return 0, fmt.Errorf("kraken: decode: %w", err)
 	}
 	if len(result.Error) > 0 {
@@ -465,9 +412,9 @@ func (f *takerFeeFetcher) fetchKraken() (float64, error) {
 	// Kraken uses its internal pair name "XXBTZEUR" in the response.
 	for _, key := range []string{"XXBTZEUR", "XBTEUR"} {
 		if entry, ok := result.Result.Fees[key]; ok {
-			pct, err := strconv.ParseFloat(entry.Fee, 64)
+			pct, err := parseKrakenTakerFee(entry.Fee)
 			if err != nil {
-				return 0, fmt.Errorf("kraken: parse fee %q: %w", entry.Fee, err)
+				return 0, err
 			}
 			return pct / 100, nil // convert percent to fraction
 		}
@@ -475,39 +422,48 @@ func (f *takerFeeFetcher) fetchKraken() (float64, error) {
 	return 0, fmt.Errorf("kraken: XBTEUR taker fee not found in TradeVolume response")
 }
 
-// fetchBinance fetches the user's taker fee via GET /sapi/v1/asset/tradeFee.
-// The API returns the fee already as a fraction (e.g. "0.001" = 0.1%).
-// Queries BTCUSDT as representative — Binance taker fees are account-wide (VIP tier).
-func (f *takerFeeFetcher) fetchBinance() (float64, error) {
-	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	qs := "symbol=BTCUSDT&timestamp=" + timestamp
-	mac := hmac.New(sha256.New, []byte(f.apiSecret))
-	mac.Write([]byte(qs))
-
-	req, _ := http.NewRequest(http.MethodGet,
-		"https://api.binance.com/sapi/v1/asset/tradeFee?"+qs+"&signature="+hex.EncodeToString(mac.Sum(nil)), nil)
-	req.Header.Set("X-MBX-APIKEY", f.apiKey)
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return 0, fmt.Errorf("binance: %w", err)
+func parseKrakenTakerFee(raw json.RawMessage) (float64, error) {
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		pct, parseErr := strconv.ParseFloat(text, 64)
+		if parseErr != nil {
+			return 0, fmt.Errorf("kraken: parse taker fee %q: %w", text, parseErr)
+		}
+		return pct, nil
 	}
-	defer resp.Body.Close()
-
-	var entries []struct {
-		Symbol          string `json:"symbol"`
-		MakerCommission string `json:"makerCommission"`
-		TakerCommission string `json:"takerCommission"`
+	var number float64
+	if err := json.Unmarshal(raw, &number); err == nil {
+		return number, nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
-		return 0, fmt.Errorf("binance: decode: %w", err)
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return 0, fmt.Errorf("kraken: decode taker fee %s: %w", string(raw), err)
 	}
-	for _, e := range entries {
-		if e.Symbol == "BTCUSDT" {
-			return strconv.ParseFloat(e.TakerCommission, 64) // already a fraction
+	for _, key := range []string{"fee", "taker", "rate"} {
+		if value, ok := object[key]; ok {
+			return parseKrakenTakerFee(value)
 		}
 	}
-	return 0, fmt.Errorf("binance: BTCUSDT taker fee not found")
+	return 0, fmt.Errorf("kraken: unsupported taker fee response %s", string(raw))
+}
+
+// fetchBinance fetches the user's taker fee via the official Spot SDK
+// (GET /api/v3/account/commission) for BTCUSDT. The API returns the fee already
+// as a fraction (e.g. "0.001" = 0.1%); the effective per-symbol rate includes
+// BNB discounts and matches what the account actually pays.
+func (f *takerFeeFetcher) fetchBinance() (float64, error) {
+	client := binanceclient.NewSpot(f.apiKey, f.apiSecret, binanceClientOptions())
+	resp, err := client.RestApi.AccountAPI.AccountCommission(context.Background()).Symbol("BTCUSDT").Execute()
+	if err != nil {
+		return 0, binanceclient.WrapError("AccountCommission", false, err)
+	}
+	standard := resp.Data.GetStandardCommission()
+	taker := standard.GetTaker()
+	rate, err := strconv.ParseFloat(taker, 64)
+	if err != nil {
+		return 0, fmt.Errorf("binance: parse taker commission %q: %w", taker, err)
+	}
+	return rate, nil
 }
 
 // fetchBitstamp fetches the user's taker fee via POST /api/v2/fees/trading/.

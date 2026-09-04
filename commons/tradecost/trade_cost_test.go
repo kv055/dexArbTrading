@@ -39,7 +39,7 @@ func TestTradeCostEstimatorCostPctUsesAllComponents(t *testing.T) {
 func TestTradeCostEstimatorBreakdownMatchesComponentSum(t *testing.T) {
 	est := fixedCostEstimator("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005)
 
-	bd := est.Breakdown(0.1, "bisq", "buy")
+	bd := est.Breakdown(0.1, "bisq", "bid")
 
 	assertFloat(t, bd.BTCAmount, 0.1)
 	assertFloat(t, bd.CexTakerFeeBTC, 0.00025)
@@ -70,7 +70,7 @@ func TestTradeCostEstimatorBreakdownMatchesComponentSum(t *testing.T) {
 func TestTradeCostEstimatorBreakdownIncludesHedgeCostOnBidSide(t *testing.T) {
 	est := fixedCostEstimatorWithHedge("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 
-	bd := est.Breakdown(0.1, "bisq", "buy")
+	bd := est.Breakdown(0.1, "bisq", "bid")
 
 	assertFloat(t, bd.Hedge.FeeSumBTC, 0.0002)
 	assertFloat(t, bd.Hedge.FeeSumPct, 0.2)
@@ -90,7 +90,7 @@ func TestTradeCostEstimatorBreakdownIncludesHedgeCostOnBidSide(t *testing.T) {
 func TestBisq2BidUsesHubWalletTwoTxs(t *testing.T) {
 	est := fixedCostEstimator("kraken", "bisq2", 0.0025, 0.00015, 0.0, 0.00005)
 
-	bd := est.Breakdown(0.1, "bisq2", "buy")
+	bd := est.Breakdown(0.1, "bisq2", "bid")
 
 	if bd.RouteMethod != string(routing.MethodOnChainHubWallet) {
 		t.Fatalf("route method = %q, want onchain_hub", bd.RouteMethod)
@@ -105,7 +105,7 @@ func TestBisq2BidUsesHubWalletTwoTxs(t *testing.T) {
 func TestBisq2AskSendsDirectToCex(t *testing.T) {
 	est := fixedCostEstimator("kraken", "bisq2", 0.0025, 0.00015, 0.0, 0.00005)
 
-	bd := est.Breakdown(0.1, "bisq2", "sell")
+	bd := est.Breakdown(0.1, "bisq2", "ask")
 
 	if bd.RouteMethod != string(routing.MethodOnChainDirect) {
 		t.Fatalf("ask route method = %q, want onchain_direct", bd.RouteMethod)
@@ -120,7 +120,7 @@ func TestBisq2AskSendsDirectToCex(t *testing.T) {
 func TestRobosatsRoutesViaSwapBothSides(t *testing.T) {
 	est := fixedCostEstimator("kraken", "robosats", 0.0025, 0.00015, 0.00175, 0.00005)
 
-	for _, dir := range []string{"buy", "sell"} {
+	for _, dir := range []string{"bid", "ask"} {
 		bd := est.Breakdown(0.01, "robosats", dir)
 		if bd.RouteMethod != string(routing.MethodOnChainSwap) {
 			t.Fatalf("%s route method = %q, want onchain_swap", dir, bd.RouteMethod)
@@ -303,11 +303,11 @@ func fixedCostEstimatorWithHedgePosition(exchange, dexExchange string, takerFeeF
 	est.cexCostOverride = func(in cextrading.Input) (cextrading.Selection, bool) {
 		takerBTC := in.BTCAmount * takerFeeFrac
 		withdrawalBTC := 0.0
-		if in.Direction != "sell" {
+		if in.Direction != "ask" {
 			withdrawalBTC = withdrawalFeeBTC
 		}
 		side := "short"
-		if in.Direction == "sell" {
+		if in.Direction == "ask" {
 			side = "long"
 		}
 		pos := &cextrading.HedgePositionDetail{RecommendedCollateral: in.BTCAmount * in.RefPriceEUR * 0.1}
@@ -341,8 +341,8 @@ func fixedCostEstimatorWithHedgePosition(exchange, dexExchange string, takerFeeF
 func TestBreakdownCapitalRespectsFullAndCappedVolume(t *testing.T) {
 	est := fixedCostEstimatorWithHedgePosition("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 
-	full := est.breakdown(0.1, 45000, "bisq", "buy", 0, "", nil, nil, false, nil)
-	capped := est.breakdown(0.04, 45000, "bisq", "buy", 0, "", nil, nil, false, nil)
+	full := est.breakdown(0.1, 45000, "bisq", "bid", 0, "", nil, nil, false, nil)
+	capped := est.breakdown(0.04, 45000, "bisq", "bid", 0, "", nil, nil, false, nil)
 
 	// Full size.
 	assertFloat(t, full.Capital.SpotNotional, 4500)        // 0.1 * 45000
@@ -365,8 +365,8 @@ func TestBreakdownRealDepositPctScalesWithCappedVolume(t *testing.T) {
 	est := fixedCostEstimatorWithHedgePosition("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 	realPct := 0.18
 
-	full := est.breakdown(0.1, 45000, "bisq", "buy", 0, "", nil, nil, false, &realPct)
-	capped := est.breakdown(0.04, 45000, "bisq", "buy", 0, "", nil, nil, false, &realPct)
+	full := est.breakdown(0.1, 45000, "bisq", "bid", 0, "", nil, nil, false, &realPct)
+	capped := est.breakdown(0.04, 45000, "bisq", "bid", 0, "", nil, nil, false, &realPct)
 
 	// The real pct is fixed, but since SecurityDepositBTC = btcAmount * pct, the
 	// absolute deposit still scales down correctly with the smaller capped size.
@@ -385,7 +385,7 @@ func TestBreakdownRealDepositPctScalesWithCappedVolume(t *testing.T) {
 func TestAbortCostFromBreakdownIncludesBidUnwindComponents(t *testing.T) {
 	est := fixedCostEstimatorWithHedge("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 
-	bd := est.Breakdown(0.1, "bisq", "buy")
+	bd := est.Breakdown(0.1, "bisq", "bid")
 	abort := est.AbortCostFromBreakdown(bd)
 
 	assertFloat(t, abort.BTCAmount, 0.1)
@@ -407,7 +407,7 @@ func TestAbortCostFromBreakdownIncludesBidUnwindComponents(t *testing.T) {
 func TestTradeCostEstimatorBreakdownIncludesLongHedgeCostOnAskSide(t *testing.T) {
 	est := fixedCostEstimatorWithHedge("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 
-	bd := est.Breakdown(0.1, "bisq", "sell")
+	bd := est.Breakdown(0.1, "bisq", "ask")
 
 	assertFloat(t, bd.WithdrawalFeeBTC, 0)
 	assertFloat(t, bd.NetworkFeeBTC, 0.00005)
@@ -423,7 +423,7 @@ func TestTradeCostEstimatorBreakdownIncludesLongHedgeCostOnAskSide(t *testing.T)
 func TestAbortCostFromBreakdownAskSideOnlyIncludesTwoBTCTransfers(t *testing.T) {
 	est := fixedCostEstimatorWithHedge("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 
-	bd := est.Breakdown(0.1, "bisq", "sell")
+	bd := est.Breakdown(0.1, "bisq", "ask")
 	abort := est.AbortCostFromBreakdown(bd)
 
 	assertFloat(t, abort.CexBuyTaker.BTC, 0)
@@ -441,14 +441,14 @@ func TestAbortCostFromBreakdownAskSideOnlyIncludesTwoBTCTransfers(t *testing.T) 
 	}
 }
 
-func TestTradeCostEstimatorAskSideLongHedgeClampsFundingCredit(t *testing.T) {
+func TestTradeCostEstimatorDoesNotProjectFundingWithoutEventDuration(t *testing.T) {
 	est := NewFixedEstimatorWithHedgeRatesForTesting("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.001, 0.002, 0.003)
 
-	bid := est.Breakdown(0.1, "bisq", "buy")
-	ask := est.Breakdown(0.1, "bisq", "sell")
+	bid := est.Breakdown(0.1, "bisq", "bid")
+	ask := est.Breakdown(0.1, "bisq", "ask")
 
-	assertFloat(t, bid.Hedge.FundingFeeBTC, 0.0003)
-	assertFloat(t, bid.Hedge.FeeSumBTC, 0.0006)
+	assertFloat(t, bid.Hedge.FundingFeeBTC, 0)
+	assertFloat(t, bid.Hedge.FeeSumBTC, 0.0003)
 	assertFloat(t, ask.Hedge.FundingFeeBTC, 0)
 	assertFloat(t, ask.Hedge.FeeSumBTC, 0.0003)
 	if ask.Hedge.Side != "long" {
@@ -459,7 +459,7 @@ func TestTradeCostEstimatorAskSideLongHedgeClampsFundingCredit(t *testing.T) {
 func TestAbortCostFromBreakdownRecalculatesPercentForCappedSize(t *testing.T) {
 	est := fixedCostEstimatorWithHedge("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005, 0.0002)
 
-	abort := est.AbortCostFromBreakdown(est.Breakdown(0.05, "bisq", "buy"))
+	abort := est.AbortCostFromBreakdown(est.Breakdown(0.05, "bisq", "bid"))
 
 	assertFloat(t, abort.BTCAmount, 0.05)
 	assertFloat(t, abort.CexBuyTaker.BTC, 0.000125)
@@ -474,7 +474,7 @@ func TestAbortCostFromBreakdownRecalculatesPercentForCappedSize(t *testing.T) {
 func TestTradeCostEstimatorBreakdownRoundsBTCAndPercentFields(t *testing.T) {
 	est := fixedCostEstimator("kraken", "bisq", 0.00123456789, 0.000000004, 0.00098765432, 0.000000006)
 
-	bd := est.Breakdown(0.123456789, "bisq", "buy")
+	bd := est.Breakdown(0.123456789, "bisq", "bid")
 
 	assertFloat(t, bd.BTCAmount, 0.12345679)
 	assertFloat(t, bd.CexTakerFeeBTC, 0.00015242)
@@ -490,7 +490,7 @@ func TestTradeCostEstimatorZeroAmountReturnsEmptyCost(t *testing.T) {
 	est := fixedCostEstimator("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005)
 
 	assertFloat(t, est.CostPct(0, "bisq"), 0)
-	if bd := est.Breakdown(0, "bisq", "buy"); !reflect.DeepEqual(bd, CostBreakdown{}) {
+	if bd := est.Breakdown(0, "bisq", "bid"); !reflect.DeepEqual(bd, CostBreakdown{}) {
 		t.Fatalf("zero amount breakdown = %#v, want empty breakdown", bd)
 	}
 }

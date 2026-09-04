@@ -67,6 +67,29 @@ services:
           cpus: '0.5'
     restart: unless-stopped
 
+  # LND's bitcoind RPC client resolves its host before dialing, so it cannot
+  # consume a .onion hostname directly. This bridge presents a Docker-local TCP
+  # endpoint and delegates onion resolution and transport to Tor via SOCKS5.
+  bitcoind-rpc-proxy:
+    logging: *default-logging
+    image: dexarbtrading-bitcoind-rpc-proxy:local
+    build:
+      context: ./deploy/bitcoind-rpc-proxy
+      dockerfile: Dockerfile
+    depends_on:
+      tor:
+        condition: service_healthy
+    environment:
+      - UPSTREAM_URL=http://${LND_BITCOIND_RPCHOST}:${LND_BITCOIND_RPCPORT:-8332}/
+      - TOR_SOCKS_ADDR=tor:9050
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8332/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
   bisq:
     logging: *default-logging
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-bisq:${BISQ_IMAGE_TAG:-${IMAGE_TAG:-latest}}
@@ -77,7 +100,7 @@ services:
       # arg the image silently builds at the Dockerfile's ARG default and the
       # env below drifts out of sync with what actually runs.
       args:
-        - BISQ_VERSION=1.10.4
+        - BISQ_VERSION=1.10.6
     depends_on:
       tor:
         condition: service_healthy
@@ -86,7 +109,7 @@ services:
       unified-api:
         condition: service_healthy
     environment:
-      - BISQ_VERSION=1.10.4
+      - BISQ_VERSION=1.10.6
       - BISQ_ACCOUNT_PROVIDER=Bisq
       - BISQ_ACCOUNT_FILE_PATH=${BISQ_ACCOUNT_FILE_PATH:-}
       - BISQ_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
@@ -182,6 +205,8 @@ services:
       - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
       - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
       - MM_CEX_CAPABILITY_MAX_AGE=${MM_CEX_CAPABILITY_MAX_AGE:-30m}
+      - COINBASE_WITHDRAW_RESERVE_FLOOR_SAT=${COINBASE_WITHDRAW_RESERVE_FLOOR_SAT:-10000}
+      - COINBASE_WITHDRAW_RESERVE_MULTIPLIER=${COINBASE_WITHDRAW_RESERVE_MULTIPLIER:-2}
       # Explicit opt-in for money-moving recovery, DEX relay, and hedgeless refill.
       - ENABLE_AUTOMATED_TRADEFLOW_WORKERS=${ENABLE_AUTOMATED_TRADEFLOW_WORKERS:-false}
       # OpenTelemetry: traces -> Alloy -> Tempo; structured logs scraped from stdout.
@@ -234,7 +259,14 @@ services:
       - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
       - PRICE_PROVIDER=bisq_tor
       - SNAPSHOT_INTERVAL_MIN=1
+      # Failed source fetches retain their last confirmed offers for this grace;
+      # a successful snapshot still removes absent offers immediately.
+      - LIVE_OFFER_STALE_GRACE=5m
       - CLOSED_OFFER_ANALYSIS_GRACE_CYCLES=3
+      # Drop order_lifecycle rows older than this many days. 0 disables the
+      # sweep. Batched with a per-cycle time budget so a 47M-row backlog drains
+      # across several snapshot passes instead of stalling one cycle.
+      - LIFECYCLE_RETENTION_DAYS=${LIFECYCLE_RETENTION_DAYS:-30}
       # A full eight-currency pass can exceed three minutes while Tor-backed
       # sources time out. Keep the worker healthy throughout a valid pass.
       - SNAPSHOT_HEALTH_MAX_AGE_SEC=900
@@ -242,6 +274,10 @@ services:
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY:-}
       - TOR_PROXY_URL=socks5h://tor:9050
+      # Keep coordinator discovery current without baking a stale federation
+      # list into the snapshot image. The worker falls back safely on failure.
+      - ROBOSATS_FEDERATION_URL=${ROBOSATS_FEDERATION_URL:-https://raw.githubusercontent.com/RoboSats/robosats/main/frontend/static/federation.json}
+      - ROBOSATS_FEDERATION_REFRESH_INTERVAL=${ROBOSATS_FEDERATION_REFRESH_INTERVAL:-6h}
       # OpenTelemetry: traces -> Alloy -> Tempo; structured logs scraped from stdout.
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-alloy:4317}
       - OTEL_SERVICE_NAME=unified-snapshot
@@ -429,15 +465,16 @@ services:
       # POSTGRES_HOST/PORT/DB/USER/PASSWORD (see resolveDatabaseURL in main.go),
       # so the bridge-network host is set here without re-stating credentials.
       - POSTGRES_HOST=postgres
-      - OPENCLAW_URL=
-      # Internal traffic hits unified-api directly on the bridge network.
-      # The /internal/ws/live_offers route is secret-gated (X-Internal-Secret),
-      # not session-cookie-gated like the browser /ws/live_offers path — the
-      # premium-offer watcher is a service-to-service caller with no cookie.
-      # INTERNAL_API_SECRET must match unified-api's (root .env).
-      - OFFER_PREMIUM_WSS_URL=ws://unified-api:5010/internal/ws/live_offers?cex=kraken
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - LND_HOST=https://lnd:8080
+      # The manual LND health check uses this same in-network proxy and credentials
+      # as LND, so it validates the actual configured pruned Bitcoin Core node.
+      - LND_BITCOIND_RPC_URL=http://bitcoind-rpc-proxy:8332
+      - LND_BITCOIND_RPCUSER=${LND_BITCOIND_RPCUSER}
+      - LND_BITCOIND_RPCPASS=${LND_BITCOIND_RPCPASS}
+      # One-shot operator escape hatch to create a separate empty wallet while
+      # retaining recovery material for a previous wallet in Postgres.
+      - LND_INIT_FRESH=${LND_INIT_FRESH:-false}
       - APP_ENCRYPTION_KEY=${APP_ENCRYPTION_KEY:-}
       - LND_MACAROON_PATH=/lnd/data/chain/bitcoin/mainnet/admin.macaroon
       - LND_TLS_CERT_PATH=/lnd/tls.cert
@@ -448,7 +485,7 @@ services:
       # bisq container did not publish 9998 to the host.
       - BISQ_GRPC_HOST=bisq:9998
       - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
-      - BISQ_VERSION=1.10.4
+      - BISQ_VERSION=1.10.6
       - BISQ2_REST_HOST=bisq2:8090
       - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
       - BISQ2_VERSION=2.1.11
@@ -474,7 +511,7 @@ services:
       # containers use http://mm-controller:5001, not this publish.
       - "127.0.0.1:5001:5001"
     volumes:
-      - lnd-data:/lnd:ro
+      - lnd-data-fresh:/lnd:ro
       # - ./dexMmController/secrets/lnd_seed_mnemonic:/run/secrets/lnd_seed_mnemonic:ro
       # - ./dexMmController/secrets/lnd_aezeed_passphrase:/run/secrets/lnd_aezeed_passphrase:ro
     healthcheck:
@@ -498,8 +535,18 @@ services:
     # Bridge network: reachable from sibling containers at https://lnd:8080.
     # The TLS cert must include the "lnd" SAN (added below); see the one-time
     # cert-regeneration note in the README / migration comment before first up.
+    # Public DNS only on this service: LND does not resolve sibling compose
+    # names, and Docker's 127.0.0.11 has timed out Lightning Labs lookups.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     volumes:
-      - lnd-data:/root/.lnd
+      - lnd-data-fresh:/root/.lnd
+    depends_on:
+      tor:
+        condition: service_healthy
+      bitcoind-rpc-proxy:
+        condition: service_healthy
     ports:
       # Loopback only, for host-side lncli / debugging. Sibling containers use
       # the docker DNS name (lnd:8080 / lnd:10009), not these publishes.
@@ -515,11 +562,15 @@ services:
     command:
       - --bitcoin.active
       - --bitcoin.mainnet
-      - --bitcoin.node=neutrino
-      - --neutrino.addpeer=btcd-mainnet.lightning.computer
-      - --neutrino.addpeer=neutrino.noderunner.wtf
-      - --neutrino.addpeer=node.eldamar.icu
-      - --neutrino.addpeer=btcd.lnolymp.us
+      - --bitcoin.node=bitcoind
+      - --bitcoind.rpchost=bitcoind-rpc-proxy:8332
+      - --bitcoind.rpcuser=${LND_BITCOIND_RPCUSER}
+      - --bitcoind.rpcpass=${LND_BITCOIND_RPCPASS}
+      # RPC polling avoids exposing a separate ZMQ endpoint through Tor.
+      - --bitcoind.rpcpolling
+      - --bitcoind.pruned-node-max-peers=4
+      - --tor.active
+      - --tor.socks=tor:9050
       - --fee.url=https://nodes.lightning.computer/fees/v1/btc-fee-estimates.json
       - --restlisten=0.0.0.0:8080
       - --rpclisten=0.0.0.0:10009
@@ -529,8 +580,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
-          cpus: '0.5'
+          memory: 1G
+          cpus: '1.0'
     restart: unless-stopped
 
   # Maddy mail services are disabled for now. Keep this configuration here so
@@ -870,26 +921,21 @@ services:
 
   # One local Swagger UI for all service-owned OpenAPI documents. It is kept
   # behind the docs profile and bound to loopback because internal/admin routes
-  # are included in the catalogs.
+  # are included in the bundled contracts.
   api-docs:
     image: swaggerapi/swagger-ui:v5.30.1
     profiles:
       - docs
     environment:
       URLS: >-
-        [{"name":"dexUnifiedApi","url":"/specs/unified-api.yaml"},{"name":"dexMmController — complete routes","url":"/specs/mm-controller.yaml"},{"name":"dexMmController — typed execution contract","url":"/specs/mm-execution.yaml"},{"name":"dexMonitor","url":"/specs/monitor.yaml"},{"name":"dexMonitor — bisqstats","url":"/specs/bisqstats.yaml"},{"name":"dexFiatController","url":"/specs/fiat-controller.yaml"}]
-      URLS_PRIMARY_NAME: dexMonitor
+        [{"name":"dexUnifiedApi — public","url":"/specs/dex-unified-api/public.openapi.yaml"},{"name":"dexUnifiedApi — internal","url":"/specs/dex-unified-api/internal.openapi.yaml"},{"name":"dexMmController — public","url":"/specs/dex-mm-controller/public.openapi.yaml"},{"name":"dexMmController — internal","url":"/specs/dex-mm-controller/internal.openapi.yaml"},{"name":"dexMonitor — public","url":"/specs/dex-monitor/public.openapi.yaml"},{"name":"dexMonitor — bisqstats","url":"/specs/dex-monitor/bisqstats.public.openapi.yaml"},{"name":"dexFiatController — public","url":"/specs/dex-fiat-controller/public.openapi.yaml"},{"name":"dexFiatController — internal","url":"/specs/dex-fiat-controller/internal.openapi.yaml"}]
+      URLS_PRIMARY_NAME: dexMonitor — public
       DISPLAY_REQUEST_DURATION: "true"
       PERSIST_AUTHORIZATION: "true"
     ports:
       - "127.0.0.1:8088:8080"
     volumes:
-      - ./dexUnifiedApi/api/openapi.yaml:/usr/share/nginx/html/specs/unified-api.yaml:ro
-      - ./dexMmController/api/openapi.yaml:/usr/share/nginx/html/specs/mm-controller.yaml:ro
-      - ./dexMmController/api/execution.openapi.yaml:/usr/share/nginx/html/specs/mm-execution.yaml:ro
-      - ./dexMonitor/api/openapi.yaml:/usr/share/nginx/html/specs/monitor.yaml:ro
-      - ./dexMonitor/api/bisqstats.openapi.yaml:/usr/share/nginx/html/specs/bisqstats.yaml:ro
-      - ./dexFiatController/api/openapi.yaml:/usr/share/nginx/html/specs/fiat-controller.yaml:ro
+      - ./api-docs/specs:/usr/share/nginx/html/specs:ro
     deploy:
       resources:
         limits:
@@ -921,6 +967,9 @@ volumes:
   maddy-data:
   maddy-backups:
   lnd-data:
+  # The prior lnd-data volume is intentionally retained for recovery. New
+  # wallet initialization uses this isolated volume.
+  lnd-data-fresh:
   prometheus-data:
   grafana-data:
   loki-data:

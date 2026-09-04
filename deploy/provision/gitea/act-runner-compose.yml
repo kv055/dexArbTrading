@@ -69,3 +69,11 @@ services:
 volumes:
   dind-storage:
   act-runner-data:
+
+# The homeserver's internet path is limited to a 1492-byte MTU (typical for
+# PPPoE). Keep the outer runner network below that ceiling so registry traffic
+# originating from the DinD daemon does not depend on fragile PMTU discovery.
+networks:
+  default:
+    driver_opts:
+      com.docker.network.driver.mtu: "1492"

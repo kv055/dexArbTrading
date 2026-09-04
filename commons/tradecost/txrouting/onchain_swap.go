@@ -13,8 +13,8 @@ import (
 
 // onChainSwap withdraws BTC on-chain from the CEX into our LND, then converts it to
 // spendable Lightning locally so a Lightning DEX (RoboSats) can be paid. One on-chain
-// transaction (CEX → our LND) plus a conversion that is the cheaper of a Boltz normal
-// submarine swap (reusing one channel) or opening a fresh channel per payment.
+// transaction (CEX → our LND) plus a Boltz submarine swap into the manually
+// managed long-lived channel. Channel opening remains an informational comparison.
 type onChainSwap struct{ eng *Engine }
 
 func (onChainSwap) Kind() Kind { return MethodOnChainSwap }
@@ -70,8 +70,8 @@ const (
 )
 
 // ConversionBreakdown details the local on-chain → Lightning conversion. It is only
-// populated for the OnChainSwap method; Strategy is "" otherwise. The chosen strategy
-// is the cheaper of a Boltz submarine swap and a fresh channel open.
+// populated for the OnChainSwap method; Strategy is "" otherwise. Execution
+// always selects submarine_swap; ChannelOpenBTC remains comparison-only.
 type ConversionBreakdown struct {
 	Strategy           string  `json:"strategy"`             // "submarine_swap" | "channel_open" | "" (n/a)
 	ServiceFeePct      float64 `json:"service_fee_pct"`      // Boltz service fee as % of trade (swap strategy)
@@ -136,8 +136,8 @@ func (p swapParams) crossoverSteadyStateSats() (sats float64, ok bool) {
 	return num / denom, true
 }
 
-// conversionBreakdown evaluates both strategies for a single payment of amountBTC and
-// returns the cheaper one as a rounded, display-ready breakdown.
+// conversionBreakdown prices executable submarine-swap conversion while retaining
+// channel-open cost and crossover as informational comparison fields.
 func (p swapParams) conversionBreakdown(amountBTC float64) ConversionBreakdown {
 	amountSats := amountBTC * 1e8
 	serviceSats := p.ServiceFrac * amountSats
@@ -149,10 +149,6 @@ func (p swapParams) conversionBreakdown(amountBTC float64) ConversionBreakdown {
 
 	totalSats := swapSats
 	strategy := StrategySubmarineSwap
-	if channelSats < swapSats {
-		totalSats = channelSats
-		strategy = StrategyChannelOpen
-	}
 
 	pct := func(sats float64) float64 {
 		if amountBTC <= 0 {
@@ -244,16 +240,15 @@ func (c *boltzFeeCache) get() boltzFees {
 	return result
 }
 
-// Boltz v2 submarine response: { "<from>": { "<to>": { fees:{percentage, minerFees}, ... } } }.
-// We want BTC -> BTC (on-chain BTC -> Lightning BTC). minerFees is usually a number
-// but may be an object; parseBoltzMinerFees handles both.
+// This read-only shared cost estimator consumes public fee metadata. Swap
+// creation, signing, claiming and refunding live exclusively in mm-controller
+// and use the official Boltz client library there.
 func fetchBoltzSubmarineFees() (boltzFees, error) {
 	req, err := http.NewRequest(http.MethodGet, boltzSubmarineURL, nil)
 	if err != nil {
 		return boltzFees{}, err
 	}
 	req.Header.Set("Accept", "application/json")
-
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return boltzFees{}, fmt.Errorf("boltz: %w", err)
@@ -266,7 +261,6 @@ func fetchBoltzSubmarineFees() (boltzFees, error) {
 	if resp.StatusCode != http.StatusOK {
 		return boltzFees{}, fmt.Errorf("boltz GET %s: status %d", boltzSubmarineURL, resp.StatusCode)
 	}
-
 	var parsed map[string]map[string]struct {
 		Fees struct {
 			Percentage float64         `json:"percentage"`
@@ -294,7 +288,7 @@ func parseBoltzMinerFees(raw json.RawMessage) float64 {
 	if err := json.Unmarshal(raw, &n); err == nil {
 		return n
 	}
-	var obj map[string]float64 // e.g. {"server": 148} or {"lockup": .., "claim": ..}
+	var obj map[string]float64
 	if err := json.Unmarshal(raw, &obj); err == nil {
 		sum := 0.0
 		for _, v := range obj {

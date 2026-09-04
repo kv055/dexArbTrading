@@ -1,11 +1,13 @@
 package tradecost
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,16 +35,6 @@ func DefaultBTCTradeSize() float64 {
 // SupportedCEXes returns the CEXes the cost model knows about (owned by cextrading).
 func SupportedCEXes() []string {
 	return cextrading.SupportedCEXes()
-}
-
-// TakerFeeFallback returns the static taker fee fraction for an exchange.
-func TakerFeeFallback(exchange string) float64 {
-	return cextrading.TakerFeeFallback(exchange)
-}
-
-// WithdrawalFallback returns the static on-chain withdrawal fee (BTC) for an exchange.
-func WithdrawalFallback(exchange string) float64 {
-	return cextrading.WithdrawalFallback(exchange)
 }
 
 // ---------------------------------------------------------------------------
@@ -224,8 +216,8 @@ func fetchRobosatsTakerFee() (float64, error) {
 // ---------------------------------------------------------------------------
 
 // TradeCostEstimator estimates the total cost of one CEX→DEX arbitrage cycle:
-//  1. CEX taker fee — fetched live from exchange API where available, static fallback
-//  2. CEX BTC withdrawal fee — fetched live from exchange API, static fallback
+//  1. persisted CEX taker fee
+//  2. persisted CEX BTC withdrawal fee
 //  3. Bitcoin on-chain network fee — congestion-adaptive, dynamic vsize, cached 5 min
 //  4. DEX platform fee — static per-exchange taker rate
 //
@@ -252,7 +244,20 @@ func NewTradeCostEstimator() *TradeCostEstimator {
 
 // NewTradeCostEstimatorWithCredentials builds an estimator whose authenticated
 // exchange fee lookups resolve credentials from the supplied database provider.
+// It is retained for source compatibility; CEX pricing now needs persisted fees.
 func NewTradeCostEstimatorWithCredentials(provider exchangecredentials.Provider) *TradeCostEstimator {
+	_ = provider // Kept for API compatibility; CEX prices now read persisted fees.
+	return newTradeCostEstimator(nil)
+}
+
+// NewTradeCostEstimatorWithPersistedFees builds an estimator that reads the
+// Unified API's exchange-derived fee snapshots. Missing or stale values are
+// excluded rather than replaced with static defaults.
+func NewTradeCostEstimatorWithPersistedFees(feeDB *sql.DB) *TradeCostEstimator {
+	return newTradeCostEstimator(feeDB)
+}
+
+func newTradeCostEstimator(feeDB *sql.DB) *TradeCostEstimator {
 	torClient, err := newTorHTTPClient()
 	if err != nil {
 		fmt.Printf("[TradeCost] Tor client unavailable, bitcoin fee fetcher will use direct HTTP: %v\n", err)
@@ -264,7 +269,7 @@ func NewTradeCostEstimatorWithCredentials(provider exchangecredentials.Provider)
 	} else {
 		fmt.Println("[TradeCost] mempool fee data bootstrapped")
 	}
-	return &TradeCostEstimator{
+	estimator := &TradeCostEstimator{
 		dexFees: map[string]*cachedFee{
 			"bisq":     newCachedFee(feeTTL),
 			"robosats": newCachedFee(feeTTL),
@@ -273,8 +278,49 @@ func NewTradeCostEstimatorWithCredentials(provider exchangecredentials.Provider)
 		btcPredictor:      predictor,
 		withdrawalTxShape: defaultCexProfile.txShape(),
 		txEngine:          routing.NewEngine(predictor),
-		cexEngine:         cextrading.NewEngine(provider),
 	}
+	estimator.cexEngine = cextrading.NewEngineWithWithdrawalResolver(feeDB, estimator.resolveWithdrawalReserve)
+	return estimator
+}
+
+const defaultCoinbaseWithdrawalReserveFloorSat int64 = 10_000
+
+func coinbaseReserveConfig() (int64, float64) {
+	floor := defaultCoinbaseWithdrawalReserveFloorSat
+	if parsed, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("COINBASE_WITHDRAW_RESERVE_FLOOR_SAT")), 10, 64); err == nil && parsed > 0 {
+		floor = parsed
+	}
+	multiplier := 2.0
+	if parsed, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv("COINBASE_WITHDRAW_RESERVE_MULTIPLIER")), 64); err == nil && parsed > 0 {
+		multiplier = parsed
+	}
+	return floor, multiplier
+}
+
+func (e *TradeCostEstimator) resolveWithdrawalReserve(cex string, persisted float64) float64 {
+	if !strings.EqualFold(cex, "coinbase") {
+		return persisted
+	}
+	floorSat, multiplier := coinbaseReserveConfig()
+	reserve := math.Max(persisted, float64(floorSat)/1e8)
+	if e == nil || e.btcPredictor == nil {
+		return reserve
+	}
+	_, _, _, express, err := e.btcPredictor.GetSimpleFeeEstimate()
+	if err != nil {
+		return reserve
+	}
+	recommendation, err := e.btcPredictor.EstimateCustomFee(2, 2, "P2WPKH", express)
+	if err != nil {
+		return reserve
+	}
+	return math.Max(reserve, recommendation.TotalFeeBTC*multiplier)
+}
+
+// CoinbaseWithdrawalReserve returns the exact conservative value used by route
+// pricing and its source label for operational status responses.
+func (e *TradeCostEstimator) CoinbaseWithdrawalReserve(persisted float64) (float64, string) {
+	return e.resolveWithdrawalReserve("coinbase", persisted), "conservative_combined"
 }
 
 // fixedRoutingCost returns a deterministic, offline routing.Cost for tests: each
@@ -318,7 +364,7 @@ func fixedCexCost(exchange string, takerFeeFrac, withdrawalFeeBTC float64, hedge
 	return func(in cextrading.Input) (cextrading.Selection, bool) {
 		takerBTC := in.BTCAmount * takerFeeFrac
 		withdrawalBTC := 0.0
-		if in.Direction != "sell" {
+		if in.Direction != "ask" {
 			withdrawalBTC = withdrawalFeeBTC
 		}
 		sel := cextrading.Selection{
@@ -340,7 +386,7 @@ func fixedCexCost(exchange string, takerFeeFrac, withdrawalFeeBTC float64, hedge
 
 // hedgeSideForTestDirection mirrors cextrading's bid→short / ask→long mapping.
 func hedgeSideForTestDirection(direction string) string {
-	if direction == "sell" {
+	if direction == "ask" {
 		return "long"
 	}
 	return "short"
@@ -400,7 +446,10 @@ func NewFixedEstimatorWithHedgeRatesForTesting(exchange, dexExchange string, tak
 	est := NewFixedEstimatorForTesting(exchange, dexExchange, takerFeeFrac, withdrawalFeeBTC, dexFeeFrac, networkFeeBTC)
 	hedgeFn := func(in cextrading.Input) cextrading.HedgeBreakdown {
 		side := hedgeSideForTestDirection(in.Direction)
-		fundingCostRate := fundingRate
+		// Model the supplied funding rate as an eight-hour venue interval, just
+		// like production inputs. A zero holding duration therefore has no
+		// projected funding charge.
+		fundingCostRate := fundingRate * in.TransferMinutes / (8 * 60)
 		if side == "long" {
 			fundingCostRate = -fundingRate
 		}
@@ -463,7 +512,7 @@ func (e *TradeCostEstimator) TakerFeeBTC(btcAmount float64) float64 {
 	if btcAmount <= 0 {
 		return 0
 	}
-	sel, _ := e.cexCost(cextrading.Input{BTCAmount: btcAmount, Direction: "buy"})
+	sel, _ := e.cexCost(cextrading.Input{BTCAmount: btcAmount, Direction: "bid"})
 	return sel.TakerFeeBTC
 }
 
@@ -475,7 +524,7 @@ func (e *TradeCostEstimator) DexFeeBTC(btcAmount float64, dexExchange string) fl
 }
 
 func (e *TradeCostEstimator) EstimateHedgeBreakdown(btcAmount float64, refPriceEUR float64, transferMinutes float64, coupledHedge bool) HedgeBreakdown {
-	return e.EstimateHedgeBreakdownForDirection(btcAmount, refPriceEUR, transferMinutes, coupledHedge, "buy")
+	return e.EstimateHedgeBreakdownForDirection(btcAmount, refPriceEUR, transferMinutes, coupledHedge, "bid")
 }
 
 func (e *TradeCostEstimator) EstimateHedgeBreakdownForDirection(btcAmount float64, refPriceEUR float64, transferMinutes float64, coupledHedge bool, direction string) HedgeBreakdown {
@@ -532,7 +581,7 @@ func resolveRequiredConfirmations(direction string, requested int) int {
 	if requested >= 1 && requested <= 6 {
 		return requested
 	}
-	if direction == "sell" {
+	if direction == "ask" {
 		return 4
 	}
 	return 2
@@ -554,10 +603,10 @@ func (e *TradeCostEstimator) CostPctWithConfirmations(btcAmount float64, dexExch
 		return 0
 	}
 	// CostPct uses the bid side (default), where a CEX withdrawal fee applies.
-	requiredConfirmations = resolveRequiredConfirmations("buy", requiredConfirmations)
+	requiredConfirmations = resolveRequiredConfirmations("bid", requiredConfirmations)
 	dexFeeFrac := e.getDexFeeFrac(dexExchange)
-	cost := e.routingCost(dexExchange, "buy", btcAmount, requiredConfirmations, "")
-	sel, ok := e.cexCost(cextrading.Input{BTCAmount: btcAmount, Direction: "buy"})
+	cost := e.routingCost(dexExchange, "bid", btcAmount, requiredConfirmations, "")
+	sel, ok := e.cexCost(cextrading.Input{BTCAmount: btcAmount, Direction: "bid"})
 	if !ok {
 		return 0
 	}
@@ -724,7 +773,7 @@ func Round2(v float64) float64 {
 }
 
 // Breakdown returns a full per-component cost breakdown for a given trade size, DEX, and offer direction.
-// direction should be the DEX offer direction: "buy" (bid side) or "sell" (ask side).
+// direction is the canonical DEX offer direction: "bid" or "ask".
 func (e *TradeCostEstimator) Breakdown(btcAmount float64, dexExchange string, direction string) CostBreakdown {
 	return e.BreakdownWithConfirmations(btcAmount, dexExchange, direction, 0)
 }
@@ -752,10 +801,10 @@ func (e *TradeCostEstimator) breakdownWithOptions(btcAmount float64, refPriceEUR
 
 	networkFeeBTC := cost.NetworkFeeBTC
 	conversionBTC := cost.Conversion.FeeSumBTC
+	// Confirmation estimates are not a hedge holding-period model. Until the
+	// execution lifecycle supplies event timestamps, funding is deliberately
+	// unavailable/zero while open and close fees remain included.
 	transferMinutes := 0.0
-	if cost.Detail != nil && cost.Detail.SelectedFullConfirmationMinutes > 0 {
-		transferMinutes = float64(cost.Detail.SelectedFullConfirmationMinutes * cost.NumOnchainTxs)
-	}
 
 	// Pick the cheapest CEX fee combo. Ask side: BTC is deposited to the CEX, so no
 	// withdrawal fee (the cextrading engine side-gates it); bid side withdraws.
@@ -772,8 +821,13 @@ func (e *TradeCostEstimator) breakdownWithOptions(btcAmount float64, refPriceEUR
 	if !ok {
 		return CostBreakdown{}
 	}
+	// Retain the network arrival estimate as display metadata only. It was not
+	// supplied to hedge pricing and therefore cannot create a funding charge.
+	if cost.Detail != nil {
+		sel.Hedge.TransferMinutes = cost.Detail.SelectedFullConfirmationMinutes * cost.NumOnchainTxs
+	}
 
-	isBid := direction != "sell"
+	isBid := direction != "ask"
 	tradeDir := "bid"
 	if !isBid {
 		tradeDir = "ask"

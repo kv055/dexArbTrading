@@ -11,23 +11,38 @@ Open <http://127.0.0.1:8088> and select a service from the definition picker.
 The site is bound to loopback because it includes internal and administrative
 routes.
 
-## Coverage and maturity
+## Contract flow
 
-The route catalogs cover every statically registered HTTP route in
-`dexUnifiedApi`, `dexMmController`, `dexMonitor`, the monitor's standalone
-`bisqstats` command, and `dexFiatController`. `commons` is a shared Go library
-and does not expose an HTTP server.
+The OpenAPI 3.1 documents under each service's `api/` directory are the source
+of truth. Public and internal audiences are split into separate contracts.
+Shared health and error schemas live in `commons/api/openapi/`; committed,
+self-contained bundles under `api-docs/specs/` feed Swagger UI and every code
+generator.
 
-Catalog operations marked `x-contract-status: route-catalog` document the
-method and path but do not yet promise a precise request or response model. The
-MM execution definition is the first strongly typed contract and also generates
-the monitor frontend's TypeScript types.
+The bundles generate strict Go server interfaces and models in the services,
+typed Go clients in `commons/api/client/`, and the monitor frontend's TypeScript
+types. During the wire-compatible cutover, generated strict adapters own normal
+JSON route registration and request binding. They buffer each established
+handler's response, validate its status, content type, and body against the
+contract, and only then send it to the client. A violation is rejected as a
+server error. These adapters are recorded as `validated-legacy` in
+`api-contracts.json`; `native-strict` is reserved for handlers that directly
+implement generated request and response types. WebSockets, transparent
+proxies, downloads, metrics, and Fiat capture mode are explicit raw exceptions
+documented in the contracts.
 
-After adding or removing a route, regenerate the catalogs:
+## Changing an API
+
+Edit the appropriate source contract before changing its implementation, then
+run from the repository root:
 
 ```bash
-python3 scripts/openapi-route-catalogs.py
+make api-generate
+make api-check
 ```
 
-Use `python3 scripts/openapi-route-catalogs.py --check` to verify that committed
-catalogs match the Go route registrations.
+`api-check` bundles and lints every contract, checks generated versus raw route
+ownership, regenerates Go and TypeScript artifacts (including response-validator
+tests), and fails if committed outputs are stale. CI runs the same check for
+every parent-repository change so a submodule pointer update cannot bypass
+contract verification.

@@ -1,0 +1,67 @@
+# Grafana-managed alert rules (provisioned). In-Grafana only: no contact point is
+# configured here, so these fire and turn red in the Alerting UI / Alert-list panel
+# but nothing is pushed externally.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: lnd
+    folder: DEX Alerts
+    interval: 1m
+    rules:
+      # Wallet RPC is up (RPC_ACTIVE) but LND has not finished the wallet
+      # rescan (synced_to_chain=false). Header height can still be at tip.
+      # 6h covers a normal 1–4h Neutrino catch-up after an LND restart.
+      - uid: dexarb-lnd-unsynced
+        title: LND not synced to chain
+        condition: C
+        for: 6h
+        noDataState: OK
+        execErrState: Error
+        isPaused: false
+        labels:
+          severity: warning
+        annotations:
+          summary: "LND wallet is up but synced_to_chain has been 0 for 6h"
+          description: "Neutrino headers can be at tip while the LNWL wallet rescan is still unfinished. Check `docker compose logs lnd` for Started/Finished rescan and Chain backend is fully synced. Do not docker compose down -v."
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 21600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: dex_lnd_wallet_up == 1 and dex_lnd_synced_to_chain == 0
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+                  reducer:
+                    type: last
+                    params: []
+              refId: C

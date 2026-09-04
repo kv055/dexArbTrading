@@ -19,7 +19,7 @@ set +a
 : "${GITEA_OWNER:?GITEA_OWNER not set in .env.gitea}"
 : "${GITEA_TOKEN:?GITEA_TOKEN not set in .env.gitea}"
 : "${RUNNER_NAME:=homeserver-1}"
-: "${HOMESERVER_SSH_USER:=gitea-runner}"
+: "${HOMESERVER_SSH_USER:=umbrel}"
 : "${HOMESERVER_SSH_HOST:?HOMESERVER_SSH_HOST not set in .env.gitea}"
 : "${HOMESERVER_RUNNER_DIR:=~/gitea-runner}"
 

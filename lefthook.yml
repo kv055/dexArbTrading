@@ -29,3 +29,8 @@ post-commit:
   scripts:
     "encrypt-env.sh":
       runner: bash
+
+post-checkout:
+  scripts:
+    "rebuild-dev-services-after-checkout.sh":
+      runner: bash

@@ -57,40 +57,39 @@ cp deploy/provision/gitea/.env.gitea.example deploy/provision/gitea/.env.gitea
 | `GITEA_OWNER` | User/org that will own the repos (e.g. `kv055`). |
 | `GITEA_TOKEN` | The **Gitea** PAT from step 3 above (NOT the GitHub PAT). |
 | `RUNNER_NAME` / `RUNNER_LABELS` | Runner identity + the `ubuntu-latest → catthehacker` image mapping. |
-| `HOMESERVER_ADMIN_SSH_USER` | Sudo-capable account (e.g. `umbrel`) used **once** by `provision-runner-user.sh` to create the runner user. Must differ from `HOMESERVER_SSH_USER`. Only needed for the one-time bootstrap below. |
-| `HOMESERVER_SSH_USER` | The **unprivileged** runner account that `setup-gitea.sh` logs in as to deploy/start the runner (default `gitea-runner`). Created by the bootstrap step, not pre-existing. |
+| `HOMESERVER_ADMIN_SSH_USER` | Sudo-capable account used by `provision-runner-user.sh` for docker group + lingering (default `umbrel`). On Umbrel OS this is the same as `HOMESERVER_SSH_USER`. |
+| `HOMESERVER_SSH_USER` | Account that owns runner files and that `setup-gitea.sh` logs in as (default `umbrel`). Must be an OS-image user on Umbrel; overlay-only users vanish after a Rugix overlay rebuild. |
 | `HOMESERVER_SSH_HOST` | Tailscale IP of the homeserver (e.g. `100.x.y.z`). Use the IP, not a `*.ts.net` hostname. |
-| `HOMESERVER_RUNNER_DIR` | Directory on the homeserver where runner files are placed (default `~/gitea-runner`). |
+| `HOMESERVER_RUNNER_DIR` | Directory on the homeserver where runner files are placed (default `~/gitea-runner`, i.e. `/home/umbrel/gitea-runner`). |
 
 Also reused: `GH_PAT` in the repo-root `.env` (the GitHub PAT) — written as a Gitea
 secret so the runner can fetch submodules from github.com.
 
-## Bootstrap the runner user (first time only)
+## Bootstrap the runner owner
 
-`setup-gitea.sh` logs in to the homeserver **as** the unprivileged `HOMESERVER_SSH_USER`
-(`gitea-runner`) to copy the runner files and `docker compose up` — so it can't be the thing
-that *creates* that user. That needs a sudo-capable admin login, which is the chicken-and-egg
-`provision-runner-user.sh` solves. Run it **once** before the first `setup-gitea.sh`:
+`setup-gitea.sh` logs in to the homeserver **as** `HOMESERVER_SSH_USER` (`umbrel`
+on Umbrel OS) to copy the runner files and `docker compose up`. That account
+must be in the `docker` group and have systemd lingering. Run this before the
+first `setup-gitea.sh` and again after an Umbrel overlay rebuild (unclean reboot):
 
 ```bash
 bash deploy/provision/gitea/provision-runner-user.sh
 ```
 
-Over a single sudo SSH session as `HOMESERVER_ADMIN_SSH_USER` (e.g. `umbrel`) it:
+Over a sudo SSH session as `HOMESERVER_ADMIN_SSH_USER` (same as `umbrel` by
+default) it:
 
-1. creates the `gitea-runner` user (no password — key-only, like the admin account);
-2. adds it to the `docker` group so it can run `docker compose` for the runner;
-3. authorizes the **same** SSH key(s) the admin account uses (copies the admin's
-   `authorized_keys`) — no separate keypair to manage for a homelab trial;
-4. enables systemd lingering so the runner user's reconciliation timer remains
-   active after SSH logout and across homeserver reboots.
+1. uses the existing OS-image user (does not create a dedicated overlay user);
+2. adds it to the `docker` group so it can run `docker compose`;
+3. enables systemd lingering so the reconciliation timer starts at boot;
+4. if `/home/gitea-runner/gitea-runner` still exists from the old overlay
+   account, copies it to `~/gitea-runner` on the stock user (same compose
+   project name, so named volumes keep working).
 
-It's idempotent (safe to re-run) and forces correct home-dir ownership so sshd's `StrictModes`
-still accepts key auth on a re-run over a stale home dir. Verify it worked (should not prompt
-for a password, and docker must work):
+Verify (should not prompt for a password, and docker must work):
 
 ```bash
-ssh gitea-runner@100.x.y.z docker ps
+ssh umbrel@100.x.y.z docker ps
 ```
 
 ## Run it
@@ -199,8 +198,8 @@ The reconciler serializes itself with setup and teardown, waits for Compose heal
 and writes state transitions to journald. Inspect it with:
 
 ```bash
-ssh gitea-runner@100.x.y.z 'systemctl --user status gitea-runner-reconcile.timer'
-ssh gitea-runner@100.x.y.z 'journalctl --user -u gitea-runner-reconcile.service'
+ssh umbrel@100.x.y.z 'systemctl --user status gitea-runner-reconcile.timer'
+ssh umbrel@100.x.y.z 'journalctl --user -u gitea-runner-reconcile.service'
 ```
 
 It records a disk warning at 90% usage and a critical message at 95%, but never prunes

@@ -286,8 +286,70 @@ if not (1 <= n <= 16) or roundtrip[-n:] != bytes([n]) * n:
 if roundtrip[:-n] != creds_plain:
     raise SystemExit("ERROR: ciphertext did not round-trip to the original plaintext")
 
+# Also emit a Tabularis import payload (same connection, same tunnel) so the
+# VPS Postgres can be imported into Tabularis without typing anything either.
+# Schema is Tabularis' ExportPayload (src-tauri/src/models.rs, demo
+# connections.json): Connections page -> Import dropup -> "Tabularis JSON".
+# Fixed ids (pg-dexarb-vps / vps-bastion / group dexarb): Tabularis merges by
+# id on import, so regenerating + re-importing updates in place instead of
+# piling up duplicates. Like Tabularis' own exports, this file carries the DB
+# password in PLAINTEXT — it lives in the gitignored 700-perm out dir.
+tabularis_payload = {
+    "version": 1,
+    "groups": [
+        {
+            "id": "dexarb",
+            "name": "dexArbTrading",
+            "collapsed": False,
+            "sort_order": 0,
+        },
+    ],
+    "connections": [
+        {
+            "id": "pg-dexarb-vps",
+            "name": conn_name,
+            "group_id": "dexarb",
+            "sort_order": 0,
+            "params": {
+                "driver": "postgres",
+                # Host/port are resolved from the SSH server's side, same as
+                # DBeaver's tunnel: Postgres is 127.0.0.1:5432 on the VPS.
+                "host": "127.0.0.1",
+                "port": 5432,
+                "username": user,
+                "password": password,
+                "database": database,
+                "ssl_mode": None,
+                "ssl_ca": None,
+                "ssl_cert": None,
+                "ssl_key": None,
+                "ssh_enabled": True,
+                "ssh_connection_id": "vps-bastion",
+                "save_in_keychain": True,
+            },
+        },
+    ],
+    "ssh_connections": [
+        {
+            "id": "vps-bastion",
+            "name": "VPS bastion",
+            "host": ssh_host,
+            "port": 22,
+            "user": ssh_user,
+            "auth_type": "ssh_key",
+            "key_file": ssh_key,
+            "save_in_keychain": True,
+        },
+    ],
+}
+
+tab_path = out_dir / "tabularis-dexarb-vps.json"
+tab_path.write_text(json.dumps(tabularis_payload, indent=2) + "\n", encoding="utf-8")
+os.chmod(tab_path, 0o600)
+
 print(f"  conn_id : {conn_id}")
 print(f"  dexarb-vps.dbp : {dbp_path} ({dbp_path.stat().st_size} bytes)")
+print(f"  tabularis json : {tab_path} ({tab_path.stat().st_size} bytes)")
 PY
 
 chmod 600 "$OUT_DIR/dexarb-vps.dbp"
@@ -328,6 +390,13 @@ Connection name: $CONN_NAME
 SSH host       : $VPS_SSH_HOST
 SSH user       : $VPS_SSH_USER
 Generated      : $(date -Iseconds)
+
+Tabularis alternative:
+The same connection is also emitted as a Tabularis import payload next to this
+file: tabularis-dexarb-vps.json. Import via the Connections page ->
+Import dropup -> "Tabularis JSON". Re-importing merges by id (updates in
+place). WARNING: it contains the DB password in PLAINTEXT (same trade-off as
+Tabularis' own export); keep it in this gitignored directory.
 EOF
 chmod 600 "$OUT_DIR/README.txt"
 

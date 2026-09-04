@@ -11,7 +11,6 @@ The repository is organized as a parent deployment repo with several component r
 - `dexMonitor` serves the React dashboard plus monitor-facing REST and WebSocket APIs.
 - `dexMmController` tracks arbitrage transactions, wallet addresses, account health, premium offers, LND wallet access, and DEX offer execution.
 - `dexFiatController` automates fiat account monitoring and payment notification forwarding for PayPal, Wise, and Revolut.
-- `dexMmTradingLogicHummingBot` contains the Hummingbot strategy/controller code used for CEX-side BTC execution and withdrawal experiments.
 - `commons` is a shared Go module for price feeds, trade-cost calculation, hedge modelling, and Bitcoin fee analysis.
 - `deploy` contains the VPS webhook deploy helper.
 
@@ -27,7 +26,7 @@ At runtime the stack centers on Postgres:
 6. `dexFiatController` reads connector credentials from the shared database, monitors fiat services, and forwards payment events to `dexUnifiedApi`.
 7. `postgres-backup` periodically creates compressed logical backups and uploads them with `rclone`.
 
-External dependencies include Tor, Bisq, LND, optional Hummingbot/OpenClaw services, CEX APIs, and fiat-provider web sessions.
+External dependencies include Tor, Bisq, LND, optional OpenClaw services, CEX APIs, and fiat-provider web sessions.
 
 ## Repository Layout
 
@@ -40,7 +39,6 @@ External dependencies include Tor, Bisq, LND, optional Hummingbot/OpenClaw servi
 +-- dexMonitor/                     # Dashboard server and React frontend
 +-- dexMmController/                # Transaction, wallet, account-health, and offer execution service
 +-- dexFiatController/              # Fiat connector automation and TOTP helper service
-+-- dexMmTradingLogicHummingBot/    # Hummingbot strategy/controller code
 +-- nginx/                          # Local reverse proxy for dashboard/API
 +-- deploy/                     # Webhook-based deployment scripts
 ```
@@ -101,6 +99,39 @@ Important root settings:
 
 The service-specific READMEs explain their own environment variables and runtime responsibilities.
 
+## LND Neutrino sync
+
+The Compose `lnd` service uses `--bitcoin.node=neutrino` (no local bitcoind). `lncli getinfo` `block_height` is the Neutrino **header** tip. `synced_to_chain` stays false until the wallet rescan (`LNWL`) catches up to that tip. Magma LSP orders stay disabled until `synced_to_chain` is true.
+
+`num_peers` / `uris` on `getinfo` are **Lightning** peers, not Neutrino peers. Both stay empty until LND reaches `SERVER_ACTIVE`.
+
+The `lnd` healthcheck only hits `/v1/state`. A healthy container is not a synced node.
+
+Watch these log lines, in order, after an LND start:
+
+1. `LNWL: Started rescan ...`
+2. `LNWL: Rescanned through block ...` (when the rescan spans more than the start height)
+3. `LNWL: Finished rescan for 1 address ...`
+4. `LTND: Chain backend is fully synced ...`
+
+BTCN `Processed 1 block` at tip does **not** mean the wallet rescan finished.
+
+```bash
+docker compose exec -T lnd lncli getinfo \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["synced_to_chain"], d["block_height"])'
+```
+
+Restart discipline:
+
+| Action | Effect |
+|--------|--------|
+| Rebuild `mm-controller` / `dexmonitor` only | Does not recreate `lnd` — preferred for app changes. |
+| `docker compose stop` / `down` (no `-v`) | Volume kept. The next LND start re-runs a near-tip wallet rescan (often 1–4 hours). |
+| Recreate `lnd` (`up -d lnd` after a compose/image change) | Restarts that rescan cycle. Avoid unless LND config or image changed. |
+| `docker compose down -v` | Deletes `dexarbtrading_lnd-data` and forces a full Neutrino resync. Never use this to “unstick” sync. |
+
+After changing LND flags, run `docker compose up -d lnd` only and wait for `Chain backend is fully synced` before expecting Magma to enable. Do not copy the `lnd` service `dns:` block onto other services — it replaces Docker DNS and those services need sibling hostnames.
+
 ## Database And Backups
 
 `dexUnifiedApi` owns schema setup and application role creation. The Compose stack starts a `postgres-backup` sidecar that runs `pg_dump -Fc`, validates the archive with `pg_restore --list`, keeps local files in the `postgres-backups` volume, and optionally uploads with `rclone`.
@@ -120,14 +151,14 @@ Dropbox can be used by switching `PG_BACKUP_RCLONE_REMOTE` and providing the Dro
 
 `main` is the protected production branch — it is never pushed to directly. Changes reach
 prod by promoting `develop` → `main` via a reviewed PR (see [Branching & environments](#branching--environments)).
-Each merge to `main` triggers the fully automated VPS deploy via GitHub Actions:
+Each merge to `main` triggers the fully automated VPS deploy. Tests already ran on
+`develop`; the promotion skips Go, frontend, OpenAPI, cert, and Bisq-patch jobs and:
 
-1. **Tests** — Go tests run for all modules; frontend lints, builds, and runs Playwright e2e tests.
-2. **Build & push** — Docker images for all services are built and pushed to GHCR tagged with `:latest` and `:<sha>`.
-3. **Pre-deploy checks** — the runner SSHes into the VPS to verify docker, compose, disk space, and memory are healthy.
-4. **Decrypt & upload secrets** — each `.env.enc` (committed, encrypted) is decrypted on the CI runner using private keys from GitHub Secrets, then SCPed to the VPS as a plain `.env` file.
-5. **Deploy** — `docker-compose.yml` is pushed to the VPS and `deploy/redeploy.sh` is invoked over SSH, which pulls new images and restarts the stack.
-6. **Smoke tests** — the runner hits `/health` endpoints to confirm the stack came up.
+1. **Build & push** — Docker images for all services are built and pushed to GHCR tagged with `:latest` and `:<sha>`.
+2. **Pre-deploy checks** — the runner SSHes into the VPS to verify docker, compose, disk space, and memory are healthy.
+3. **Decrypt & upload secrets** — each `.env.enc` (committed, encrypted) is decrypted on the CI runner using private keys from GitHub Secrets, then SCPed to the VPS as a plain `.env` file.
+4. **Deploy** — `docker-compose.yml` is pushed to the VPS and `deploy/redeploy.sh` is invoked over SSH, which pulls new images and restarts the stack.
+5. **Smoke tests** — the runner hits `/health` endpoints to confirm the stack came up.
 
 See `deploy/README.md` for required GitHub Secrets, the one-time VPS setup, and the dotenvx secrets management workflow.
 
@@ -147,7 +178,7 @@ Rules of the road:
   bypassable with `--no-verify`; server-side GitHub branch protection (PR + green checks,
   non-bypassable) would require GitHub Pro or a public repo.
 - Day-to-day: branch off `develop` → open a PR into `develop` → CI validates → squash-merge.
-- Ship to prod: open a PR `develop` → `main`; the merge rebuilds images and deploys.
+- Ship to prod: open a PR `develop` → `main`; the merge rebuilds GHCR images and deploys (tests are not re-run).
 - The automated Bisq version bump follows the same path — it opens a PR into `develop` (not
   `main`); review and merge it once CI is green.
 - Branches are cleaned up automatically: GitHub deletes a PR's head branch on merge, a weekly

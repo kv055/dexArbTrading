@@ -1,0 +1,39 @@
+extends:
+  - spectral:oas
+
+rules:
+  operation-operationId: error
+  operation-operationId-unique: error
+  operation-operationId-valid-in-url: error
+  operation-tags: error
+  # WebSocket handshakes legitimately return 101, which the built-in rule does
+  # not regard as success. OpenAPI schema validation still requires responses.
+  operation-success-response: off
+  oas3-api-servers: off
+  explicit-operation-security:
+    description: Every operation must state its security requirements explicitly.
+    severity: error
+    given: $.paths[*][get,put,post,delete,patch,options,head,trace]
+    then:
+      field: security
+      function: defined
+  response-content-schema:
+    description: Every declared response media type must have a schema.
+    severity: error
+    given: $.paths[*][get,put,post,delete,patch,options,head,trace].responses[*].content[*]
+    then:
+      field: schema
+      function: defined
+  forbid-route-catalog-marker:
+    description: Route-catalog placeholders are not valid source contracts.
+    severity: error
+    given: $..x-contract-status
+    then:
+      function: falsy
+  raw-operation-reason:
+    description: Raw transport operations must explain why strict generation is bypassed.
+    severity: error
+    given: $.paths[*][?(@.tags && @.tags[0] == 'raw')]
+    then:
+      field: x-raw-reason
+      function: truthy

@@ -395,6 +395,69 @@ build_candidate_image_manifest() {
   validate_image_manifest "$destination"
 }
 
+service_image_inputs_changed() {
+  local service="$1" from_sha="$2" to_sha="$3"
+  local -a paths=()
+
+  case "$service" in
+    tor|bisq|bisq2)
+      paths=(dexUnifiedApi)
+      ;;
+    unified-api|unified-snapshot|postgres-backup)
+      paths=(go.work go.work.sum commons dexUnifiedApi)
+      ;;
+    dexmonitor)
+      paths=(go.work go.work.sum commons dexMonitor)
+      ;;
+    mm-controller)
+      paths=(dexMmController)
+      ;;
+    fiat-controller)
+      paths=(dexFiatController)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  git cat-file -e "$from_sha^{commit}" 2>/dev/null || return 0
+  ! git diff --quiet "$from_sha" "$to_sha" -- "${paths[@]}"
+}
+
+# The workflow supplies image services to rebuild, but the VPS is the source
+# of truth for which image tag is actually active. Refuse a candidate when an
+# inherited service image was built from older inputs than the target commit.
+# This turns a missed cumulative CI diff into a visible failure instead of a
+# healthy, permanently version-skewed deployment.
+validate_changed_services_cover_image_inputs() {
+  local base_manifest="$1" target_sha="$2" index service variable image_sha
+  local failed=false
+  declare -A requested=() active_tags=()
+
+  [[ -n "$base_manifest" ]] || return 0
+  validate_image_manifest "$base_manifest" || return 1
+
+  for service in "${changed_services[@]}"; do
+    requested["$service"]=1
+  done
+  while IFS='=' read -r variable image_sha; do
+    active_tags["$variable"]="$image_sha"
+  done <"$base_manifest"
+
+  for index in "${!image_services[@]}"; do
+    service="${image_services[$index]}"
+    variable="${image_vars[$index]}"
+    image_sha="${active_tags[$variable]}"
+    if [[ -z "${requested[$service]:-}" ]] &&
+       service_image_inputs_changed "$service" "$image_sha" "$target_sha"; then
+      echo "changed service list omits stale image: $service ($image_sha -> $target_sha)" >&2
+      failed=true
+    fi
+  done
+
+  ! "$failed"
+}
+
 sync_tree() {
   local sha="$1"
   if ! git cat-file -e "$sha^{commit}" 2>/dev/null; then
@@ -406,6 +469,11 @@ sync_tree() {
     fi
   fi
   git checkout --force --detach "$sha"
+  # Production runs pre-built images. Keeping initialized submodule worktrees
+  # here only leaves stale source behind and makes the parent checkout appear
+  # dirty. Environment activation immediately recreates the gitignored service
+  # directories required by Compose.
+  git submodule deinit --force --all
 }
 
 compose_preflight() {
@@ -615,6 +683,8 @@ if [[ "$prev_sha" =~ ^[0-9a-f]{40}$ ]]; then
   ensure_previous_image_manifest "$prev_sha" || exit 1
   previous_manifest="$release_root/$prev_sha/images.env"
 fi
+validate_changed_services_cover_image_inputs \
+  "$previous_manifest" "$new_sha" || exit 1
 build_candidate_image_manifest "$previous_manifest" "$candidate_manifest"
 
 if start_release \

@@ -1,5 +1,5 @@
 # develop: test + build (validate images) + open develop→main PR
-# main:    test + build (push images to GHCR) + pre-deploy + deploy to VPS
+# main:    skip tests; build (push images to GHCR) + pre-deploy + deploy to VPS
 name: CI/CD
 
 on:
@@ -100,6 +100,85 @@ jobs:
       - name: Scan root and submodule snapshot
         run: gitleaks dir . --config .gitleaks.toml --redact --no-banner
 
+  database-sql-integrity:
+    name: Database SQL immutability
+    needs: security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Reject changed database SQL history
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -Eeuo pipefail
+          zero=0000000000000000000000000000000000000000
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo "Manual run has no change range; skipping database SQL immutability check."
+            exit 0
+          fi
+          if [ "$EVENT" = pull_request ]; then base="$PR_BASE"; head="$PR_HEAD"; else base="$BEFORE"; head="$AFTER"; fi
+          if [ -z "$base" ] || [ "$base" = "$zero" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base=$(git rev-parse "${head}^" 2>/dev/null || true)
+          fi
+          [ -n "$base" ] || { echo "No usable base commit; refusing to skip database SQL immutability check." >&2; exit 1; }
+          old=$(git ls-tree "$base" dexUnifiedApi | awk '{print $3}')
+          new=$(git ls-tree "$head" dexUnifiedApi | awk '{print $3}')
+          [ -n "$old" ] && [ -n "$new" ] || { echo "Unable to resolve dexUnifiedApi submodule revisions." >&2; exit 1; }
+          [ "$old" != "$new" ] || { echo "dexUnifiedApi submodule is unchanged."; exit 0; }
+          # SQL immutability was introduced with this dexUnifiedApi revision.
+          # Older target branches may include the pre-policy schema squash in
+          # their PR diff, so begin enforcement at the known-good boundary.
+          sql_history_baseline=12fbf354ed04922471acafd6af1f017a7402c611
+          git -C dexUnifiedApi fetch --no-tags origin "$old" "$new" "$sql_history_baseline"
+          git -C dexUnifiedApi fetch --no-tags origin main || true
+          if git -C dexUnifiedApi merge-base --is-ancestor "$old" "$sql_history_baseline" \
+            && git -C dexUnifiedApi merge-base --is-ancestor "$sql_history_baseline" "$new"; then
+            echo "Using SQL immutability baseline $sql_history_baseline (target revision $old predates enforcement)."
+            old="$sql_history_baseline"
+          fi
+
+          violations=()
+          while IFS=$'\t' read -r status first second; do
+            [ -n "$status" ] || continue
+            if [ "${status:0:1}" = A ] && [[ "$first" == db/migrations/*.sql ]] \
+              && [[ "${first##*/}" =~ ^[0-9]{14}_[a-z0-9_]+\.sql$ ]]; then
+              echo "allowed new migration: $first"
+              continue
+            fi
+            if [ "$status" = M ] && [[ "$first" == db/schema/* ]]; then
+              new_blob=$(git -C dexUnifiedApi rev-parse "$new:$first")
+              restored=0
+              while IFS= read -r c; do
+                [ -n "$c" ] || continue
+                git -C dexUnifiedApi cat-file -e "$c:$first" 2>/dev/null || continue
+                if [ "$(git -C dexUnifiedApi rev-parse "$c:$first")" = "$new_blob" ]; then
+                  restored=1
+                  break
+                fi
+              done < <(git -C dexUnifiedApi log --pretty=%H "$old" -- "$first")
+              if [ "$restored" = 1 ]; then
+                echo "allowed historical restore: $first"
+                continue
+              fi
+            fi
+            violations+=("$status $first${second:+ -> $second}")
+          done < <(git -C dexUnifiedApi diff --name-status --find-renames "$old" "$new" -- db/schema db/migrations)
+
+          if ((${#violations[@]})); then
+            printf 'ERROR: existing database SQL is immutable. Add only new timestamped migrations under db/migrations/.\n' >&2
+            printf '  %s\n' "${violations[@]}" >&2
+            exit 1
+          fi
+
   detect-changes:
     # Diff the push/PR range and decide which tests and image builds run.
     name: Detect changed services
@@ -125,6 +204,7 @@ jobs:
           AFTER: ${{ github.sha }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          REF: ${{ github.ref }}
         run: |
           set -Eeuo pipefail
           ALL_SERVICES="tor,bisq,bisq2,unified-api,unified-snapshot,postgres-backup,dexmonitor,mm-controller,fiat-controller"
@@ -239,6 +319,14 @@ jobs:
 
           if [ "${EVENT:-}" = "workflow_dispatch" ]; then emit_all "manual trigger -> build all"; exit 0; fi
 
+          # Never inherit per-service image tags across production releases.
+          # A skipped/failed deployment can otherwise make the next push's
+          # immediate diff smaller than the cumulative undeployed change.
+          if [ "${EVENT:-}" = "push" ] && [ "${REF:-}" = "refs/heads/main" ]; then
+            emit_all "main push -> build all services for a coherent release"
+            exit 0
+          fi
+
           if [ "${EVENT:-}" = "pull_request" ]; then BASE="${PR_BASE:-}"; HEAD="${PR_HEAD:-}"
           else BASE="${BEFORE:-}"; HEAD="${AFTER:-}"; fi
 
@@ -260,7 +348,9 @@ jobs:
   test-go:
     name: Go tests (${{ matrix.module }})
     needs: detect-changes
-    if: needs.detect-changes.outputs.test_modules != ''
+    if: |
+      (github.event_name != 'push' || github.ref != 'refs/heads/main') &&
+      needs.detect-changes.outputs.test_modules != ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -288,7 +378,9 @@ jobs:
     # the slow from-source image build.
     name: Bisq patches apply cleanly
     needs: detect-changes
-    if: contains(needs.detect-changes.outputs.changes, 'bisq')
+    if: |
+      (github.event_name != 'push' || github.ref != 'refs/heads/main') &&
+      contains(needs.detect-changes.outputs.changes, 'bisq')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -324,10 +416,49 @@ jobs:
       - name: Validate compose topology
         run: bash scripts/compose-validate.sh
 
+  openapi:
+    name: OpenAPI source-of-truth check
+    needs: security
+    if: github.event_name != 'push' || github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_PAT }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            tools/openapi/package-lock.json
+            dexMonitor/react-frontend/package-lock.json
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: tools/openapi/go.mod
+          cache-dependency-path: tools/openapi/go.sum
+
+      - name: Install pinned generators
+        run: make api-install
+
+      - name: Audit generator dependencies
+        working-directory: tools/openapi
+        run: npm audit --audit-level=moderate
+
+      - name: Verify contracts and committed generated artifacts
+        run: make api-check
+
+      - name: Exercise registered handlers against contracts
+        run: make api-contract-test
+
   test-frontend:
     name: Frontend tests
     needs: detect-changes
-    if: needs.detect-changes.outputs.run_frontend == 'true'
+    if: |
+      (github.event_name != 'push' || github.ref != 'refs/heads/main') &&
+      needs.detect-changes.outputs.run_frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:
@@ -346,10 +477,6 @@ jobs:
           cache-dependency-path: dexMonitor/react-frontend/package-lock.json
 
       - run: npm ci
-
-      - name: Verify OpenAPI route catalogs
-        working-directory: .
-        run: python3 scripts/openapi-route-catalogs.py --check
 
       - name: Verify generated API contracts
         run: npm run check:api-contract
@@ -397,6 +524,7 @@ jobs:
   certificate-renewal-test:
     name: Certificate renewal regression tests
     needs: security
+    if: github.event_name != 'push' || github.ref != 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -404,22 +532,26 @@ jobs:
 
   test-gate:
     name: Test gate
-    needs: [detect-changes, test-go, test-frontend, certificate-renewal-test]
+    needs: [database-sql-integrity, detect-changes, openapi, test-go, test-frontend, certificate-renewal-test]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Require successful or intentionally skipped tests
         env:
           DETECT_RESULT: ${{ needs.detect-changes.result }}
+          DATABASE_SQL_RESULT: ${{ needs.database-sql-integrity.result }}
           GO_RESULT: ${{ needs.test-go.result }}
           FRONTEND_RESULT: ${{ needs.test-frontend.result }}
+          OPENAPI_RESULT: ${{ needs.openapi.result }}
           CERTIFICATE_RESULT: ${{ needs.certificate-renewal-test.result }}
         run: |
           set -Eeuo pipefail
+          [ "$DATABASE_SQL_RESULT" = success ]
           [ "$DETECT_RESULT" = success ]
+          case "$OPENAPI_RESULT" in success|skipped) ;; *) exit 1;; esac
           case "$GO_RESULT" in success|skipped) ;; *) exit 1;; esac
           case "$FRONTEND_RESULT" in success|skipped) ;; *) exit 1;; esac
-          [ "$CERTIFICATE_RESULT" = success ]
+          case "$CERTIFICATE_RESULT" in success|skipped) ;; *) exit 1;; esac
 
   build-and-push:
     name: Build & push ${{ matrix.service }}
@@ -603,57 +735,6 @@ jobs:
           printf '%b\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
-      - name: Egress reachability check (VPS)
-        env:
-          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
-          SSH_USER: ${{ secrets.VPS_SSH_USER }}
-        run: |
-          set -Eeuo pipefail
-          ssh -i ~/.ssh/id_ed25519 "$SSH_USER@$SSH_HOST" "bash -s" <<'REMOTE'
-          set -Eeuo pipefail
-
-          check_ws() {
-            local url="$1"
-            local key
-            key=$(openssl rand -base64 16)
-            local out curl_exit=0
-            out=$(curl -sS --http1.1 --include --max-time 10 \
-                -H "Connection: Upgrade" \
-                -H "Upgrade: websocket" \
-                -H "Sec-WebSocket-Key: $key" \
-                -H "Sec-WebSocket-Version: 13" \
-                "$url" 2>&1) || curl_exit=$?
-            # 28 = CURLE_OPERATION_TIMEDOUT — expected after a successful WS handshake
-            if [ "$curl_exit" -ne 0 ] && [ "$curl_exit" -ne 28 ]; then
-              echo "WSS unreachable: $url"
-              printf '%s\n' "$out" | head -5
-              return 1
-            fi
-            if ! printf '%s\n' "$out" | grep -q ' 101 '; then
-              echo "WSS no 101 upgrade: $url"
-              printf '%s\n' "$out" | head -5
-              return 1
-            fi
-            echo "ok wss $url"
-          }
-
-          check_https() {
-            local url="$1"
-            if ! curl -fsS --max-time 10 "$url" >/dev/null; then
-              echo "HTTPS unreachable: $url"
-              return 1
-            fi
-            echo "ok https $url"
-          }
-
-          check_ws    "https://ws.kraken.com/v2"
-          check_ws    "https://ws.bitstamp.net/"
-          check_ws    "https://advanced-trade-ws.coinbase.com/"
-          check_https "https://api.kraken.com/0/public/SystemStatus"
-
-          echo "egress reachability ok"
-          REMOTE
-
       - name: VPS health checks
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
@@ -666,6 +747,11 @@ jobs:
           docker info >/dev/null
           docker compose version >/dev/null
           test -d "$REPO_DIR" || { echo "missing repo dir $REPO_DIR on VPS"; exit 1; }
+          echo "Docker disk usage before unused-image prune:"
+          docker system df
+          docker image prune -af
+          echo "Docker disk usage after unused-image prune:"
+          docker system df
           docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
           free_kb=$(df -P "$docker_root" | awk 'NR==2 {print $4}')
           [ "$free_kb" -gt 5242880 ] || { echo "low disk on $docker_root: $((free_kb/1024)) MB free, need >= 5120"; exit 1; }

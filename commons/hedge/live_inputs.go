@@ -1,9 +1,9 @@
 package hedge
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	binanceclient "commons/cexclient/binance"
+	krakenclient "commons/cexclient/kraken"
 	"commons/exchangecredentials"
 )
 
@@ -169,11 +171,8 @@ type krakenFeeScheduleVolumesResponse struct {
 
 func fetchKrakenFeeSchedules() (krakenFeeSchedulesResponse, error) {
 	var out krakenFeeSchedulesResponse
-	req, err := http.NewRequest(http.MethodGet, krakenFuturesAPIBase+"/derivatives/api/v3/feeschedules", nil)
-	if err != nil {
-		return out, err
-	}
-	if err := doJSON(req, &out); err != nil {
+	client := krakenclient.NewFutures("", "", krakenclient.FuturesOptions{BaseURL: krakenFuturesAPIBase, Client: hedgeHTTPClient})
+	if err := client.Request(context.Background(), http.MethodGet, "/derivatives/api/v3/feeschedules", false, nil, nil, &out); err != nil {
 		return out, fmt.Errorf("kraken futures fee schedules: %w", err)
 	}
 	if len(out.FeeSchedules) == 0 {
@@ -183,15 +182,10 @@ func fetchKrakenFeeSchedules() (krakenFeeSchedulesResponse, error) {
 }
 
 func fetchKrakenFeeScheduleVolumes(apiKey, apiSecret string) (map[string]float64, error) {
-	path := "/derivatives/api/v3/feeschedules/volumes"
-	req, err := http.NewRequest(http.MethodGet, krakenFuturesAPIBase+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	signKrakenFuturesRequest(req, apiKey, apiSecret, path, "")
-
+	const requestPath = "/derivatives/api/v3/feeschedules/volumes"
 	var out krakenFeeScheduleVolumesResponse
-	if err := doJSON(req, &out); err != nil {
+	client := krakenclient.NewFutures(apiKey, apiSecret, krakenclient.FuturesOptions{BaseURL: krakenFuturesAPIBase, Client: hedgeHTTPClient})
+	if err := client.Request(context.Background(), http.MethodGet, requestPath, true, nil, nil, &out); err != nil {
 		return nil, fmt.Errorf("kraken futures fee schedule volumes: %w", err)
 	}
 	if out.Result != "" && !strings.EqualFold(out.Result, "success") {
@@ -275,14 +269,12 @@ type krakenHistoricalFundingResponse struct {
 }
 
 func fetchKrakenLatestFundingRate(symbol string) (float64, error) {
-	u := krakenFuturesAPIBase + "/derivatives/api/v3/historical-funding-rates?symbol=" + url.QueryEscape(symbol)
-	req, err := http.NewRequest(http.MethodGet, u, nil)
-	if err != nil {
-		return 0, err
-	}
-
 	var out krakenHistoricalFundingResponse
-	if err := doJSON(req, &out); err != nil {
+	client := krakenclient.NewFutures("", "", krakenclient.FuturesOptions{BaseURL: krakenFuturesAPIBase, Client: hedgeHTTPClient})
+	// The SDK's query encoder only understands map[string]any; a
+	// map[string]string silently encodes to an empty query and the endpoint
+	// answers 400 BAD_REQUEST.
+	if err := client.Request(context.Background(), http.MethodGet, "/derivatives/api/v3/historical-funding-rates", false, map[string]any{"symbol": symbol}, nil, &out); err != nil {
 		return 0, fmt.Errorf("kraken futures funding: %w", err)
 	}
 	if len(out.Rates) == 0 {
@@ -312,7 +304,9 @@ func fetchCoinbasePerpTakerRate(apiKey, apiSecret, passphrase string) (float64, 
 	}
 	for _, row := range out {
 		if strings.EqualFold(row.InstrumentType, "PERP") {
-			return row.TakerFeeRate, nil
+			// INTX documents fee rates in percentage points (0.04 means 0.04%).
+			// The rest of the cost engine uses decimal fractions.
+			return row.TakerFeeRate / 100, nil
 		}
 	}
 	return 0, fmt.Errorf("coinbase futures fee rates: no PERP tier found")
@@ -351,19 +345,8 @@ func fetchCoinbaseInstrumentFunding(instrument string) (float64, time.Duration, 
 		intervalNS = int64(intervalF)
 	}
 
-	return fundingRate, time.Duration(intervalNS), nil
-}
-
-func signKrakenFuturesRequest(req *http.Request, apiKey, apiSecret, path, postData string) {
-	nonce := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	hash := sha256.Sum256([]byte(postData + nonce + path))
-	secretBytes, _ := base64.StdEncoding.DecodeString(apiSecret)
-	mac := hmac.New(sha512.New, secretBytes)
-	mac.Write(hash[:])
-
-	req.Header.Set("APIKey", apiKey)
-	req.Header.Set("Nonce", nonce)
-	req.Header.Set("Authent", base64.StdEncoding.EncodeToString(mac.Sum(nil)))
+	// predicted_funding uses the same percentage-point convention as fee-rates.
+	return fundingRate / 100, time.Duration(intervalNS), nil
 }
 
 func signCoinbaseINTXRequest(req *http.Request, apiKey, apiSecret, passphrase, path, body string) {
@@ -426,51 +409,26 @@ func FetchBinanceFuturesInputs(symbol string, credentials exchangecredentials.Cr
 	}, nil
 }
 
-type binanceCommissionRateResponse struct {
-	TakerCommissionRate string `json:"takerCommissionRate"`
-}
-
 func fetchBinanceFuturesTakerRate(apiKey, apiSecret, symbol string) (float64, error) {
-	base := "https://fapi.binance.com"
-	timestamp := strconv.FormatInt(time.Now().UnixMilli(), 10)
-	query := "symbol=" + url.QueryEscape(symbol) + "&timestamp=" + timestamp
-	mac := hmac.New(sha256.New, []byte(apiSecret))
-	mac.Write([]byte(query))
-	query += "&signature=" + fmt.Sprintf("%x", mac.Sum(nil))
-
-	req, err := http.NewRequest(http.MethodGet, base+"/fapi/v1/commissionRate?"+query, nil)
+	client := binanceclient.NewFutures(apiKey, apiSecret, binanceclient.Options{Timeout: 15 * time.Second})
+	resp, err := client.RestApi.AccountAPI.UserCommissionRate(context.Background()).Symbol(symbol).Execute()
 	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("X-MBX-APIKEY", apiKey)
-
-	var out binanceCommissionRateResponse
-	if err := doJSON(req, &out); err != nil {
 		return 0, fmt.Errorf("binance futures commission rate: %w", err)
 	}
-	rate, err := strconv.ParseFloat(out.TakerCommissionRate, 64)
+	rate, err := strconv.ParseFloat(resp.Data.GetTakerCommissionRate(), 64)
 	if err != nil {
 		return 0, fmt.Errorf("binance futures commission rate parse: %w", err)
 	}
 	return rate, nil
 }
 
-type binancePremiumIndexResponse struct {
-	LastFundingRate string `json:"lastFundingRate"`
-}
-
 func fetchBinancePremiumIndex(symbol string) (float64, error) {
-	req, err := http.NewRequest(http.MethodGet,
-		"https://fapi.binance.com/fapi/v1/premiumIndex?symbol="+url.QueryEscape(symbol), nil)
+	client := binanceclient.NewFutures("", "", binanceclient.Options{Timeout: 15 * time.Second})
+	resp, err := client.RestApi.MarketDataAPI.MarkPrice(context.Background()).Symbol(symbol).Execute()
 	if err != nil {
-		return 0, err
-	}
-
-	var out binancePremiumIndexResponse
-	if err := doJSON(req, &out); err != nil {
 		return 0, fmt.Errorf("binance futures premium index: %w", err)
 	}
-	rate, err := strconv.ParseFloat(out.LastFundingRate, 64)
+	rate, err := strconv.ParseFloat(resp.Data.MarkPriceResponse1.GetLastFundingRate(), 64)
 	if err != nil {
 		return 0, fmt.Errorf("binance futures funding rate parse: %w", err)
 	}

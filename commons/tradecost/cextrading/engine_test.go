@@ -1,9 +1,50 @@
 package cextrading
 
 import (
+	"database/sql"
 	"math"
 	"testing"
+	"time"
 )
+
+func TestBestUsesLastKnownKrakenFeesForHedgefullAndHedgeless(t *testing.T) {
+	now := time.Now()
+	fees := PersistedFees{
+		SpotTakerFeeRate:       sql.NullFloat64{Float64: 0.008, Valid: true},
+		BTCWithdrawalFeeBTC:    sql.NullFloat64{Float64: 0.000015, Valid: true},
+		FuturesOpenTakerRate:   sql.NullFloat64{Float64: 0.0005, Valid: true},
+		FuturesCloseTakerRate:  sql.NullFloat64{Float64: 0.0005, Valid: true},
+		FuturesFundingRate:     sql.NullFloat64{Float64: -0.00002, Valid: true},
+		FundingIntervalSeconds: sql.NullInt64{Int64: 14400, Valid: true},
+		FetchedAt:              sql.NullTime{Time: now.Add(-14 * time.Hour), Valid: true},
+	}
+	engine := &Engine{
+		cexes:         []string{"kraken"},
+		spotAvailable: func(string, bool) bool { return fees.spotAvailable(now, true) },
+		takerFrac:     func(string) float64 { return fees.SpotTakerFeeRate.Float64 },
+		withdrawBTC:   func(string) float64 { return fees.BTCWithdrawalFeeBTC.Float64 },
+		hedgeCost: func(string, float64, float64, float64, bool, string) hedgeCostDetails {
+			if !fees.hedgeAvailable(now) {
+				return hedgeCostDetails{}
+			}
+			return hedgeCostDetails{venue: "kraken_futures", feeBTC: 0.00001}
+		},
+	}
+
+	full, ok := engine.Best(Input{BTCAmount: 0.01, Direction: "bid"})
+	if !ok || full.CEX != "kraken" || full.Hedge.Venue != "kraken_futures" {
+		t.Fatalf("hedgefull selection = %+v, ok=%v", full, ok)
+	}
+	hedgeless, ok := engine.Best(Input{
+		BTCAmount:          0.01,
+		Direction:          "bid",
+		AllowNoHedge:       true,
+		ExcludedHedgeCEXes: []string{"kraken"},
+	})
+	if !ok || hedgeless.CEX != "kraken" || hedgeless.Hedge.Venue != "" {
+		t.Fatalf("hedgeless selection = %+v, ok=%v", hedgeless, ok)
+	}
+}
 
 func eq(t *testing.T, got, want float64) {
 	t.Helper()
@@ -33,7 +74,7 @@ func TestBestPicksCheapestCombo(t *testing.T) {
 	withdraw := map[string]float64{"kraken": 0.0001, "binance": 0.0002, "bitstamp": 0.0003, "coinbase": 0.0}
 	eng := testEngine(taker, withdraw, nil)
 
-	sel, ok := eng.Best(Input{BTCAmount: 1.0, Direction: "buy"})
+	sel, ok := eng.Best(Input{BTCAmount: 1.0, Direction: "bid"})
 	if !ok {
 		t.Fatal("expected a selection")
 	}
@@ -51,7 +92,7 @@ func TestBestSkipsExcludedCEXes(t *testing.T) {
 	withdraw := map[string]float64{"kraken": 0.0001, "binance": 0.0002, "bitstamp": 0.0003, "coinbase": 0.0}
 	eng := testEngine(taker, withdraw, nil)
 
-	sel, ok := eng.Best(Input{BTCAmount: 1.0, Direction: "buy", ExcludedCEXes: []string{"binance"}})
+	sel, ok := eng.Best(Input{BTCAmount: 1.0, Direction: "bid", ExcludedCEXes: []string{"binance"}})
 	if !ok {
 		t.Fatal("expected a selection")
 	}
@@ -64,7 +105,7 @@ func TestBestSkipsExcludedCEXes(t *testing.T) {
 
 func TestBestReturnsFalseWhenAllExcluded(t *testing.T) {
 	eng := testEngine(map[string]float64{}, map[string]float64{}, nil)
-	if _, ok := eng.Best(Input{BTCAmount: 1.0, Direction: "buy", ExcludedCEXes: []string{"kraken", "binance", "bitstamp", "coinbase"}}); ok {
+	if _, ok := eng.Best(Input{BTCAmount: 1.0, Direction: "bid", ExcludedCEXes: []string{"kraken", "binance", "bitstamp", "coinbase"}}); ok {
 		t.Fatal("expected no selection when every CEX is excluded")
 	}
 }
@@ -74,7 +115,7 @@ func TestBestAskSideHasNoWithdrawalFee(t *testing.T) {
 	withdraw := map[string]float64{"kraken": 0.0001, "binance": 0.0002, "bitstamp": 0.0003, "coinbase": 0.0}
 	eng := testEngine(taker, withdraw, nil)
 
-	sel, ok := eng.Best(Input{BTCAmount: 1.0, Direction: "sell"})
+	sel, ok := eng.Best(Input{BTCAmount: 1.0, Direction: "ask"})
 	if !ok {
 		t.Fatal("expected a selection")
 	}
@@ -91,7 +132,7 @@ func TestManualOptionsExposeEligibleSpotAndWithdrawalFees(t *testing.T) {
 	withdraw := map[string]float64{"kraken": 0.0001, "binance": 0.0002, "bitstamp": 0.0003, "coinbase": 0}
 	eng := testEngine(taker, withdraw, nil)
 
-	options := eng.ManualOptions(Input{BTCAmount: 1, Direction: "buy", ExcludedCEXes: []string{"binance"}})
+	options := eng.ManualOptions(Input{BTCAmount: 1, Direction: "bid", ExcludedCEXes: []string{"binance"}})
 	if len(options.SpotTakerFees) != 4 || len(options.WithdrawalFees) != 4 {
 		t.Fatalf("options = %d spot / %d withdrawal, want 4 each", len(options.SpotTakerFees), len(options.WithdrawalFees))
 	}
@@ -105,7 +146,7 @@ func TestManualOptionsExposeEligibleSpotAndWithdrawalFees(t *testing.T) {
 		t.Fatalf("excluded binance options must remain visible and disabled")
 	}
 
-	ask := eng.ManualOptions(Input{BTCAmount: 1, Direction: "sell"})
+	ask := eng.ManualOptions(Input{BTCAmount: 1, Direction: "ask"})
 	if ask.WithdrawalFees[0].Applicable || ask.WithdrawalFees[0].FeeBTC != 0 {
 		t.Fatalf("ask withdrawal option = %+v, want not applicable and zero", ask.WithdrawalFees[0])
 	}
@@ -128,7 +169,7 @@ func TestBestHedgeParticipatesInComboAndThreadsCoupledFlag(t *testing.T) {
 	}
 	eng := testEngine(taker, withdraw, hedge)
 
-	sel, ok := eng.Best(Input{BTCAmount: 1.0, Direction: "buy", CoupledHedge: true})
+	sel, ok := eng.Best(Input{BTCAmount: 1.0, Direction: "bid", CoupledHedge: true})
 	if !ok {
 		t.Fatal("expected a selection")
 	}
@@ -146,7 +187,7 @@ func TestBestHedgeParticipatesInComboAndThreadsCoupledFlag(t *testing.T) {
 
 func TestBestZeroAmountReturnsFalse(t *testing.T) {
 	eng := testEngine(map[string]float64{"kraken": 0.001}, map[string]float64{"kraken": 0.0001}, nil)
-	if _, ok := eng.Best(Input{BTCAmount: 0, Direction: "buy"}); ok {
+	if _, ok := eng.Best(Input{BTCAmount: 0, Direction: "bid"}); ok {
 		t.Fatal("expected no selection for a zero amount")
 	}
 }
@@ -181,7 +222,7 @@ func TestIndependentSpotAndHedgeExclusions(t *testing.T) {
 
 	sel, ok := eng.Best(Input{
 		BTCAmount:          1,
-		Direction:          "buy",
+		Direction:          "bid",
 		ExcludedSpotCEXes:  []string{"coinbase"},
 		ExcludedHedgeCEXes: []string{"kraken"},
 	})
@@ -202,7 +243,7 @@ func TestCoupledRejectsSpotWithDisabledPairedHedge(t *testing.T) {
 
 	sel, ok := eng.Best(Input{
 		BTCAmount:          1,
-		Direction:          "buy",
+		Direction:          "bid",
 		CoupledHedge:       true,
 		ExcludedHedgeCEXes: []string{"kraken"},
 	})
@@ -219,7 +260,7 @@ func TestAllHedgesDisabledReturnsNoRoute(t *testing.T) {
 	}
 	if _, ok := eng.Best(Input{
 		BTCAmount:          1,
-		Direction:          "buy",
+		Direction:          "bid",
 		ExcludedHedgeCEXes: []string{"kraken"},
 	}); ok {
 		t.Fatal("expected no route when every hedge is disabled")
@@ -234,7 +275,7 @@ func TestAllowNoHedgeReturnsSpotOnlyWhenHedgesDisabled(t *testing.T) {
 	}
 	sel, ok := eng.Best(Input{
 		BTCAmount:          1,
-		Direction:          "buy",
+		Direction:          "bid",
 		ExcludedHedgeCEXes: []string{"kraken", "binance"},
 		AllowNoHedge:       true,
 	})
