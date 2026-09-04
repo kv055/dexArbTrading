@@ -762,6 +762,13 @@ jobs:
   deploy:
     name: Deploy
     needs: [detect-changes, pre-deploy]
+    # always() is required: skipped main test jobs make the default success()
+    # gate false even when pre-deploy itself succeeded (see Gitea deploy if).
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.pre-deploy.result == 'success'
     runs-on: ubuntu-latest
     # Leave enough time for a 30-minute cold-start health wait and rollback.
     timeout-minutes: 75
