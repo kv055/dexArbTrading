@@ -16,6 +16,40 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
+// CexDepositAddress defines model for CexDepositAddress.
+type CexDepositAddress struct {
+	Address              string                 `json:"address"`
+	Asset                string                 `json:"asset"`
+	Method               *string                `json:"method,omitempty"`
+	Network              string                 `json:"network"`
+	Tag                  *string                `json:"tag,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// CexSpotTrade defines model for CexSpotTrade.
+type CexSpotTrade struct {
+	Amount               float32                `json:"amount"`
+	Fee                  float32                `json:"fee"`
+	FeeAsset             *string                `json:"fee_asset,omitempty"`
+	Price                float32                `json:"price"`
+	Timestamp            string                 `json:"timestamp"`
+	TradeId              string                 `json:"trade_id"`
+	TradeType            string                 `json:"trade_type"`
+	TradingPair          string                 `json:"trading_pair"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// CexWithdrawalAddress defines model for CexWithdrawalAddress.
+type CexWithdrawalAddress struct {
+	Address              string                 `json:"address"`
+	Asset                string                 `json:"asset"`
+	Label                *string                `json:"label,omitempty"`
+	Network              string                 `json:"network"`
+	Tag                  *string                `json:"tag,omitempty"`
+	Whitelisted          *bool                  `json:"whitelisted,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	Checks               *map[string]interface{} `json:"checks,omitempty"`
@@ -166,6 +200,424 @@ type PutApiTradingSeedsIdJSONRequestBody PutApiTradingSeedsIdJSONBody
 
 // PutApiTradingTotpSecretsIdJSONRequestBody defines body for PutApiTradingTotpSecretsId for application/json ContentType.
 type PutApiTradingTotpSecretsIdJSONRequestBody PutApiTradingTotpSecretsIdJSONBody
+
+// Getter for additional properties for CexDepositAddress. Returns the specified
+// element and whether it was found
+func (a CexDepositAddress) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for CexDepositAddress
+func (a *CexDepositAddress) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for CexDepositAddress to handle AdditionalProperties
+func (a *CexDepositAddress) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["address"]; found {
+		err = json.Unmarshal(raw, &a.Address)
+		if err != nil {
+			return fmt.Errorf("error reading 'address': %w", err)
+		}
+		delete(object, "address")
+	}
+
+	if raw, found := object["asset"]; found {
+		err = json.Unmarshal(raw, &a.Asset)
+		if err != nil {
+			return fmt.Errorf("error reading 'asset': %w", err)
+		}
+		delete(object, "asset")
+	}
+
+	if raw, found := object["method"]; found {
+		err = json.Unmarshal(raw, &a.Method)
+		if err != nil {
+			return fmt.Errorf("error reading 'method': %w", err)
+		}
+		delete(object, "method")
+	}
+
+	if raw, found := object["network"]; found {
+		err = json.Unmarshal(raw, &a.Network)
+		if err != nil {
+			return fmt.Errorf("error reading 'network': %w", err)
+		}
+		delete(object, "network")
+	}
+
+	if raw, found := object["tag"]; found {
+		err = json.Unmarshal(raw, &a.Tag)
+		if err != nil {
+			return fmt.Errorf("error reading 'tag': %w", err)
+		}
+		delete(object, "tag")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for CexDepositAddress to handle AdditionalProperties
+func (a CexDepositAddress) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["address"], err = json.Marshal(a.Address)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'address': %w", err)
+	}
+
+	object["asset"], err = json.Marshal(a.Asset)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'asset': %w", err)
+	}
+
+	if a.Method != nil {
+		object["method"], err = json.Marshal(a.Method)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'method': %w", err)
+		}
+	}
+
+	object["network"], err = json.Marshal(a.Network)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'network': %w", err)
+	}
+
+	if a.Tag != nil {
+		object["tag"], err = json.Marshal(a.Tag)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'tag': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for CexSpotTrade. Returns the specified
+// element and whether it was found
+func (a CexSpotTrade) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for CexSpotTrade
+func (a *CexSpotTrade) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for CexSpotTrade to handle AdditionalProperties
+func (a *CexSpotTrade) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["amount"]; found {
+		err = json.Unmarshal(raw, &a.Amount)
+		if err != nil {
+			return fmt.Errorf("error reading 'amount': %w", err)
+		}
+		delete(object, "amount")
+	}
+
+	if raw, found := object["fee"]; found {
+		err = json.Unmarshal(raw, &a.Fee)
+		if err != nil {
+			return fmt.Errorf("error reading 'fee': %w", err)
+		}
+		delete(object, "fee")
+	}
+
+	if raw, found := object["fee_asset"]; found {
+		err = json.Unmarshal(raw, &a.FeeAsset)
+		if err != nil {
+			return fmt.Errorf("error reading 'fee_asset': %w", err)
+		}
+		delete(object, "fee_asset")
+	}
+
+	if raw, found := object["price"]; found {
+		err = json.Unmarshal(raw, &a.Price)
+		if err != nil {
+			return fmt.Errorf("error reading 'price': %w", err)
+		}
+		delete(object, "price")
+	}
+
+	if raw, found := object["timestamp"]; found {
+		err = json.Unmarshal(raw, &a.Timestamp)
+		if err != nil {
+			return fmt.Errorf("error reading 'timestamp': %w", err)
+		}
+		delete(object, "timestamp")
+	}
+
+	if raw, found := object["trade_id"]; found {
+		err = json.Unmarshal(raw, &a.TradeId)
+		if err != nil {
+			return fmt.Errorf("error reading 'trade_id': %w", err)
+		}
+		delete(object, "trade_id")
+	}
+
+	if raw, found := object["trade_type"]; found {
+		err = json.Unmarshal(raw, &a.TradeType)
+		if err != nil {
+			return fmt.Errorf("error reading 'trade_type': %w", err)
+		}
+		delete(object, "trade_type")
+	}
+
+	if raw, found := object["trading_pair"]; found {
+		err = json.Unmarshal(raw, &a.TradingPair)
+		if err != nil {
+			return fmt.Errorf("error reading 'trading_pair': %w", err)
+		}
+		delete(object, "trading_pair")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for CexSpotTrade to handle AdditionalProperties
+func (a CexSpotTrade) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["amount"], err = json.Marshal(a.Amount)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'amount': %w", err)
+	}
+
+	object["fee"], err = json.Marshal(a.Fee)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'fee': %w", err)
+	}
+
+	if a.FeeAsset != nil {
+		object["fee_asset"], err = json.Marshal(a.FeeAsset)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'fee_asset': %w", err)
+		}
+	}
+
+	object["price"], err = json.Marshal(a.Price)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'price': %w", err)
+	}
+
+	object["timestamp"], err = json.Marshal(a.Timestamp)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'timestamp': %w", err)
+	}
+
+	object["trade_id"], err = json.Marshal(a.TradeId)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'trade_id': %w", err)
+	}
+
+	object["trade_type"], err = json.Marshal(a.TradeType)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'trade_type': %w", err)
+	}
+
+	object["trading_pair"], err = json.Marshal(a.TradingPair)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'trading_pair': %w", err)
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
+
+// Getter for additional properties for CexWithdrawalAddress. Returns the specified
+// element and whether it was found
+func (a CexWithdrawalAddress) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for CexWithdrawalAddress
+func (a *CexWithdrawalAddress) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for CexWithdrawalAddress to handle AdditionalProperties
+func (a *CexWithdrawalAddress) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["address"]; found {
+		err = json.Unmarshal(raw, &a.Address)
+		if err != nil {
+			return fmt.Errorf("error reading 'address': %w", err)
+		}
+		delete(object, "address")
+	}
+
+	if raw, found := object["asset"]; found {
+		err = json.Unmarshal(raw, &a.Asset)
+		if err != nil {
+			return fmt.Errorf("error reading 'asset': %w", err)
+		}
+		delete(object, "asset")
+	}
+
+	if raw, found := object["label"]; found {
+		err = json.Unmarshal(raw, &a.Label)
+		if err != nil {
+			return fmt.Errorf("error reading 'label': %w", err)
+		}
+		delete(object, "label")
+	}
+
+	if raw, found := object["network"]; found {
+		err = json.Unmarshal(raw, &a.Network)
+		if err != nil {
+			return fmt.Errorf("error reading 'network': %w", err)
+		}
+		delete(object, "network")
+	}
+
+	if raw, found := object["tag"]; found {
+		err = json.Unmarshal(raw, &a.Tag)
+		if err != nil {
+			return fmt.Errorf("error reading 'tag': %w", err)
+		}
+		delete(object, "tag")
+	}
+
+	if raw, found := object["whitelisted"]; found {
+		err = json.Unmarshal(raw, &a.Whitelisted)
+		if err != nil {
+			return fmt.Errorf("error reading 'whitelisted': %w", err)
+		}
+		delete(object, "whitelisted")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for CexWithdrawalAddress to handle AdditionalProperties
+func (a CexWithdrawalAddress) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	object["address"], err = json.Marshal(a.Address)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'address': %w", err)
+	}
+
+	object["asset"], err = json.Marshal(a.Asset)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'asset': %w", err)
+	}
+
+	if a.Label != nil {
+		object["label"], err = json.Marshal(a.Label)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'label': %w", err)
+		}
+	}
+
+	object["network"], err = json.Marshal(a.Network)
+	if err != nil {
+		return nil, fmt.Errorf("error marshaling 'network': %w", err)
+	}
+
+	if a.Tag != nil {
+		object["tag"], err = json.Marshal(a.Tag)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'tag': %w", err)
+		}
+	}
+
+	if a.Whitelisted != nil {
+		object["whitelisted"], err = json.Marshal(a.Whitelisted)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'whitelisted': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
 
 // Getter for additional properties for Health. Returns the specified
 // element and whether it was found
@@ -5407,13 +5859,13 @@ type GetApiGeneralStatsPastPremiumsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiGeneralStatsPastPremiumsResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiGeneralStatsPastPremiumsResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -5455,13 +5907,13 @@ type GetApiGeneralStatsPaymentMethodsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]map[string]interface{}
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiGeneralStatsPaymentMethodsResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiGeneralStatsPaymentMethodsResponse) GetJSON200() *[]map[string]interface{} {
 	return r.JSON200
 }
 
@@ -6463,13 +6915,13 @@ type GetApiTradingAccountsIdCexDepositAddressesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]CexDepositAddress
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiTradingAccountsIdCexDepositAddressesResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiTradingAccountsIdCexDepositAddressesResponse) GetJSON200() *[]CexDepositAddress {
 	return r.JSON200
 }
 
@@ -6559,13 +7011,13 @@ type GetApiTradingAccountsIdCexSpotTradesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]CexSpotTrade
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiTradingAccountsIdCexSpotTradesResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiTradingAccountsIdCexSpotTradesResponse) GetJSON200() *[]CexSpotTrade {
 	return r.JSON200
 }
 
@@ -6607,13 +7059,13 @@ type GetApiTradingAccountsIdCexWithdrawalAddressesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *map[string]interface{}
+	JSON200 *[]CexWithdrawalAddress
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *map[string]interface{}
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetApiTradingAccountsIdCexWithdrawalAddressesResponse) GetJSON200() *map[string]interface{} {
+func (r GetApiTradingAccountsIdCexWithdrawalAddressesResponse) GetJSON200() *[]CexWithdrawalAddress {
 	return r.JSON200
 }
 
@@ -9301,7 +9753,7 @@ func ParseGetApiGeneralStatsPastPremiumsResponse(rsp *http.Response) (*GetApiGen
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -9337,7 +9789,7 @@ func ParseGetApiGeneralStatsPaymentMethodsResponse(rsp *http.Response) (*GetApiG
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []map[string]interface{}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -10093,7 +10545,7 @@ func ParseGetApiTradingAccountsIdCexDepositAddressesResponse(rsp *http.Response)
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []CexDepositAddress
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -10165,7 +10617,7 @@ func ParseGetApiTradingAccountsIdCexSpotTradesResponse(rsp *http.Response) (*Get
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []CexSpotTrade
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -10201,7 +10653,7 @@ func ParseGetApiTradingAccountsIdCexWithdrawalAddressesResponse(rsp *http.Respon
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest map[string]interface{}
+		var dest []CexWithdrawalAddress
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

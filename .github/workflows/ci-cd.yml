@@ -487,6 +487,9 @@ jobs:
       - name: Build (tsc + vite)
         run: npm run build
 
+      - name: Run frontend unit tests
+        run: npm test
+
       - name: Cache Playwright browsers
         uses: actions/cache@v5
         id: playwright-cache

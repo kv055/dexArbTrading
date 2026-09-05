@@ -1,0 +1,14 @@
+type: object
+additionalProperties: true
+required: [asset, network, address]
+properties:
+  asset:
+    type: string
+  network:
+    type: string
+  address:
+    type: string
+  tag:
+    type: string
+  method:
+    type: string

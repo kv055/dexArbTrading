@@ -1,5 +1,7 @@
 # Gitea Actions — session-commit recipes
 
+Use when session-commit **destination is `gitea`**.
+
 Load credentials once (never echo the token):
 
 ```bash
