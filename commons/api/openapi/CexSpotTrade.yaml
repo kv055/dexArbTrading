@@ -1,0 +1,20 @@
+type: object
+additionalProperties: true
+required: [trade_id, trading_pair, trade_type, price, amount, fee, timestamp]
+properties:
+  trade_id:
+    type: string
+  trading_pair:
+    type: string
+  trade_type:
+    type: string
+  fee_asset:
+    type: string
+  timestamp:
+    type: string
+  price:
+    type: number
+  amount:
+    type: number
+  fee:
+    type: number
