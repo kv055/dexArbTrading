@@ -1,6 +1,7 @@
 package tradecost
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 
 	"commons/bitcoin"
 	"commons/exchangecredentials"
+	"commons/nostrreq"
 	"commons/tradecost/cextrading"
 	routing "commons/tradecost/txrouting"
 )
@@ -129,12 +131,14 @@ func (c *cachedFee) get(fallback float64, refresh func() (float64, error), label
 // RoboSats: 0.175% — fetched live from /api/info/; this is the fallback.
 // HodlHodl: 0.5% — both sides pay; no API endpoint. Source: hodlhodl.com/pages/faq
 // Peach:    2% buyer trading fee. Source: peachbitcoin.com/faq/trading
+// Mostro:   0.3% each side on the documented mainnet node; live from kind 38385.
 var dexTakerFees = map[string]float64{
 	"bisq":         0.0115,
 	"bisq2":        0.0,
 	"robosats":     0.00175,
 	"hodlhodl":     0.005,
 	"peachbitcoin": 0.02,
+	"mostro":       0.003,
 }
 
 // bisqSecurityDepositFloorBTC is Bisq's minimum security deposit regardless of
@@ -211,6 +215,47 @@ func fetchRobosatsTakerFee() (float64, error) {
 	return 0, fmt.Errorf("all coordinators failed, last: %w", lastErr)
 }
 
+// fetchMostroTakerFee reads kind-38385 instance-info events and returns the
+// highest advertised fee (conservative when several Mostro nodes are live).
+func fetchMostroTakerFee() (float64, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	events, _, err := nostrreq.Query(ctx, nostrreq.MostroRelays, map[string]any{
+		"kinds": []int{38385},
+		"#y":    []string{"mostro"},
+		"#z":    []string{"info"},
+	})
+	if err != nil {
+		return 0, err
+	}
+	fee, ok := parseMostroInfoFee(events)
+	if !ok {
+		return 0, fmt.Errorf("no mostro fee on kind 38385 events")
+	}
+	return fee, nil
+}
+
+func parseMostroInfoFee(events []nostrreq.Event) (float64, bool) {
+	maxFee := 0.0
+	found := false
+	for _, event := range events {
+		for _, tag := range event.Tags {
+			if len(tag) < 2 || tag[0] != "fee" {
+				continue
+			}
+			v, err := strconv.ParseFloat(strings.TrimSpace(tag[1]), 64)
+			if err != nil || v <= 0 {
+				continue
+			}
+			found = true
+			if v > maxFee {
+				maxFee = v
+			}
+		}
+	}
+	return maxFee, found
+}
+
 // ---------------------------------------------------------------------------
 // TradeCostEstimator
 // ---------------------------------------------------------------------------
@@ -274,6 +319,7 @@ func newTradeCostEstimator(feeDB *sql.DB) *TradeCostEstimator {
 			"bisq":     newCachedFee(feeTTL),
 			"robosats": newCachedFee(feeTTL),
 			"hodlhodl": newCachedFee(feeTTL),
+			"mostro":   newCachedFee(feeTTL),
 		},
 		btcPredictor:      predictor,
 		withdrawalTxShape: defaultCexProfile.txShape(),
@@ -503,6 +549,9 @@ func (e *TradeCostEstimator) getDexFeeFrac(dexExchange string) float64 {
 
 	if dexExchange == "robosats" {
 		refresh = fetchRobosatsTakerFee
+	}
+	if dexExchange == "mostro" {
+		refresh = fetchMostroTakerFee
 	}
 
 	return cache.get(fallback, refresh, label)

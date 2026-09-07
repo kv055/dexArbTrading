@@ -27,6 +27,8 @@ var dexTxRoutingProfiles = map[string]DexRoutingProfile{
 	"hodlhodl": {Bid: MethodOnChainHubWallet, Ask: MethodOnChainDirect},
 	// RoboSats: Lightning BTC leg (hold invoices) → swap on both sides.
 	"robosats": {Bid: MethodOnChainSwap, Ask: MethodOnChainSwap},
+	// Mostro: Lightning hold-invoice escrow, same swap route as RoboSats.
+	"mostro": {Bid: MethodOnChainSwap, Ask: MethodOnChainSwap},
 	// Peach: on-chain P2P with a per-trade escrow address (like HodlHodl) → hub on bid.
 	"peachbitcoin": {Bid: MethodOnChainHubWallet, Ask: MethodOnChainDirect},
 }
