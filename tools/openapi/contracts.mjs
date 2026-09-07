@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { parse, stringify } from 'yaml';
+import { checkProxyContracts } from './proxy-contracts.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'api-contracts.json'), 'utf8'));
@@ -57,6 +58,10 @@ function bundle() {
 
 function lint() {
   bundle();
+  const publicSpec = parse(fs.readFileSync(path.join(root, 'api-docs/specs/dex-monitor/public.openapi.yaml'), 'utf8'));
+  const upstreamSpec = parse(fs.readFileSync(path.join(root, 'api-docs/specs/dex-mm-controller/internal.openapi.yaml'), 'utf8'));
+  process.stdout.write('Validated ' + checkProxyContracts(publicSpec, upstreamSpec) + ' proxy responses against upstream contracts\n');
+  run(process.execPath, ['--test', 'tools/openapi/proxy-contracts.test.mjs']);
   run(spectral, ['lint', '--ruleset', '.spectral.yaml', ...manifest.contracts.map((contract) => contract.bundle)]);
 }
 

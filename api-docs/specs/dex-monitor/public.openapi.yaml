@@ -277,8 +277,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
         default:
           description: Error response
           content:
@@ -304,8 +306,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
         default:
           description: Error response
           content:
@@ -904,8 +908,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
         default:
           description: Error response
           content:
@@ -960,8 +966,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
         default:
           description: Error response
           content:
@@ -988,8 +996,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
         default:
           description: Error response
           content:
@@ -1139,8 +1149,10 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
         default:
           description: Error response
           content:
@@ -2272,8 +2284,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  $ref: '#/components/schemas/CexDepositAddress'
         default:
           description: Error response
           content:
@@ -2338,8 +2351,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  $ref: '#/components/schemas/CexSpotTrade'
         default:
           description: Error response
           content:
@@ -2371,8 +2385,9 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: true
+                type: array
+                items:
+                  $ref: '#/components/schemas/CexWithdrawalAddress'
         default:
           description: Error response
           content:
@@ -3994,6 +4009,72 @@ components:
           type: object
           additionalProperties: true
       additionalProperties: true
+    CexDepositAddress:
+      type: object
+      additionalProperties: true
+      required:
+        - asset
+        - network
+        - address
+      properties:
+        asset:
+          type: string
+        network:
+          type: string
+        address:
+          type: string
+        tag:
+          type: string
+        method:
+          type: string
+    CexSpotTrade:
+      type: object
+      additionalProperties: true
+      required:
+        - trade_id
+        - trading_pair
+        - trade_type
+        - price
+        - amount
+        - fee
+        - timestamp
+      properties:
+        trade_id:
+          type: string
+        trading_pair:
+          type: string
+        trade_type:
+          type: string
+        fee_asset:
+          type: string
+        timestamp:
+          type: string
+        price:
+          type: number
+        amount:
+          type: number
+        fee:
+          type: number
+    CexWithdrawalAddress:
+      type: object
+      additionalProperties: true
+      required:
+        - asset
+        - network
+        - address
+      properties:
+        asset:
+          type: string
+        network:
+          type: string
+        address:
+          type: string
+        tag:
+          type: string
+        label:
+          type: string
+        whitelisted:
+          type: boolean
   securitySchemes:
     dashboardSession:
       type: apiKey

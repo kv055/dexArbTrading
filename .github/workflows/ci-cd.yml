@@ -487,6 +487,9 @@ jobs:
       - name: Build (tsc + vite)
         run: npm run build
 
+      - name: Run frontend unit tests
+        run: npm test
+
       - name: Cache Playwright browsers
         uses: actions/cache@v5
         id: playwright-cache
@@ -557,6 +560,7 @@ jobs:
     name: Build & push ${{ matrix.service }}
     needs: [detect-changes, test-gate]
     if: |
+      always() &&
       needs.detect-changes.result == 'success' &&
       needs.test-gate.result == 'success' &&
       needs.detect-changes.outputs.changes != ''
@@ -695,7 +699,7 @@ jobs:
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
       needs.test-gate.result == 'success' &&
-      (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
+      needs.build-and-push.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -761,6 +765,13 @@ jobs:
   deploy:
     name: Deploy
     needs: [detect-changes, pre-deploy]
+    # always() is required: skipped main test jobs make the default success()
+    # gate false even when pre-deploy itself succeeded (see Gitea deploy if).
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      needs.pre-deploy.result == 'success'
     runs-on: ubuntu-latest
     # Leave enough time for a 30-minute cold-start health wait and rollback.
     timeout-minutes: 75

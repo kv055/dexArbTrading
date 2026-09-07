@@ -101,7 +101,7 @@ api-check: ## Verify OpenAPI lint, route coverage, and committed generated artif
 	node tools/openapi/contracts.mjs check
 
 api-contract-test: ## Exercise registered handlers through generated OpenAPI validators
-	@for module in dexUnifiedApi dexMmController dexMonitor dexFiatController; do \
+	@set -e; for module in dexUnifiedApi dexMmController dexMonitor dexFiatController; do \
 		echo "==> $$module OpenAPI contract tests"; \
 		(cd $$module && GOCACHE=/tmp/dexarb-openapi-gocache/$$module \
 			go test ./... -run 'OpenAPI|ResponseValidation|LegacyStrictServer'); \
