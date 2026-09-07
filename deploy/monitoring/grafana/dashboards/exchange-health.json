@@ -80,7 +80,7 @@
       "gridPos": {"h": 7, "w": 12, "x": 12, "y": 11},
       "fieldConfig": {"defaults": {"unit": "short", "min": 0, "max": 1, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "yellow", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
       "options": {"mergeValues": true, "showValue": "never", "rowHeight": 0.9, "alignValue": "left"},
-      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "dex_exchange_up{exchange=~\"robosats|peachbitcoin|hodlhodl\"}", "legendFormat": "{{exchange}}", "refId": "A"}]
+      "targets": [{"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "dex_exchange_up{exchange=~\"robosats|peachbitcoin|hodlhodl|mostro\"}", "legendFormat": "{{exchange}}", "refId": "A"}]
     },
     {
       "id": 8,
