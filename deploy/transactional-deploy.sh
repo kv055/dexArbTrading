@@ -670,11 +670,11 @@ dump_failing_logs() {
     echo "=== $service ==="
     docker logs --tail 80 "$service" 2>&1 || true
   done < <(
-    docker compose ps --format '{{.Name}} {{.State}}' 2>/dev/null |
-      awk '$2 != "running" {print $1}'
+    docker compose ps -a --format '{{.Name}}\t{{.State}}\t{{.Health}}' 2>/dev/null |
+      awk -F '\t' 'tolower($2) != "running" || tolower($3) == "unhealthy" {print $1}'
   )
   echo "--- all container states ---"
-  docker compose ps 2>/dev/null || true
+  docker compose ps -a 2>/dev/null || true
 }
 
 snapshot_active_bundle "$prev_sha" || true
