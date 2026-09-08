@@ -140,6 +140,12 @@ set -e
 [[ "$ec" -eq 7 ]]
 [[ "$(tr -d '[:space:]' <"$run_dir/result")" == "7" ]]
 
+echo "== retry failed result =="
+export FAKE_DEPLOY_EXIT=0
+bash "$repo_root/deploy/ci-activate.sh"
+[[ "$(tr -d '[:space:]' <"$run_dir/result")" == "0" ]]
+grep -q "fake deploy done" "$run_dir/deploy.log"
+
 echo "== cleanup skips in-flight deploy =="
 rm -f "$run_dir/result"
 sleep 60 &

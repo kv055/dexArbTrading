@@ -59,7 +59,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 120s
+      # Cold bootstrap after a recreate has no cached consensus; 2 minutes
+      # was enough to mark a live Tor daemon unhealthy during deploy.
+      start_period: 480s
     deploy:
       resources:
         limits:

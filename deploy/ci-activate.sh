@@ -85,8 +85,13 @@ mkdir -p "$run_dir"
 chmod 700 "$REPO_DIR/.deploy" "$REPO_DIR/.deploy/runs" "$run_dir"
 
 if [[ -f "$run_dir/result" ]]; then
-  echo "remote deploy already finished (result present)"
-  exit 0
+  prev="$(tr -d '[:space:]' <"$run_dir/result")"
+  if [[ "$prev" == "0" ]]; then
+    echo "remote deploy already finished (result present)"
+    exit 0
+  fi
+  echo "previous deploy for this SHA failed (exit ${prev:-unknown}); retrying"
+  rm -f "$run_dir/result" "$run_dir/result.tmp" "$run_dir/pid"
 fi
 
 if [[ -f "$run_dir/pid" ]]; then
