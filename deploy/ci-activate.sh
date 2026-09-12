@@ -83,6 +83,8 @@ wrapper="$run_dir/wrapper.sh"
 
 mkdir -p "$run_dir"
 chmod 700 "$REPO_DIR/.deploy" "$REPO_DIR/.deploy/runs" "$run_dir"
+exec 8>"$REPO_DIR/.deploy/stage.lock"
+flock -n 8 || { echo 'another activation dispatch or stage publication is active' >&2; exit 1; }
 
 if [[ -f "$run_dir/result" ]]; then
   prev="$(tr -d '[:space:]' <"$run_dir/result")"
@@ -147,7 +149,7 @@ rm -f "$run_dir/result" "$run_dir/result.tmp"
 : >"$run_dir/deploy.log"
 nohup "$wrapper" "$run_dir" "$deployer" "$REPO_DIR" "$NEW_SHA" "$CHANGED_SERVICES" \
   "${fetch_args[@]}" \
-  >/dev/null 2>&1 &
+  8>&- >/dev/null 2>&1 &
 echo $! >"$run_dir/pid.tmp"
 mv -f "$run_dir/pid.tmp" "$run_dir/pid"
 echo "started remote deploy pid $(tr -d '[:space:]' <"$run_dir/pid")"

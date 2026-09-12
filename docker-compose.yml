@@ -74,7 +74,7 @@ services:
   # endpoint and delegates onion resolution and transport to Tor via SOCKS5.
   bitcoind-rpc-proxy:
     logging: *default-logging
-    image: dexarbtrading-bitcoind-rpc-proxy:local
+    image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-bitcoind-rpc-proxy:${BITCOIND_RPC_PROXY_IMAGE_TAG:-${IMAGE_TAG:-latest}}
     build:
       context: ./deploy/bitcoind-rpc-proxy
       dockerfile: Dockerfile

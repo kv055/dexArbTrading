@@ -23,7 +23,6 @@ on:
       - 'dexUnifiedApi/docs/**'
       - 'dexMmTradingLogicHummingBot/**'
       - '.gitignore'
-      - '.gitmodules'
       - 'LICENSE'
 
 env:
@@ -189,6 +188,37 @@ jobs:
           # Need the push's "before" commit available locally to diff the full
           # pushed range (a push can carry several commits / a merge).
           fetch-depth: 0
+      - name: Fetch detection submodules from the Gitea mirror
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REG_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          host="${REGISTRY_URL#*://}"; scheme="${REGISTRY_URL%%://*}"
+          git config --global url."${scheme}://x-access-token:${REG_TOKEN}@${host}/${OWNER}/".insteadOf "https://github.com/kv055/"
+          git submodule update --init --recursive
+      - name: Read production image baseline
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_name == 'main' || github.event.ref == 'refs/heads/main')
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
+          SSH_USER: ${{ secrets.VPS_SSH_USER }}
+          REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
+        run: |
+          set -Eeuo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%b\n' "$SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%b\n' "$KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          python3 scripts/release-images.py ci-baseline --output release-artifacts/baseline.json
+      - uses: actions/upload-artifact@v3
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_name == 'main' || github.event.ref == 'refs/heads/main')
+        with:
+          name: production-baseline
+          path: release-artifacts/baseline.json
+          if-no-files-found: error
       - name: Determine changed services
         id: detect
         env:
@@ -198,151 +228,8 @@ jobs:
           REF: ${{ github.ref }}
           REF_NAME: ${{ github.ref_name }}
           EVENT_REF: ${{ github.event.ref }}
-        run: |
-          set -Eeuo pipefail
-          ALL_SERVICES="tor,bisq,bisq2,unified-api,unified-snapshot,postgres-backup,dexmonitor,mm-controller,fiat-controller"
-          ALL_MODULES="commons,dexUnifiedApi,dexMmController,dexMonitor,dexFiatController"
-          ZERO="0000000000000000000000000000000000000000"
-
-          add_csv() {
-            local list="$1" item="$2"
-            case ",$list," in *",$item,"*) echo "$list" ;; *) echo "${list:+$list,}$item" ;; esac
-          }
-
-          comma_to_json_array() {
-            local csv="${1:-}"
-            if [ -z "$csv" ]; then echo '[]'; return; fi
-            local IFS=',' parts=() p json='[' first=true
-            read -ra parts <<< "$csv"
-            for p in "${parts[@]}"; do
-              [ -n "$p" ] || continue
-              $first || json+=','
-              first=false
-              json+="\"$p\""
-            done
-            json+=']'
-            echo "$json"
-          }
-
-          build_matrix_json_for() {
-            local csv="${1:-}"
-            [ -n "$csv" ] || { echo '[]'; return; }
-            jq -n --arg csv "$csv" '
-              ($csv | split(",") | map(select(length > 0))) as $want |
-              [
-                {service:"tor",             context:"./dexUnifiedApi", dockerfile:"dexUnifiedApi/Dockerfile.tor"},
-                {service:"bisq",            context:"./dexUnifiedApi", dockerfile:"dexUnifiedApi/Dockerfile.bisq"},
-                {service:"bisq2",           context:"./dexUnifiedApi", dockerfile:"dexUnifiedApi/Dockerfile.bisq2"},
-                {service:"unified-api",     context:".", dockerfile:"dexUnifiedApi/Dockerfile"},
-                {service:"unified-snapshot",context:".", dockerfile:"dexUnifiedApi/Dockerfile.snapshot"},
-                {service:"postgres-backup", context:".", dockerfile:"dexUnifiedApi/Dockerfile.backup"},
-                {service:"dexmonitor",      context:".", dockerfile:"dexMonitor/Dockerfile"},
-                {service:"mm-controller",   context:"./dexMmController", dockerfile:"dexMmController/Dockerfile"},
-                # totp-api disabled (see docker-compose.yml / services/totp-api/Dockerfile)
-                {service:"fiat-controller",context:"./dexFiatController", dockerfile:"dexFiatController/Dockerfile"}
-              ] | map(select(.service as $s | $want | index($s)))
-            '
-          }
-
-          write_outputs() {
-            local changes="$1" test_modules="$2" run_frontend="$3"
-            local test_modules_json build_matrix_json
-            test_modules_json=$(comma_to_json_array "$test_modules")
-            build_matrix_json=$(build_matrix_json_for "$changes")
-            echo "changes=${changes:-}" >> "$GITHUB_OUTPUT"
-            echo "test_modules=${test_modules:-}" >> "$GITHUB_OUTPUT"
-            echo "run_frontend=${run_frontend}" >> "$GITHUB_OUTPUT"
-            {
-              echo 'test_modules_json<<EOF'
-              echo "$test_modules_json"
-              echo 'EOF'
-              echo 'build_matrix_json<<EOF'
-              echo "$build_matrix_json"
-              echo 'EOF'
-            } >> "$GITHUB_OUTPUT"
-            echo "services to build: ${changes:-<none>}"
-            echo "test modules: ${test_modules:-<none>}"
-            echo "run frontend: ${run_frontend}"
-            echo "build matrix: ${build_matrix_json}"
-          }
-
-          emit_all() {
-            echo "${1:-build all}"
-            write_outputs "$ALL_SERVICES" "$ALL_MODULES" "true"
-          }
-
-          resolve_base() {
-            local before="${1:-}" after="${2:-}"
-            echo "resolve_base: event=${EVENT:-} before=${before:-<empty>} after=${after:-<empty>}" >&2
-            if [ -n "$before" ] && [ "$before" != "$ZERO" ] && git cat-file -e "${before}^{commit}" 2>/dev/null; then
-              echo "$before"; return 0
-            fi
-            if git cat-file -e "${after}^{commit}" 2>/dev/null && parent=$(git rev-parse "${after}^" 2>/dev/null); then
-              echo "before unusable (${before:-<empty>}); falling back to parent ${parent}" >&2
-              echo "$parent"; return 0
-            fi
-            echo ""
-          }
-
-          map_paths() {
-            local changed="$1" S="" M="" run_frontend=false
-            path_changed() { printf '%s\n' "$changed" | grep -qE "$1"; }
-            if path_changed '^commons(/|$)'; then
-              S=$(add_csv "$S" unified-api); S=$(add_csv "$S" unified-snapshot)
-              S=$(add_csv "$S" postgres-backup); S=$(add_csv "$S" dexmonitor)
-              M=$(add_csv "$M" commons); M=$(add_csv "$M" dexUnifiedApi); M=$(add_csv "$M" dexMonitor)
-              run_frontend=true
-            fi
-            if path_changed '^dexUnifiedApi(/|$)'; then
-              S=$(add_csv "$S" tor); S=$(add_csv "$S" bisq); S=$(add_csv "$S" bisq2)
-              S=$(add_csv "$S" unified-api); S=$(add_csv "$S" unified-snapshot); S=$(add_csv "$S" postgres-backup)
-              M=$(add_csv "$M" dexUnifiedApi); run_frontend=true
-            fi
-            if path_changed '^dexMonitor(/|$)'; then
-              S=$(add_csv "$S" dexmonitor); M=$(add_csv "$M" dexMonitor); run_frontend=true
-            fi
-            if path_changed '^dexMmController(/|$)'; then
-              S=$(add_csv "$S" mm-controller); M=$(add_csv "$M" dexMmController); run_frontend=true
-            fi
-            if path_changed '^dexFiatController(/|$)'; then
-              S=$(add_csv "$S" fiat-controller); M=$(add_csv "$M" dexFiatController); run_frontend=true
-            fi
-            if $run_frontend; then write_outputs "$S" "$M" "true"; else write_outputs "$S" "$M" "false"; fi
-          }
-
-          if [ "${EVENT:-}" = "workflow_dispatch" ]; then emit_all "manual trigger -> build all"; exit 0; fi
-
-          # A prior main commit can pass review but fail before deployment. If
-          # the next main push only builds its immediate Git diff, images from
-          # the failed release are silently inherited forever. Production
-          # promotions are infrequent enough that rebuilding every service is
-          # preferable to a version-skewed release marked healthy.
-          if [ "${EVENT:-}" = "push" ] && {
-            [ "${REF:-}" = "refs/heads/main" ] ||
-            [ "${REF_NAME:-}" = "main" ] ||
-            [ "${EVENT_REF:-}" = "refs/heads/main" ];
-          }; then
-            emit_all "main push -> build all services for a coherent release"
-            exit 0
-          fi
-
-          if [ "${EVENT:-}" = "pull_request" ]; then BASE="${PR_BASE:-}"; HEAD="${PR_HEAD:-}"
-          else BASE="${BEFORE:-}"; HEAD="${AFTER:-}"; fi
-
-          BASE=$(resolve_base "$BASE" "$HEAD")
-          if [ -z "$BASE" ]; then emit_all "no usable base commit -> build all"; exit 0; fi
-
-          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
-          echo "diff range: ${BASE}..${HEAD}"
-          echo "changed paths:"
-          printf '%s\n' "$CHANGED"
-
-          changed() { printf '%s\n' "$CHANGED" | grep -qE "$1"; }
-          if changed '^(\.gitmodules|go\.work|go\.work\.sum)$'; then
-            emit_all "infra change -> build all"; exit 0
-          fi
-
-          map_paths "$CHANGED"
+          BASELINE_FILE: release-artifacts/baseline.json
+        run: bash scripts/detect-changed-services.sh
 
       # Gitea act often leaves github.ref empty when evaluating downstream job `if`
       # expressions; resolve deploy intent once here from every context field act sets.
@@ -364,6 +251,19 @@ jobs:
           fi
           echo "main=${deploy}" >> "$GITHUB_OUTPUT"
           echo "deploy_main: event=${EVENT} ref=${REF} ref_name=${REF_NAME} event_ref=${EVENT_REF} -> ${deploy}"
+
+  release-protocol:
+    name: Image detection and deployment regression tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          set -Eeuo pipefail
+          bash scripts/test-image-service-inputs.sh
+          python3 scripts/test-release-images.py
+          bash deploy/test-transactional-deploy.sh
+          DEPLOY_TEST_DIGEST=1 bash deploy/test-transactional-deploy.sh
+          bash deploy/test-ci-activate.sh
 
   test-go:
     name: Go tests (${{ matrix.module }})
@@ -553,13 +453,14 @@ jobs:
 
   test-gate:
     name: Test gate
-    needs: [database-sql-integrity, detect-changes, openapi, test-go, test-frontend, certificate-renewal-test]
+    needs: [database-sql-integrity, detect-changes, openapi, test-go, test-frontend, certificate-renewal-test, release-protocol]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Require successful or intentionally skipped tests
         env:
           DETECT_RESULT: ${{ needs.detect-changes.result }}
+          RELEASE_RESULT: ${{ needs.release-protocol.result }}
           DATABASE_SQL_RESULT: ${{ needs.database-sql-integrity.result }}
           GO_RESULT: ${{ needs.test-go.result }}
           FRONTEND_RESULT: ${{ needs.test-frontend.result }}
@@ -569,6 +470,7 @@ jobs:
           set -Eeuo pipefail
           [ "$DATABASE_SQL_RESULT" = success ]
           [ "$DETECT_RESULT" = success ]
+          [ "$RELEASE_RESULT" = success ]
           case "$OPENAPI_RESULT" in success|skipped) ;; *) exit 1;; esac
           case "$GO_RESULT" in success|skipped) ;; *) exit 1;; esac
           case "$FRONTEND_RESULT" in success|skipped) ;; *) exit 1;; esac
@@ -592,6 +494,9 @@ jobs:
           - service: tor
             context: ./dexUnifiedApi
             dockerfile: dexUnifiedApi/Dockerfile.tor
+          - service: bitcoind-rpc-proxy
+            context: deploy/bitcoind-rpc-proxy
+            dockerfile: deploy/bitcoind-rpc-proxy/Dockerfile
           - service: bisq
             context: ./dexUnifiedApi
             dockerfile: dexUnifiedApi/Dockerfile.bisq
@@ -650,13 +555,13 @@ jobs:
         id: reg
         env:
           URL: ${{ secrets.REGISTRY_URL }}
-          REF: ${{ github.ref }}
+          DEPLOY_MAIN: ${{ needs.detect-changes.outputs.deploy_main }}
         run: |
           gitea_host="${URL#*://}"; scheme="${URL%%://*}"
           echo "commit_hash=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "commit_date=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
 
-          if [ "$REF" = "refs/heads/main" ]; then
+          if [ "$DEPLOY_MAIN" = "true" ]; then
             echo "registry=ghcr.io" >> "$GITHUB_OUTPUT"
             echo "image_owner=kv055" >> "$GITHUB_OUTPUT"
           else
@@ -683,13 +588,13 @@ jobs:
         if: steps.check.outputs.build == 'true'
         env:
           URL: ${{ secrets.REGISTRY_URL }}
-          REF: ${{ github.ref }}
+          DEPLOY_MAIN: ${{ needs.detect-changes.outputs.deploy_main }}
         run: |
           # Gitea act executes each step in a fresh job container. Build the
           # registry config here, immediately before Buildx consumes it; a
           # /tmp file created by the preceding metadata step does not persist.
           docker buildx use ci-builder 2>/dev/null && exit 0
-          if [ "$REF" = "refs/heads/main" ]; then
+          if [ "$DEPLOY_MAIN" = "true" ]; then
             docker buildx create --name ci-builder --use --driver docker-container
           else
             gitea_host="${URL#*://}"; scheme="${URL%%://*}"
@@ -702,7 +607,7 @@ jobs:
           fi
 
       - name: Login to Gitea registry
-        if: steps.check.outputs.build == 'true' && needs.detect-changes.outputs.deploy_main != 'true'
+        if: steps.check.outputs.build == 'true' && steps.reg.outputs.registry != 'ghcr.io'
         uses: docker/login-action@v4
         with:
           registry: ${{ steps.reg.outputs.registry }}
@@ -710,7 +615,7 @@ jobs:
           password: ${{ secrets.REGISTRY_TOKEN }}
 
       - name: Login to GHCR
-        if: steps.check.outputs.build == 'true' && needs.detect-changes.outputs.deploy_main == 'true'
+        if: steps.check.outputs.build == 'true' && steps.reg.outputs.registry == 'ghcr.io'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -718,6 +623,7 @@ jobs:
           password: ${{ secrets.GH_PAT }}
 
       - uses: docker/build-push-action@v7
+        id: image
         if: steps.check.outputs.build == 'true'
         with:
           context: ${{ matrix.context }}
@@ -725,7 +631,7 @@ jobs:
           build-args: |
             COMMIT_HASH=${{ steps.reg.outputs.commit_hash }}
             COMMIT_DATE=${{ steps.reg.outputs.commit_date }}
-          push: ${{ github.event_name != 'pull_request' }}
+          push: ${{ github.event_name == 'push' }}
           tags: |
             ${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:latest
             ${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:${{ github.sha }}
@@ -733,7 +639,21 @@ jobs:
           # Matters most for bisq/bisq2: without it every run rebuilds the Bisq
           # daemon from source (git clone + full gradle compile).
           cache-from: type=registry,ref=${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}:buildcache
-          cache-to: ${{ github.event_name != 'pull_request' && format('type=registry,ref={0}/{1}/dexarbtrading-{2}:buildcache,mode=max', steps.reg.outputs.registry, steps.reg.outputs.image_owner, matrix.service) || '' }}
+          cache-to: ${{ github.event_name == 'push' && format('type=registry,ref={0}/{1}/dexarbtrading-{2}:buildcache,mode=max', steps.reg.outputs.registry, steps.reg.outputs.image_owner, matrix.service) || '' }}
+
+      - name: Record published image digest
+        if: steps.check.outputs.build == 'true' && needs.detect-changes.outputs.deploy_main == 'true'
+        env:
+          SERVICE: ${{ matrix.service }}
+          SHA: ${{ github.sha }}
+          IMAGE: ${{ steps.reg.outputs.registry }}/${{ steps.reg.outputs.image_owner }}/dexarbtrading-${{ matrix.service }}@${{ steps.image.outputs.digest }}
+        run: python3 scripts/release-images.py receipt --service "$SERVICE" --sha "$SHA" --image "$IMAGE" --output "receipts/$SERVICE.json"
+      - uses: actions/upload-artifact@v3
+        if: steps.check.outputs.build == 'true' && needs.detect-changes.outputs.deploy_main == 'true'
+        with:
+          name: image-receipt-${{ matrix.service }}
+          path: receipts/${{ matrix.service }}.json
+          if-no-files-found: error
 
   open-promote-pr:
     name: Open develop → main PR
@@ -742,7 +662,7 @@ jobs:
       always() &&
       needs.detect-changes.outputs.deploy_main != 'true' &&
       needs.test-gate.result == 'success' &&
-      (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
+      (needs.build-and-push.result == 'success' || (needs.detect-changes.outputs.changes == '' && needs.build-and-push.result == 'skipped'))
     runs-on: ubuntu-latest
     steps:
       - name: Create or reuse promote PR
@@ -788,7 +708,7 @@ jobs:
       always() &&
       needs.detect-changes.outputs.deploy_main == 'true' &&
       needs.test-gate.result == 'success' &&
-      (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
+      (needs.build-and-push.result == 'success' || (needs.detect-changes.outputs.changes == '' && needs.build-and-push.result == 'skipped'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -839,7 +759,7 @@ jobs:
           test -d "$REPO_DIR" || { echo "missing repo dir $REPO_DIR on VPS"; exit 1; }
           echo "Docker disk usage before unused-image prune:"
           docker system df
-          docker image prune -af
+          # Active and previous release images are retained for exact rollback.
           echo "Docker disk usage after unused-image prune:"
           docker system df
           docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
@@ -886,6 +806,22 @@ jobs:
           printf '%b\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
 
+      - name: Download production baseline
+        uses: actions/download-artifact@v3
+        with:
+          name: production-baseline
+          path: release-artifacts
+      - name: Download image build receipts
+        if: needs.detect-changes.outputs.changes != ''
+        uses: actions/download-artifact@v3
+        with:
+          path: release-downloads
+      - name: Prepare receipt directory
+        run: |
+          mkdir -p release-artifacts/receipts
+          if [ -d release-downloads ]; then
+            find release-downloads -path '*/image-receipt-*/*.json' -exec cp {} release-artifacts/receipts/ \;
+          fi
       - name: Validate and stage encrypted environment bundle
         timeout-minutes: 3
         env:
@@ -893,6 +829,7 @@ jobs:
           SSH_USER: ${{ secrets.VPS_SSH_USER }}
           REPO_DIR: ${{ secrets.VPS_REPO_DIR }}
           NEW_SHA: ${{ github.sha }}
+          RELEASE_ARTIFACTS: release-artifacts
           KEY_ROOT:            ${{ secrets.DOTENV_PRIVATE_KEY_ROOT }}
           KEY_UNIFIED_API:     ${{ secrets.DOTENV_PRIVATE_KEY_UNIFIED_API }}
           KEY_MONITOR:         ${{ secrets.DOTENV_PRIVATE_KEY_MONITOR }}

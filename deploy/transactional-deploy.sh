@@ -15,6 +15,7 @@ env_bundle=""
 changed_services_csv=""
 changed_services_supplied=false
 fetch_origin=false
+legacy_images=false
 while (($#)); do
   case "$1" in
     --repo-dir) repo_dir="${2:-}"; shift 2 ;;
@@ -26,6 +27,7 @@ while (($#)); do
       shift 2
       ;;
     --fetch-origin) fetch_origin=true; shift ;;
+    --legacy-images) legacy_images=true; shift ;;
     *) usage ;;
   esac
 done
@@ -50,6 +52,26 @@ validator="$stage_dir/validate-env-contract.sh"
 }
 "$validator" values "$env_bundle"
 
+inputs_lib="$stage_dir/image-service-inputs.sh"
+if [[ ! -f "$inputs_lib" ]]; then
+  inputs_lib="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/image-service-inputs.sh"
+fi
+[[ -f "$inputs_lib" ]] || {
+  echo "image service input map is missing: $inputs_lib" >&2
+  exit 1
+}
+# shellcheck source=../scripts/image-service-inputs.sh
+source "$inputs_lib"
+digest_tool="$stage_dir/release-images.py"
+baseline_file="$stage_dir/baseline.json"
+if ! "$legacy_images"; then
+  [[ -f "$digest_tool" && -f "$baseline_file" && -d "$stage_dir/receipts" ]] || {
+    echo 'digest deployment requires staged baseline, receipts, and release-images.py' >&2
+    exit 1
+  }
+  command -v python3 >/dev/null
+fi
+
 state_root="$repo_dir/.deploy"
 release_root="$state_root/releases"
 mkdir -p "$release_root"
@@ -69,7 +91,22 @@ cleanup() {
 trap cleanup EXIT
 
 cd "$repo_dir"
+IMAGE_INPUTS_REPO="$repo_dir"
+if ! git cat-file -e "${new_sha}^{commit}" 2>/dev/null; then
+  if "$fetch_origin"; then
+    git fetch --no-tags origin "$new_sha" || git fetch --no-tags origin main
+  fi
+fi
 prev_sha="$(cat .deployed_sha 2>/dev/null || true)"
+if ! "$legacy_images"; then
+  python3 "$digest_tool" check --repo "$repo_dir" --baseline "$baseline_file"
+  if [[ -n "$prev_sha" && ! -f "$release_root/$prev_sha/images.json" ]]; then
+    echo 'Migrating production to digest references; one-time container recreation may occur'
+    mkdir -p "$release_root/$prev_sha"
+    python3 "$digest_tool" legacy-rollback --sha "$prev_sha" \
+      --output "$release_root/$prev_sha/rollback.compose.json"
+  fi
+fi
 env_paths=(
   ".env"
   "dexUnifiedApi/.env"
@@ -77,30 +114,11 @@ env_paths=(
   "dexMmController/.env"
   "dexFiatController/.env"
 )
-image_services=(
-  tor
-  bisq
-  bisq2
-  unified-api
-  unified-snapshot
-  postgres-backup
-  dexmonitor
-  mm-controller
-  # totp-api disabled (see docker-compose.yml)
-  fiat-controller
-)
-image_vars=(
-  TOR_IMAGE_TAG
-  BISQ_IMAGE_TAG
-  BISQ2_IMAGE_TAG
-  UNIFIED_API_IMAGE_TAG
-  UNIFIED_SNAPSHOT_IMAGE_TAG
-  POSTGRES_BACKUP_IMAGE_TAG
-  DEXMONITOR_IMAGE_TAG
-  MM_CONTROLLER_IMAGE_TAG
-  # TOTP_API_IMAGE_TAG
-  FIAT_CONTROLLER_IMAGE_TAG
-)
+mapfile -t image_services < <(image_input_services)
+image_vars=()
+for service in "${image_services[@]}"; do
+  image_vars+=("$(image_service_variable "$service")")
+done
 config_services=(grafana prometheus loki tempo alloy nginx)
 changed_services=()
 
@@ -152,20 +170,21 @@ parse_changed_services() {
 }
 
 parse_changed_services || exit 2
+changed_services_csv="$(IFS=,; echo "${changed_services[*]}")"
 
 copy_bundle() {
   local source_root="$1" destination_root="$2" relative
-  mkdir -p "$destination_root"
-  chmod 700 "$destination_root"
+  mkdir -p "$destination_root" || return 1
+  chmod 700 "$destination_root" || return 1
   for relative in "${env_paths[@]}"; do
     [[ -f "$source_root/$relative" ]] || {
       echo "environment bundle is missing $relative" >&2
       return 1
     }
-    mkdir -p "$destination_root/$(dirname "$relative")"
+    mkdir -p "$destination_root/$(dirname "$relative")" || return 1
     install -m 600 "$source_root/$relative" \
-      "$destination_root/$relative.tmp"
-    mv -f "$destination_root/$relative.tmp" "$destination_root/$relative"
+      "$destination_root/$relative.tmp" || return 1
+    mv -f "$destination_root/$relative.tmp" "$destination_root/$relative" || return 1
   done
 }
 
@@ -173,9 +192,9 @@ activate_bundle() {
   local source_root="$1" relative
   for relative in "${env_paths[@]}"; do
     [[ -f "$source_root/$relative" ]] || return 1
-    mkdir -p "$(dirname "$relative")"
-    install -m 600 "$source_root/$relative" "$relative.tmp"
-    mv -f "$relative.tmp" "$relative"
+    mkdir -p "$(dirname "$relative")" || return 1
+    install -m 600 "$source_root/$relative" "$relative.tmp" || return 1
+    mv -f "$relative.tmp" "$relative" || return 1
   done
 }
 
@@ -199,27 +218,29 @@ configure_dexmm_telegram_webhook() {
     /^DEXMM_TELEGRAM_WEBHOOK_URL=/ { print "DEXMM_TELEGRAM_WEBHOOK_URL=" url; found=1; next }
     { print }
     END { if (!found) print "DEXMM_TELEGRAM_WEBHOOK_URL=" url }
-  ' .env >"$temporary"
-  chmod 600 "$temporary"
-  mv -f "$temporary" .env
+  ' .env >"$temporary" || return 1
+  chmod 600 "$temporary" || return 1
+  mv -f "$temporary" .env || return 1
   echo "configured system-managed DEXMM Telegram webhook: $url"
 }
 
 snapshot_active_bundle() {
   local sha="$1" target temporary relative
-  target="$release_root/$sha/env"
+  target="$release_root/$sha"
   temporary="$release_root/.${sha}.tmp.$$"
   [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 0
-  [[ -d "$target" ]] && return 0
+  [[ -d "$target/env" ]] && return 0
   for relative in "${env_paths[@]}"; do
     [[ -f "$relative" ]] || {
       echo "warning: cannot snapshot missing active $relative" >&2
       return 1
     }
   done
-  rm -rf "$temporary"
-  copy_bundle "$repo_dir" "$temporary/env"
-  mv "$temporary" "$release_root/$sha"
+  rm -rf "$temporary" || return 1
+  copy_bundle "$repo_dir" "$temporary/env" || return 1
+  mkdir -p "$target" || return 1
+  mv "$temporary/env" "$target/env" || return 1
+  rmdir "$temporary" || return 1
 }
 
 write_uniform_image_manifest() {
@@ -325,6 +346,13 @@ normalize_image_manifest() {
 
   for variable in "${image_vars[@]}"; do
     [[ -n "${values[$variable]:-}" ]] || {
+      # Newly managed services have no historical source tag. Their required
+      # rebuild is selected from the baseline, and validated via build receipts.
+      if [[ "$variable" == BITCOIND_RPC_PROXY_IMAGE_TAG ]]; then
+        values[$variable]="$prev_sha"
+        changed=true
+        continue
+      fi
       echo "image manifest is missing $variable" >&2
       return 1
     }
@@ -396,32 +424,7 @@ build_candidate_image_manifest() {
 }
 
 service_image_inputs_changed() {
-  local service="$1" from_sha="$2" to_sha="$3"
-  local -a paths=()
-
-  case "$service" in
-    tor|bisq|bisq2)
-      paths=(dexUnifiedApi)
-      ;;
-    unified-api|unified-snapshot|postgres-backup)
-      paths=(go.work go.work.sum commons dexUnifiedApi)
-      ;;
-    dexmonitor)
-      paths=(go.work go.work.sum commons dexMonitor)
-      ;;
-    mm-controller)
-      paths=(dexMmController)
-      ;;
-    fiat-controller)
-      paths=(dexFiatController)
-      ;;
-    *)
-      return 0
-      ;;
-  esac
-
-  git cat-file -e "$from_sha^{commit}" 2>/dev/null || return 0
-  ! git diff --quiet "$from_sha" "$to_sha" -- "${paths[@]}"
+  IMAGE_INPUTS_REPO="$repo_dir" image_service_inputs_changed "$@"
 }
 
 # The workflow supplies image services to rebuild, but the VPS is the source
@@ -632,10 +635,30 @@ start_release() {
   local sha="$1" bundle="$2" manifest="$3" issue_certificate="$4" from_sha="$5"
   local certificate_before certificate_after certificate_changed=false
   local restart_services=()
+  unset COMPOSE_FILE
   sync_tree "$sha" || return 1
   activate_bundle "$bundle" || return 1
   configure_dexmm_telegram_webhook || return 1
   load_image_manifest "$manifest" || return 1
+  if ! "$legacy_images"; then
+    local digest_manifest="$release_root/$sha/images.json"
+    if [[ "$issue_certificate" == true ]]; then
+      digest_manifest="$stage_dir/candidate.json"
+      python3 "$digest_tool" prepare --repo "$repo_dir" --baseline "$baseline_file" \
+        --receipts "$stage_dir/receipts" --sha "$sha" --changed "$changed_services_csv" \
+        --output "$digest_manifest" || return 1
+    fi
+    if [[ -f "$digest_manifest" ]]; then
+      python3 "$digest_tool" override --manifest "$digest_manifest" \
+        --output "$state_root/active.compose.json" || return 1
+    elif [[ -f "$release_root/$sha/rollback.compose.json" ]]; then
+      install -m 600 "$release_root/$sha/rollback.compose.json" "$state_root/active.compose.json"
+    else
+      echo "no digest or local rollback references for $sha" >&2
+      return 1
+    fi
+    export COMPOSE_FILE="$repo_dir/docker-compose.yml:$state_root/active.compose.json"
+  fi
   compose_preflight || return 1
   if [[ "$issue_certificate" == true ]]; then
     certificate_before="$(certificate_bundle_checksum)"
@@ -644,19 +667,24 @@ start_release() {
     [[ "$certificate_before" != "$certificate_after" ]] &&
       certificate_changed=true
   fi
-  pull_changed_images || return 1
+  if "$legacy_images"; then
+    pull_changed_images || return 1
+  elif [[ -f "$digest_manifest" ]]; then
+    # Pulling exact digests also restores images absent from the local cache.
+    docker compose pull || return 1
+  fi
   # Unified Snapshot's first cycle calls several external/Tor markets and can
   # legitimately exceed twenty minutes before writing its success marker. With
   # per-service tags, Compose keeps its existing container unless its image or
   # service configuration actually changed.
   docker compose up -d --remove-orphans \
-    --wait --wait-timeout 1800 || return 1
+    --wait --wait-timeout 1800 --no-build || return 1
   mapfile -t restart_services < <(
     config_services_to_recreate "$from_sha" "$sha" "$certificate_changed"
   )
   if ((${#restart_services[@]})); then
     docker compose up -d --force-recreate --no-deps \
-      --wait --wait-timeout 120 "${restart_services[@]}" || return 1
+      --wait --wait-timeout 120 --no-build "${restart_services[@]}" || return 1
   fi
   smoke || return 1
 }
@@ -677,7 +705,7 @@ dump_failing_logs() {
   docker compose ps -a 2>/dev/null || true
 }
 
-snapshot_active_bundle "$prev_sha" || true
+snapshot_active_bundle "$prev_sha" || exit 1
 previous_manifest=""
 if [[ "$prev_sha" =~ ^[0-9a-f]{40}$ ]]; then
   ensure_previous_image_manifest "$prev_sha" || exit 1
@@ -687,15 +715,22 @@ validate_changed_services_cover_image_inputs \
   "$previous_manifest" "$new_sha" || exit 1
 build_candidate_image_manifest "$previous_manifest" "$candidate_manifest"
 
-if start_release \
-  "$new_sha" "$env_bundle" "$candidate_manifest" true "$prev_sha"; then
-  copy_bundle "$env_bundle" "$release_root/$new_sha/env"
+finalize_release() {
+  copy_bundle "$env_bundle" "$release_root/$new_sha/env" || return 1
+  if ! "$legacy_images"; then
+    install -m 600 "$stage_dir/candidate.json" "$release_root/$new_sha/images.json.tmp" || return 1
+    mv -f "$release_root/$new_sha/images.json.tmp" "$release_root/$new_sha/images.json" || return 1
+  fi
   install -m 600 "$candidate_manifest" \
-    "$release_root/$new_sha/images.env.tmp"
+    "$release_root/$new_sha/images.env.tmp" || return 1
   mv -f "$release_root/$new_sha/images.env.tmp" \
-    "$release_root/$new_sha/images.env"
-  printf '%s\n' "$new_sha" >.deployed_sha.tmp
-  mv -f .deployed_sha.tmp .deployed_sha
+    "$release_root/$new_sha/images.env" || return 1
+  printf '%s\n' "$new_sha" >.deployed_sha.tmp || return 1
+  mv -f .deployed_sha.tmp .deployed_sha || return 1
+}
+
+if start_release \
+  "$new_sha" "$env_bundle" "$candidate_manifest" true "$prev_sha" && finalize_release; then
   find "$release_root" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' |
     sort -nr | tail -n +3 | cut -d' ' -f2- |
     while IFS= read -r old_release; do
