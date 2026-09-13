@@ -57,6 +57,12 @@ type Health struct {
 	AdditionalProperties map[string]interface{}  `json:"-"`
 }
 
+// PutApiAppSettingsJSONBody defines parameters for PutApiAppSettings.
+type PutApiAppSettingsJSONBody map[string]interface{}
+
+// PostApiAppSettingsRevealJSONBody defines parameters for PostApiAppSettingsReveal.
+type PostApiAppSettingsRevealJSONBody map[string]interface{}
+
 // PostApiAuthLoginJSONBody defines parameters for PostApiAuthLogin.
 type PostApiAuthLoginJSONBody map[string]interface{}
 
@@ -128,6 +134,12 @@ type PutApiTradingSeedsIdJSONBody map[string]interface{}
 
 // PutApiTradingTotpSecretsIdJSONBody defines parameters for PutApiTradingTotpSecretsId.
 type PutApiTradingTotpSecretsIdJSONBody map[string]interface{}
+
+// PutApiAppSettingsJSONRequestBody defines body for PutApiAppSettings for application/json ContentType.
+type PutApiAppSettingsJSONRequestBody PutApiAppSettingsJSONBody
+
+// PostApiAppSettingsRevealJSONRequestBody defines body for PostApiAppSettingsReveal for application/json ContentType.
+type PostApiAppSettingsRevealJSONRequestBody PostApiAppSettingsRevealJSONBody
 
 // PostApiAuthLoginJSONRequestBody defines body for PostApiAuthLogin for application/json ContentType.
 type PostApiAuthLoginJSONRequestBody PostApiAuthLoginJSONBody
@@ -774,6 +786,39 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 // The interface specification for the client above.
 type ClientInterface interface {
 
+	// GetApiAppSettings GET /api/app-settings
+	//
+	// Corresponds with GET /api/app-settings (the `GetApiAppSettings` operationId).
+	GetApiAppSettings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutApiAppSettingsWithBody PUT /api/app-settings
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/app-settings (the `PutApiAppSettings` operationId).
+	PutApiAppSettingsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutApiAppSettings PUT /api/app-settings
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/app-settings (the `PutApiAppSettings` operationId).
+	PutApiAppSettings(ctx context.Context, body PutApiAppSettingsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostApiAppSettingsRevealWithBody POST /api/app-settings/reveal
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/app-settings/reveal (the `PostApiAppSettingsReveal` operationId).
+	PostApiAppSettingsRevealWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostApiAppSettingsReveal POST /api/app-settings/reveal
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/app-settings/reveal (the `PostApiAppSettingsReveal` operationId).
+	PostApiAppSettingsReveal(ctx context.Context, body PostApiAppSettingsRevealJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// PostApiAuthLoginWithBody POST /api/auth/login
 	//
 	// Takes any type of body and a specified content type.
@@ -1289,6 +1334,89 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /health (the `GetHealth` operationId).
 	GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+// GetApiAppSettings GET /api/app-settings
+//
+// Corresponds with GET /api/app-settings (the `GetApiAppSettings` operationId).
+func (c *Client) GetApiAppSettings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetApiAppSettingsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PutApiAppSettingsWithBody PUT /api/app-settings
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/app-settings (the `PutApiAppSettings` operationId).
+func (c *Client) PutApiAppSettingsWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutApiAppSettingsRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PutApiAppSettings PUT /api/app-settings
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/app-settings (the `PutApiAppSettings` operationId).
+func (c *Client) PutApiAppSettings(ctx context.Context, body PutApiAppSettingsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutApiAppSettingsRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostApiAppSettingsRevealWithBody POST /api/app-settings/reveal
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/app-settings/reveal (the `PostApiAppSettingsReveal` operationId).
+func (c *Client) PostApiAppSettingsRevealWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostApiAppSettingsRevealRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostApiAppSettingsReveal POST /api/app-settings/reveal
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/app-settings/reveal (the `PostApiAppSettingsReveal` operationId).
+func (c *Client) PostApiAppSettingsReveal(ctx context.Context, body PostApiAppSettingsRevealJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostApiAppSettingsRevealRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 // PostApiAuthLoginWithBody POST /api/auth/login
@@ -2645,6 +2773,113 @@ func (c *Client) GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewGetApiAppSettingsRequest constructs an http.Request for the GetApiAppSettings method
+func NewGetApiAppSettingsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/app-settings")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPutApiAppSettingsRequest calls the generic PutApiAppSettings builder with application/json body
+func NewPutApiAppSettingsRequest(server string, body PutApiAppSettingsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPutApiAppSettingsRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPutApiAppSettingsRequestWithBody constructs an http.Request for the PutApiAppSettings method, with any body, and a specified content type
+func NewPutApiAppSettingsRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/app-settings")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewPostApiAppSettingsRevealRequest calls the generic PostApiAppSettingsReveal builder with application/json body
+func NewPostApiAppSettingsRevealRequest(server string, body PostApiAppSettingsRevealJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostApiAppSettingsRevealRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPostApiAppSettingsRevealRequestWithBody constructs an http.Request for the PostApiAppSettingsReveal method, with any body, and a specified content type
+func NewPostApiAppSettingsRevealRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/app-settings/reveal")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
 }
 
 // NewPostApiAuthLoginRequest calls the generic PostApiAuthLogin builder with application/json body
@@ -4882,6 +5117,41 @@ func WithBaseURL(baseURL string) ClientOption {
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
 
+	// GetApiAppSettingsWithResponse GET /api/app-settings
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/app-settings (the `GetApiAppSettings` operationId).
+	GetApiAppSettingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetApiAppSettingsResponse, error)
+
+	// PutApiAppSettingsWithBodyWithResponse PUT /api/app-settings
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/app-settings (the `PutApiAppSettings` operationId).
+	PutApiAppSettingsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutApiAppSettingsResponse, error)
+
+	// PutApiAppSettingsWithResponse PUT /api/app-settings
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/app-settings (the `PutApiAppSettings` operationId).
+	PutApiAppSettingsWithResponse(ctx context.Context, body PutApiAppSettingsJSONRequestBody, reqEditors ...RequestEditorFn) (*PutApiAppSettingsResponse, error)
+
+	// PostApiAppSettingsRevealWithBodyWithResponse POST /api/app-settings/reveal
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/app-settings/reveal (the `PostApiAppSettingsReveal` operationId).
+	PostApiAppSettingsRevealWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostApiAppSettingsRevealResponse, error)
+
+	// PostApiAppSettingsRevealWithResponse POST /api/app-settings/reveal
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/app-settings/reveal (the `PostApiAppSettingsReveal` operationId).
+	PostApiAppSettingsRevealWithResponse(ctx context.Context, body PostApiAppSettingsRevealJSONRequestBody, reqEditors ...RequestEditorFn) (*PostApiAppSettingsRevealResponse, error)
+
 	// PostApiAuthLoginWithBodyWithResponse POST /api/auth/login
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
@@ -5469,6 +5739,150 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /health (the `GetHealth` operationId).
 	GetHealthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHealthResponse, error)
+}
+
+type GetApiAppSettingsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *map[string]interface{}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetApiAppSettingsResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetApiAppSettingsResponse) GetJSONDefault() *map[string]interface{} {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetApiAppSettingsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetApiAppSettingsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetApiAppSettingsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetApiAppSettingsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PutApiAppSettingsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *map[string]interface{}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PutApiAppSettingsResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PutApiAppSettingsResponse) GetJSONDefault() *map[string]interface{} {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PutApiAppSettingsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PutApiAppSettingsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutApiAppSettingsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PutApiAppSettingsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PostApiAppSettingsRevealResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *map[string]interface{}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PostApiAppSettingsRevealResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PostApiAppSettingsRevealResponse) GetJSONDefault() *map[string]interface{} {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PostApiAppSettingsRevealResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PostApiAppSettingsRevealResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostApiAppSettingsRevealResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PostApiAppSettingsRevealResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
 }
 
 type PostApiAuthLoginResponse struct {
@@ -8358,6 +8772,71 @@ func (r GetHealthResponse) ContentType() string {
 	return ""
 }
 
+// GetApiAppSettingsWithResponse GET /api/app-settings
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/app-settings (the `GetApiAppSettings` operationId).
+func (c *ClientWithResponses) GetApiAppSettingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetApiAppSettingsResponse, error) {
+	rsp, err := c.GetApiAppSettings(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetApiAppSettingsResponse(rsp)
+}
+
+// PutApiAppSettingsWithBodyWithResponse PUT /api/app-settings
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/app-settings (the `PutApiAppSettings` operationId).
+func (c *ClientWithResponses) PutApiAppSettingsWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutApiAppSettingsResponse, error) {
+	rsp, err := c.PutApiAppSettingsWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutApiAppSettingsResponse(rsp)
+}
+
+// PutApiAppSettingsWithResponse PUT /api/app-settings
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/app-settings (the `PutApiAppSettings` operationId).
+func (c *ClientWithResponses) PutApiAppSettingsWithResponse(ctx context.Context, body PutApiAppSettingsJSONRequestBody, reqEditors ...RequestEditorFn) (*PutApiAppSettingsResponse, error) {
+	rsp, err := c.PutApiAppSettings(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutApiAppSettingsResponse(rsp)
+}
+
+// PostApiAppSettingsRevealWithBodyWithResponse POST /api/app-settings/reveal
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/app-settings/reveal (the `PostApiAppSettingsReveal` operationId).
+func (c *ClientWithResponses) PostApiAppSettingsRevealWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostApiAppSettingsRevealResponse, error) {
+	rsp, err := c.PostApiAppSettingsRevealWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostApiAppSettingsRevealResponse(rsp)
+}
+
+// PostApiAppSettingsRevealWithResponse POST /api/app-settings/reveal
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/app-settings/reveal (the `PostApiAppSettingsReveal` operationId).
+func (c *ClientWithResponses) PostApiAppSettingsRevealWithResponse(ctx context.Context, body PostApiAppSettingsRevealJSONRequestBody, reqEditors ...RequestEditorFn) (*PostApiAppSettingsRevealResponse, error) {
+	rsp, err := c.PostApiAppSettingsReveal(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostApiAppSettingsRevealResponse(rsp)
+}
+
 // PostApiAuthLoginWithBodyWithResponse POST /api/auth/login
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
@@ -9448,6 +9927,114 @@ func (c *ClientWithResponses) GetHealthWithResponse(ctx context.Context, reqEdit
 		return nil, err
 	}
 	return ParseGetHealthResponse(rsp)
+}
+
+// ParseGetApiAppSettingsResponse parses an HTTP response from a GetApiAppSettingsWithResponse call
+func ParseGetApiAppSettingsResponse(rsp *http.Response) (*GetApiAppSettingsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetApiAppSettingsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	case true:
+		// Content-type (text/plain) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParsePutApiAppSettingsResponse parses an HTTP response from a PutApiAppSettingsWithResponse call
+func ParsePutApiAppSettingsResponse(rsp *http.Response) (*PutApiAppSettingsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutApiAppSettingsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	case true:
+		// Content-type (text/plain) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParsePostApiAppSettingsRevealResponse parses an HTTP response from a PostApiAppSettingsRevealWithResponse call
+func ParsePostApiAppSettingsRevealResponse(rsp *http.Response) (*PostApiAppSettingsRevealResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostApiAppSettingsRevealResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	case true:
+		// Content-type (text/plain) unsupported
+
+	}
+
+	return response, nil
 }
 
 // ParsePostApiAuthLoginResponse parses an HTTP response from a PostApiAuthLoginWithResponse call

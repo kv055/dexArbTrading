@@ -260,7 +260,7 @@ services:
       - BISQ2_REST_HOST=bisq2:8090
       - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
       - PRICE_PROVIDER=bisq_tor
-      - SNAPSHOT_INTERVAL_MIN=1
+      - SNAPSHOT_INTERVAL_MIN=${SNAPSHOT_INTERVAL_MIN:-1}
       # Failed source fetches retain their last confirmed offers for this grace;
       # a successful snapshot still removes absent offers immediately.
       - LIVE_OFFER_STALE_GRACE=5m
@@ -343,7 +343,7 @@ services:
       - ./dexMonitor/.env
     environment:
       - DATABASE_URL=postgres://dex_monitor:${POSTGRES_MONITOR_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
-      - SNAPSHOT_INTERVAL_MIN=1
+      - SNAPSHOT_INTERVAL_MIN=${SNAPSHOT_INTERVAL_MIN:-1}
       - FRONTEND_DIR=/app/react-frontend/dist
       - MM_CONTROLLER_API_URL=http://mm-controller:5001
       # Must match mm-controller's INTERNAL_API_SECRET: every proxied
@@ -380,6 +380,11 @@ services:
       # data-directory archive for recovery in a local Bisq GUI.
       - bisq-data:/bisq-data:ro
     # - lnd-data:/lnd:ro  # read-only access to macaroon + tls cert
+    # Optional: mount the ROOT .env read-write so the Settings page
+    # (PUT /api/app-settings) can persist user-facing variables. Pair with
+    # SETTINGS_ENV_FILE=/settings/root.env in the root .env. Without it the
+    # page is read-only.
+    # - ./.env:/settings/root.env:rw
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s
@@ -493,6 +498,9 @@ services:
       - BISQ2_VERSION=2.1.11
       - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
       - MM_CEX_CAPABILITY_MAX_AGE=${MM_CEX_CAPABILITY_MAX_AGE:-30m}
+      # Alert after a Bisq buyer's fiat-sent signal remains unmatched this long.
+      # 0 disables; never auto-confirms fiat receipt or releases BTC.
+      - BISQ_FIAT_ESCALATION_AFTER=${BISQ_FIAT_ESCALATION_AFTER:-2h}
       # RoboSats coordinators are Tor onion services; reach them through the
       # tor sidecar's SOCKS port on the bridge network (tor:9050).
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
@@ -502,6 +510,9 @@ services:
       # reachable and the MacroDroid phone heartbeat is fresh.
       - FIAT_CONTROLLER_URL=${FIAT_CONTROLLER_URL:-http://fiat-controller:8080}
       - FIAT_CONTROLLER_HEARTBEAT_SECRET=${PUSHPUSH_NOTIFY_SECRET:-}
+      # Shared bearer secret for the fiat-controller BTC-release webhook. The
+      # sender side is PUSHPUSH_DEX_RELEASE_TOKEN; empty disables the webhook (503).
+      - DEX_RELEASE_WEBHOOK_TOKEN=${PUSHPUSH_DEX_RELEASE_TOKEN:-}
       # Registered as secret_token on setWebhook; inbound /telegram-webhook
       # posts are rejected unless they echo it back (fail-closed when unset).
       - TELEGRAM_WEBHOOK_SECRET=${TELEGRAM_WEBHOOK_SECRET:-}

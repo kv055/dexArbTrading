@@ -180,7 +180,7 @@ jobs:
       test_modules: ${{ steps.detect.outputs.test_modules }}
       test_modules_json: ${{ steps.detect.outputs.test_modules_json }}
       run_frontend: ${{ steps.detect.outputs.run_frontend }}
-      build_matrix_json: ${{ steps.detect.outputs.build_matrix_json }}
+      build_services_json: ${{ steps.detect.outputs.build_services_json }}
       deploy_main: ${{ steps.deploy.outputs.main }}
     steps:
       - uses: actions/checkout@v5
@@ -489,6 +489,9 @@ jobs:
       fail-fast: false
       # Gitea act does not fan out fromJson(needs.*.outputs) matrices — keep a
       # static list and skip unchanged services per job.
+      # NOTE: keep service/context/dockerfile in sync with
+      # scripts/image-service-inputs.sh (GitHub CI resolves them at runtime
+      # via image_service_build to avoid passing paths through job outputs).
       matrix:
         include:
           - service: tor

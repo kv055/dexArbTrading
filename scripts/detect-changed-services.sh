@@ -46,22 +46,16 @@ comma_to_json_array() {
   echo "$json"
 }
 
-build_matrix_json_for() {
-  local csv="${1:-}"
-  [ -n "$csv" ] || { echo '[]'; return; }
-  local service context dockerfile
-  for service in ${csv//,/ }; do
-    read -r context dockerfile < <(image_service_build "$service")
-    jq -n --arg service "$service" --arg context "$context" --arg dockerfile "$dockerfile" \
-      '{service:$service, context:$context, dockerfile:$dockerfile}'
-  done | jq -s .
-}
-
 write_outputs() {
   local changes="$1" test_modules="$2" run_frontend="$3"
-  local test_modules_json build_matrix_json
+  local test_modules_json build_services_json
   test_modules_json=$(comma_to_json_array "$test_modules")
-  build_matrix_json=$(build_matrix_json_for "$changes")
+  # Service names only (no context/dockerfile paths): paths such as
+  # deploy/bitcoind-rpc-proxy can match a secret substring (e.g. a generic
+  # SSH user value) and GitHub then drops the whole output with
+  # "Skip output ... since it may contain secret". Build jobs resolve
+  # context/dockerfile at runtime via image_service_build.
+  build_services_json=$(comma_to_json_array "$changes")
   echo "changes=${changes:-}" >>"$GITHUB_OUTPUT"
   echo "test_modules=${test_modules:-}" >>"$GITHUB_OUTPUT"
   echo "run_frontend=${run_frontend}" >>"$GITHUB_OUTPUT"
@@ -69,14 +63,14 @@ write_outputs() {
     echo 'test_modules_json<<EOF'
     echo "$test_modules_json"
     echo 'EOF'
-    echo 'build_matrix_json<<EOF'
-    echo "$build_matrix_json"
+    echo 'build_services_json<<EOF'
+    echo "$build_services_json"
     echo 'EOF'
   } >>"$GITHUB_OUTPUT"
   echo "services to build: ${changes:-<none>}"
   echo "test modules: ${test_modules:-<none>}"
   echo "run frontend: ${run_frontend}"
-  echo "build matrix: ${build_matrix_json}"
+  echo "build services: ${build_services_json}"
 }
 
 emit_all() {
