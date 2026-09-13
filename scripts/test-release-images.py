@@ -329,6 +329,55 @@ class DetectionTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('changes=bisq2\n', output)
 
+    def _services_block(self, output):
+        marker = 'build_services_json<<EOF\n'
+        start = output.index(marker) + len(marker)
+        end = output.index('\nEOF', start)
+        return json.loads(output[start:end])
+
+    def test_build_services_json_has_names_not_paths(self):
+        self.change('dexMonitor/internal/server.go', 'failed deployment')
+        failed = self.commit()
+        self.change('dexUnifiedApi/cmd/server/main.go', 'next push')
+        target = self.commit()
+        result, output = self.detect(failed, target)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('build_matrix_json', output)
+        services = self._services_block(output)
+        self.assertIsInstance(services, list)
+        self.assertTrue(services)
+        for name in services:
+            self.assertNotIn('/', name)
+        changes = next(line for line in output.splitlines() if line.startswith('changes='))
+        self.assertEqual(set(services), set(changes.removeprefix('changes=').split(',')))
+
+    def test_bitcoind_service_name_is_secret_safe(self):
+        # Regression test: the bitcoind-rpc-proxy build context is
+        # deploy/bitcoind-rpc-proxy, which contains a common secret substring.
+        # The services output must carry the bare name only so GitHub never
+        # drops it with "Skip output ... since it may contain secret".
+        self.change('deploy/bitcoind-rpc-proxy/Dockerfile', 'proxy old')
+        self.git('add', 'scripts', 'dexUnifiedApi', 'dexMonitor', 'deploy/bitcoind-rpc-proxy/Dockerfile')
+        self.git('commit', '-qm', 'fixture proxy')
+        base = self.git('rev-parse', 'HEAD')
+        data = images.read(self.baseline)
+        data['release'] = base
+        for service in images.catalogue():
+            data['services'][service] = entry(service, base)
+        images.write(self.baseline, data)
+        self.change('deploy/bitcoind-rpc-proxy/Dockerfile', 'proxy new')
+        self.git('add', 'deploy/bitcoind-rpc-proxy/Dockerfile')
+        self.git('commit', '-qm', 'proxy change')
+        target = self.git('rev-parse', 'HEAD')
+        result, output = self.detect(base, target)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        changes = next(line for line in output.splitlines() if line.startswith('changes='))
+        self.assertIn('bitcoind-rpc-proxy', changes.removeprefix('changes=').split(','))
+        services = self._services_block(output)
+        self.assertIn('bitcoind-rpc-proxy', services)
+        block = output[output.index('build_services_json<<EOF'):output.index('\nEOF', output.index('build_services_json<<EOF'))]
+        self.assertNotIn('deploy/', block)
+
 
 if __name__ == "__main__":
     unittest.main()

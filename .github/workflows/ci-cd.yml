@@ -188,7 +188,7 @@ jobs:
       test_modules: ${{ steps.detect.outputs.test_modules }}
       test_modules_json: ${{ steps.detect.outputs.test_modules_json }}
       run_frontend: ${{ steps.detect.outputs.run_frontend }}
-      build_matrix_json: ${{ steps.detect.outputs.build_matrix_json }}
+      build_services_json: ${{ steps.detect.outputs.build_services_json }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -464,7 +464,9 @@ jobs:
       always() &&
       needs.detect-changes.result == 'success' &&
       needs.test-gate.result == 'success' &&
-      needs.detect-changes.outputs.changes != ''
+      needs.detect-changes.outputs.changes != '' &&
+      needs.detect-changes.outputs.build_services_json != '' &&
+      needs.detect-changes.outputs.build_services_json != '[]'
     # Runs on both push (build + push) and pull_request (build-only validation, see the
     # 'push:' flag below) so a bad image — e.g. an auto bisq bump — is caught before merge.
     runs-on: ubuntu-latest
@@ -473,7 +475,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJson(needs.detect-changes.outputs.build_matrix_json) }}
+        # Service names only (no context/dockerfile paths): paths such as
+        # deploy/bitcoind-rpc-proxy can match a secret substring and GitHub
+        # then drops the whole output ("Skip output ... since it may contain
+        # secret"). Context/dockerfile are resolved at runtime (see below).
+        service: ${{ fromJson(needs.detect-changes.outputs.build_services_json) }}
     steps:
       - name: Compute lowercase image owner
         id: owner
@@ -484,6 +490,16 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.GH_PAT }}
+
+      - name: Resolve build inputs
+        id: resolve
+        run: |
+          set -Eeuo pipefail
+          source scripts/image-service-inputs.sh
+          read -r CONTEXT DOCKERFILE < <(image_service_build "${{ matrix.service }}")
+          [[ -n "${DOCKERFILE:-}" ]] || { echo "unknown service ${{ matrix.service }}" >&2; exit 1; }
+          echo "context=${CONTEXT}" >> "$GITHUB_OUTPUT"
+          echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
 
       - name: Compute build metadata
         id: meta
@@ -502,8 +518,8 @@ jobs:
       - uses: docker/build-push-action@v7
         id: image
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
+          context: ${{ steps.resolve.outputs.context }}
+          file: ${{ steps.resolve.outputs.dockerfile }}
           # Frontend "deployed commit" header values; only the dexmonitor image
           # consumes them, the rest emit a harmless "unused build args" buildx warning.
           build-args: |
