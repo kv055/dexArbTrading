@@ -25,9 +25,18 @@ new_sha="${1:-}"
 }
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+: "${RELEASE_ARTIFACTS:?RELEASE_ARTIFACTS must contain baseline.json and receipts}"
+[[ -f "$RELEASE_ARTIFACTS/baseline.json" && -d "$RELEASE_ARTIFACTS/receipts" ]] || {
+  echo 'missing release artifacts' >&2; exit 1;
+}
 bundle="$(mktemp -d)"
+incoming=""
 cleanup() {
   rm -rf "$bundle"
+  if [[ -n "$incoming" ]]; then
+    ssh "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" \
+      "rm -rf -- $(printf '%q' "$incoming")" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 chmod 700 "$bundle"
@@ -74,20 +83,33 @@ SSH_OPTS=(
   -o ConnectTimeout=10
 )
 
-stage="$REPO_DIR/.deploy/staging/$new_sha"
+q_repo="$(printf '%q' "$REPO_DIR")"
 # shellcheck disable=SC2029
-ssh "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" \
-  "set -eu; case '$new_sha' in (*[!0-9a-f]*|'') exit 2;; esac; rm -rf '$stage'; mkdir -p '$stage'"
+incoming="$(ssh "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" \
+  "set -eu; umask 077; mkdir -p $q_repo/.deploy/incoming; mktemp -d $q_repo/.deploy/incoming/$new_sha.XXXXXXXX")"
+[[ "$incoming" == "$REPO_DIR/.deploy/incoming/$new_sha."* &&
+   "${incoming##*/}" =~ ^[0-9a-f]{40}\.[A-Za-z0-9]{8}$ ]] || {
+  incoming=''
+  echo 'invalid incoming directory returned by VPS' >&2; exit 1;
+}
 scp -q "${SSH_OPTS[@]}" -r "$bundle" \
-  "$SSH_USER@$SSH_HOST:$stage/env"
+  "$SSH_USER@$SSH_HOST:$incoming/env"
 scp -q "${SSH_OPTS[@]}" \
   "$repo_root/scripts/validate-env-contract.sh" \
+  "$repo_root/scripts/image-service-inputs.sh" \
+  "$repo_root/scripts/release-images.py" \
+  "$RELEASE_ARTIFACTS/baseline.json" \
   "$repo_root/deploy/transactional-deploy.sh" \
-  "$SSH_USER@$SSH_HOST:$stage/"
+  "$SSH_USER@$SSH_HOST:$incoming/"
+scp -q "${SSH_OPTS[@]}" -r "$RELEASE_ARTIFACTS/receipts" "$SSH_USER@$SSH_HOST:$incoming/"
+q_incoming="$(printf '%q' "$incoming")"
 # shellcheck disable=SC2029
 ssh "${SSH_OPTS[@]}" "$SSH_USER@$SSH_HOST" \
-  "chmod 700 '$stage' '$stage/transactional-deploy.sh' '$stage/validate-env-contract.sh'; \
-   find '$stage/env' -type d -exec chmod 700 {} +; \
-   find '$stage/env' -type f -exec chmod 600 {} +"
+  "set -eu; chmod 700 $q_incoming/transactional-deploy.sh $q_incoming/validate-env-contract.sh \
+     $q_incoming/image-service-inputs.sh; \
+   find $q_incoming/env -type d -exec chmod 700 {} +; \
+   find $q_incoming/env -type f -exec chmod 600 {} +; \
+   python3 $q_incoming/release-images.py publish-stage --repo $q_repo --incoming $q_incoming --sha $new_sha"
+incoming=""
 
 echo "Validated environment bundle staged for $new_sha"
