@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/nbd-wtf/go-nostr"
 )
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
@@ -76,11 +77,22 @@ func TestQueryCollectsEOSEAndMergesReplaceableEvents(t *testing.T) {
 	for _, event := range events {
 		byD[event.TagValue("d")] = event
 	}
-	if byD["order-1"].ID != "b" {
-		t.Fatalf("order-1 id = %q, want newer event b", byD["order-1"].ID)
+	if byD["order-1"].CreatedAt != 2 {
+		t.Fatalf("order-1 created_at = %d, want newer event", byD["order-1"].CreatedAt)
 	}
-	if byD["order-2"].ID != "c" {
-		t.Fatalf("order-2 id = %q, want c", byD["order-2"].ID)
+	if byD["order-2"].CreatedAt != 2 {
+		t.Fatalf("order-2 created_at = %d, want 2", byD["order-2"].CreatedAt)
+	}
+}
+
+func TestValidSignatureRejectsTampering(t *testing.T) {
+	e := signedTestEvent(t, Event{CreatedAt: 1, Kind: 38383, Tags: [][]string{{"d", "one"}}})
+	if !e.ValidSignature() {
+		t.Fatal("signed event should verify")
+	}
+	e.Tags[0][1] = "two"
+	if e.ValidSignature() {
+		t.Fatal("tampered event should not verify")
 	}
 }
 
@@ -110,9 +122,9 @@ func TestCensusCompleteRule(t *testing.T) {
 }
 
 func TestQueryCompleteWhenExtraRelayDialFails(t *testing.T) {
-	ok1 := nostrServer(t, []Event{{ID: "a", PubKey: "pub", CreatedAt: 1, Kind: 1}}, true)
+	ok1 := nostrServer(t, []Event{{ID: "a", PubKey: "pub", CreatedAt: 1, Kind: 1, Content: "one"}}, true)
 	defer ok1.Close()
-	ok2 := nostrServer(t, []Event{{ID: "b", PubKey: "pub", CreatedAt: 1, Kind: 1}}, true)
+	ok2 := nostrServer(t, []Event{{ID: "b", PubKey: "pub", CreatedAt: 1, Kind: 1, Content: "two"}}, true)
 	defer ok2.Close()
 
 	res, err := QueryWithStats(context.Background(), []string{wsURL(ok1), wsURL(ok2), "ws://127.0.0.1:1"}, map[string]any{
@@ -245,6 +257,7 @@ func nostrServer(t *testing.T, events []Event, sendEOSE bool) *httptest.Server {
 		var subID string
 		_ = json.Unmarshal(frame[1], &subID)
 		for _, event := range events {
+			event = signedTestEvent(t, event)
 			msg, _ := json.Marshal([]any{"EVENT", subID, event})
 			if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 				return
@@ -256,6 +269,21 @@ func nostrServer(t *testing.T, events []Event, sendEOSE bool) *httptest.Server {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}))
+}
+
+func signedTestEvent(t *testing.T, event Event) Event {
+	t.Helper()
+	const sk = "0000000000000000000000000000000000000000000000000000000000000001"
+	tags := make(nostr.Tags, len(event.Tags))
+	for i := range event.Tags {
+		tags[i] = nostr.Tag(event.Tags[i])
+	}
+	e := nostr.Event{CreatedAt: nostr.Timestamp(event.CreatedAt), Kind: event.Kind, Tags: tags, Content: event.Content}
+	if err := e.Sign(sk); err != nil {
+		t.Fatalf("sign event: %v", err)
+	}
+	event.ID, event.PubKey, event.Sig = e.ID, e.PubKey, e.Sig
+	return event
 }
 
 func wsURL(s *httptest.Server) string {
