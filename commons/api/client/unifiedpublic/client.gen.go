@@ -12,9 +12,28 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/oapi-codegen/runtime"
 )
+
+// Defines values for LiveOfferProtocolVersion.
+const (
+	N1 LiveOfferProtocolVersion = 1
+	N2 LiveOfferProtocolVersion = 2
+)
+
+// Valid indicates whether the value is a known member of the LiveOfferProtocolVersion enum.
+func (e LiveOfferProtocolVersion) Valid() bool {
+	switch e {
+	case N1:
+		return true
+	case N2:
+		return true
+	default:
+		return false
+	}
+}
 
 // LifecyclePoint defines model for LifecyclePoint.
 type LifecyclePoint struct {
@@ -24,13 +43,156 @@ type LifecyclePoint struct {
 }
 
 // LiveOffer Enriched live DEX offer returned by the unified routing book.
-type LiveOffer map[string]interface{}
+type LiveOffer struct {
+	// ProtocolVersion Absent when unknown; execution reads signed node capabilities.
+	ProtocolVersion      *LiveOfferProtocolVersion `json:"protocol_version,omitempty"`
+	SourceEventCreatedAt *time.Time                `json:"source_event_created_at,omitempty"`
+
+	// SourceEventId Signed quote identifier revalidated before taking an offer.
+	SourceEventId *string `json:"source_event_id,omitempty"`
+	VenueNodeName *string `json:"venue_node_name,omitempty"`
+
+	// VenueNodePubkey Nostr author of the Mostro order, scoped to its coordinator.
+	VenueNodePubkey      *string                `json:"venue_node_pubkey,omitempty"`
+	AdditionalProperties map[string]interface{} `json:"-"`
+}
+
+// LiveOfferProtocolVersion Absent when unknown; execution reads signed node capabilities.
+type LiveOfferProtocolVersion int
 
 // PutApiCexPermissionsProviderJSONBody defines parameters for PutApiCexPermissionsProvider.
 type PutApiCexPermissionsProviderJSONBody map[string]interface{}
 
 // PutApiCexPermissionsProviderJSONRequestBody defines body for PutApiCexPermissionsProvider for application/json ContentType.
 type PutApiCexPermissionsProviderJSONRequestBody PutApiCexPermissionsProviderJSONBody
+
+// Getter for additional properties for LiveOffer. Returns the specified
+// element and whether it was found
+func (a LiveOffer) Get(fieldName string) (value interface{}, found bool) {
+	if a.AdditionalProperties != nil {
+		value, found = a.AdditionalProperties[fieldName]
+	}
+	return
+}
+
+// Setter for additional properties for LiveOffer
+func (a *LiveOffer) Set(fieldName string, value interface{}) {
+	if a.AdditionalProperties == nil {
+		a.AdditionalProperties = make(map[string]interface{})
+	}
+	a.AdditionalProperties[fieldName] = value
+}
+
+// Override default JSON handling for LiveOffer to handle AdditionalProperties
+func (a *LiveOffer) UnmarshalJSON(b []byte) error {
+	object := make(map[string]json.RawMessage)
+	err := json.Unmarshal(b, &object)
+	if err != nil {
+		return err
+	}
+
+	if raw, found := object["protocol_version"]; found {
+		err = json.Unmarshal(raw, &a.ProtocolVersion)
+		if err != nil {
+			return fmt.Errorf("error reading 'protocol_version': %w", err)
+		}
+		delete(object, "protocol_version")
+	}
+
+	if raw, found := object["source_event_created_at"]; found {
+		err = json.Unmarshal(raw, &a.SourceEventCreatedAt)
+		if err != nil {
+			return fmt.Errorf("error reading 'source_event_created_at': %w", err)
+		}
+		delete(object, "source_event_created_at")
+	}
+
+	if raw, found := object["source_event_id"]; found {
+		err = json.Unmarshal(raw, &a.SourceEventId)
+		if err != nil {
+			return fmt.Errorf("error reading 'source_event_id': %w", err)
+		}
+		delete(object, "source_event_id")
+	}
+
+	if raw, found := object["venue_node_name"]; found {
+		err = json.Unmarshal(raw, &a.VenueNodeName)
+		if err != nil {
+			return fmt.Errorf("error reading 'venue_node_name': %w", err)
+		}
+		delete(object, "venue_node_name")
+	}
+
+	if raw, found := object["venue_node_pubkey"]; found {
+		err = json.Unmarshal(raw, &a.VenueNodePubkey)
+		if err != nil {
+			return fmt.Errorf("error reading 'venue_node_pubkey': %w", err)
+		}
+		delete(object, "venue_node_pubkey")
+	}
+
+	if len(object) != 0 {
+		a.AdditionalProperties = make(map[string]interface{})
+		for fieldName, fieldBuf := range object {
+			var fieldVal interface{}
+			err := json.Unmarshal(fieldBuf, &fieldVal)
+			if err != nil {
+				return fmt.Errorf("error unmarshaling field %s: %w", fieldName, err)
+			}
+			a.AdditionalProperties[fieldName] = fieldVal
+		}
+	}
+	return nil
+}
+
+// Override default JSON handling for LiveOffer to handle AdditionalProperties
+func (a LiveOffer) MarshalJSON() ([]byte, error) {
+	var err error
+	object := make(map[string]json.RawMessage)
+
+	if a.ProtocolVersion != nil {
+		object["protocol_version"], err = json.Marshal(a.ProtocolVersion)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'protocol_version': %w", err)
+		}
+	}
+
+	if a.SourceEventCreatedAt != nil {
+		object["source_event_created_at"], err = json.Marshal(a.SourceEventCreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'source_event_created_at': %w", err)
+		}
+	}
+
+	if a.SourceEventId != nil {
+		object["source_event_id"], err = json.Marshal(a.SourceEventId)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'source_event_id': %w", err)
+		}
+	}
+
+	if a.VenueNodeName != nil {
+		object["venue_node_name"], err = json.Marshal(a.VenueNodeName)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'venue_node_name': %w", err)
+		}
+	}
+
+	if a.VenueNodePubkey != nil {
+		object["venue_node_pubkey"], err = json.Marshal(a.VenueNodePubkey)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'venue_node_pubkey': %w", err)
+		}
+	}
+
+	for fieldName, field := range a.AdditionalProperties {
+		object[fieldName], err = json.Marshal(field)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling '%s': %w", fieldName, err)
+		}
+	}
+	return json.Marshal(object)
+}
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
