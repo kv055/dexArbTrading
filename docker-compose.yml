@@ -230,7 +230,11 @@ services:
       retries: 3
       # Generous start window so a slow start during a full-stack recreate on a
       # memory-constrained VPS isn't misread as unhealthy and cascaded to dependents.
-      start_period: 40s
+      # Must cover the full startup path: synchronous Tor-proxied mempool fetch,
+      # 30s live-book hydration and any newly added DB migrations all run before
+      # the listener binds (run #332: covering-index + backfill migrations blew
+      # the 40s window and cascaded a healthy release into rollback).
+      start_period: 300s
     deploy:
       resources:
         limits:
