@@ -215,6 +215,40 @@ func fetchRobosatsTakerFee() (float64, error) {
 	return 0, fmt.Errorf("all coordinators failed, last: %w", lastErr)
 }
 
+// WarmDexTakerFees refreshes the live DEX taker-fee sources (robosats via
+// Tor, mostro via Nostr relays) outside the request path. Static-fee DEXes
+// need no refresh; their configured values serve as cache fallbacks.
+// Intended for startup pre-warm and periodic background refresh: without it
+// the first request needing a robosats/mostro dex fee blocks on those
+// fetches (up to ~12s each) inside the per-offer pricing loop. feeTTL bounds
+// staleness, so a background tick at that cadence keeps values fresh.
+func (e *TradeCostEstimator) WarmDexTakerFees() {
+	if e == nil {
+		return
+	}
+	e.getDexFeeFrac("robosats")
+	e.getDexFeeFrac("mostro")
+}
+
+// RunDexTakerFeeRefreshLoop pre-warms the live DEX taker fees once, then
+// refreshes them at the fee-cache TTL cadence until ctx ends.
+func (e *TradeCostEstimator) RunDexTakerFeeRefreshLoop(ctx context.Context) {
+	if e == nil {
+		return
+	}
+	e.WarmDexTakerFees()
+	ticker := time.NewTicker(feeTTL)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			e.WarmDexTakerFees()
+		}
+	}
+}
+
 // fetchMostroTakerFee reads kind-38385 instance-info events and returns the
 // highest advertised fee (conservative when several Mostro nodes are live).
 func fetchMostroTakerFee() (float64, error) {

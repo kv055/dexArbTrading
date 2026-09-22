@@ -543,3 +543,13 @@ func TestCachedFeeSharesConcurrentRefresh(t *testing.T) {
 		t.Fatalf("refresh calls = %d, want 1", calls)
 	}
 }
+
+// TestWarmDexTakerFeesNilEstimator guards the startup pre-warm wiring: a nil
+// estimator must be a no-op, never a panic. Live-source fetch behavior itself
+// needs Tor/relays and is verified out of band (see the capped-pricing speed
+// probe), not in unit tests.
+func TestWarmDexTakerFeesNilEstimator(t *testing.T) {
+	var e *TradeCostEstimator
+	e.WarmDexTakerFees()
+	e.RunDexTakerFeeRefreshLoop(nil)
+}
