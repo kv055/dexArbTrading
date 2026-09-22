@@ -21,7 +21,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	binanceclient "commons/cexclient/binance"
@@ -61,83 +60,6 @@ func krakenSpotPOST(apiKey, apiSecret, operation, path string, body map[string]a
 }
 
 // ---------------------------------------------------------------------------
-// cachedFee — generic lazy-refresh cache for a single float64 fee value
-// (self-contained, mirroring txrouting's per-package cache pattern)
-// ---------------------------------------------------------------------------
-
-type cachedFee struct {
-	mu        sync.RWMutex
-	value     float64
-	fetchedAt time.Time
-	ttl       time.Duration
-	inflight  chan struct{}
-}
-
-func newCachedFee(ttl time.Duration) *cachedFee { return &cachedFee{ttl: ttl} }
-
-// get returns the cached value if fresh, else calls refresh and caches the result.
-// On refresh failure it keeps the last known value (or fallback if never fetched).
-func (c *cachedFee) get(fallback float64, refresh func() (float64, error), label string) float64 {
-	c.mu.RLock()
-	if !c.fetchedAt.IsZero() && time.Since(c.fetchedAt) < c.ttl {
-		v := c.value
-		c.mu.RUnlock()
-		return v
-	}
-	if c.inflight != nil {
-		ch := c.inflight
-		c.mu.RUnlock()
-		<-ch
-		c.mu.RLock()
-		v := c.value
-		c.mu.RUnlock()
-		return v
-	}
-	c.mu.RUnlock()
-
-	c.mu.Lock()
-	if !c.fetchedAt.IsZero() && time.Since(c.fetchedAt) < c.ttl {
-		v := c.value
-		c.mu.Unlock()
-		return v
-	}
-	if c.inflight != nil {
-		ch := c.inflight
-		c.mu.Unlock()
-		<-ch
-		c.mu.RLock()
-		v := c.value
-		c.mu.RUnlock()
-		return v
-	}
-	ch := make(chan struct{})
-	c.inflight = ch
-	c.mu.Unlock()
-
-	v, err := refresh()
-	c.mu.Lock()
-	if err == nil {
-		c.value = v
-		c.fetchedAt = time.Now()
-		fmt.Printf("[TradeCost] %s updated: %.8f (live)\n", label, v)
-	} else {
-		if c.fetchedAt.IsZero() {
-			c.value = fallback
-			fmt.Printf("[TradeCost] %s fetch failed (%v), using fallback %.8f\n", label, err, fallback)
-		} else {
-			fmt.Printf("[TradeCost] %s refresh failed (%v), keeping cached %.8f\n", label, err, c.value)
-		}
-		// Stamp fetchedAt even on failure so we don't retry every call for the TTL duration.
-		c.fetchedAt = time.Now()
-	}
-	result := c.value
-	close(ch)
-	c.inflight = nil
-	c.mu.Unlock()
-	return result
-}
-
-// ---------------------------------------------------------------------------
 // Withdrawal fee fetcher
 // ---------------------------------------------------------------------------
 
@@ -146,42 +68,12 @@ type withdrawalFeeFetcher struct {
 	apiKey    string
 	apiSecret string
 	provider  exchangecredentials.Provider
-	cache     *cachedFee
 }
 
 func newWithdrawalFeeFetcher(exchange string, provider exchangecredentials.Provider) *withdrawalFeeFetcher {
 	return &withdrawalFeeFetcher{
 		exchange: exchange,
 		provider: provider,
-		cache:    newCachedFee(feeTTL),
-	}
-}
-
-// get returns the CEX's on-chain BTC withdrawal fee. Every routing method withdraws
-// on-chain, so there is a single fee per exchange.
-func (f *withdrawalFeeFetcher) get() float64 {
-	if f.cache == nil {
-		return 0
-	}
-	label := fmt.Sprintf("%s onchain withdrawal fee BTC", f.exchange)
-	return f.cache.get(0, f.fetchLive, label)
-}
-
-func (f *withdrawalFeeFetcher) fetchLive() (float64, error) {
-	if err := f.refreshCredentials(); err != nil {
-		return 0, err
-	}
-	switch f.exchange {
-	case "kraken":
-		return f.fetchKraken()
-	case "binance":
-		return f.fetchBinance()
-	case "coinbase":
-		return 0, fmt.Errorf("coinbase withdrawal fee requires an address-specific estimate and is not available from these credentials")
-	case "bitstamp":
-		return f.fetchBitstamp()
-	default:
-		return 0, fmt.Errorf("unsupported exchange: %s", f.exchange)
 	}
 }
 
@@ -335,37 +227,12 @@ type takerFeeFetcher struct {
 	apiKey    string
 	apiSecret string
 	provider  exchangecredentials.Provider
-	cache     *cachedFee
 }
 
 func newTakerFeeFetcher(exchange string, provider exchangecredentials.Provider) *takerFeeFetcher {
 	return &takerFeeFetcher{
 		exchange: exchange,
 		provider: provider,
-		cache:    newCachedFee(feeTTL),
-	}
-}
-
-func (f *takerFeeFetcher) get() float64 {
-	label := f.exchange + " taker fee fraction"
-	return f.cache.get(0, f.fetchLive, label)
-}
-
-func (f *takerFeeFetcher) fetchLive() (float64, error) {
-	if err := f.refreshCredentials(); err != nil {
-		return 0, err
-	}
-	switch f.exchange {
-	case "kraken":
-		return f.fetchKraken()
-	case "binance":
-		return f.fetchBinance()
-	case "coinbase":
-		return 0, fmt.Errorf("coinbase taker fee requires Advanced Trade JWT credentials")
-	case "bitstamp":
-		return f.fetchBitstamp()
-	default:
-		return 0, fmt.Errorf("unsupported exchange: %s", f.exchange)
 	}
 }
 

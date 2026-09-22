@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -178,8 +179,12 @@ func newTorHTTPClient() (*http.Client, error) {
 		return nil, fmt.Errorf("tor proxy: %w", err)
 	}
 	return &http.Client{
-		Transport: &http.Transport{Dial: dialer.Dial},
-		Timeout:   15 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, network, addr string) (net.Conn, error) {
+				return dialer.Dial(network, addr)
+			},
+		},
+		Timeout: 15 * time.Second,
 	}, nil
 }
 
