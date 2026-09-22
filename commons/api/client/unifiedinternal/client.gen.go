@@ -24,6 +24,21 @@ type Health struct {
 // PostApiAccountsHealthCheckJSONBody defines parameters for PostApiAccountsHealthCheck.
 type PostApiAccountsHealthCheckJSONBody map[string]interface{}
 
+// PostInternalBisqRequoteJSONBody defines parameters for PostInternalBisqRequote.
+type PostInternalBisqRequoteJSONBody struct {
+	FiatCurrency        string `json:"fiat_currency"`
+	FundingFeeCapSats   int    `json:"funding_fee_cap_sats"`
+	MiningFeeSats       int    `json:"mining_fee_sats"`
+	OfferId             string `json:"offer_id"`
+	Provider            string `json:"provider"`
+	SecurityDepositSats int    `json:"security_deposit_sats"`
+	TakerFeeSats        int    `json:"taker_fee_sats"`
+	TotalToPaySats      int    `json:"total_to_pay_sats"`
+	TradeAmountSats     int    `json:"trade_amount_sats"`
+	TradeMode           string `json:"trade_mode"`
+	VolumeAsLong        int    `json:"volume_as_long"`
+}
+
 // PostInternalLiveOffersJSONBody defines parameters for PostInternalLiveOffers.
 type PostInternalLiveOffersJSONBody map[string]interface{}
 
@@ -32,6 +47,9 @@ type PostInternalPaymentNotificationsJSONBody map[string]interface{}
 
 // PostApiAccountsHealthCheckJSONRequestBody defines body for PostApiAccountsHealthCheck for application/json ContentType.
 type PostApiAccountsHealthCheckJSONRequestBody PostApiAccountsHealthCheckJSONBody
+
+// PostInternalBisqRequoteJSONRequestBody defines body for PostInternalBisqRequote for application/json ContentType.
+type PostInternalBisqRequoteJSONRequestBody PostInternalBisqRequoteJSONBody
 
 // PostInternalLiveOffersJSONRequestBody defines body for PostInternalLiveOffers for application/json ContentType.
 type PostInternalLiveOffersJSONRequestBody PostInternalLiveOffersJSONBody
@@ -213,6 +231,20 @@ type ClientInterface interface {
 	// Corresponds with GET /health (the `GetHealth` operationId).
 	GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// PostInternalBisqRequoteWithBody POST /internal/bisq/requote
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /internal/bisq/requote (the `PostInternalBisqRequote` operationId).
+	PostInternalBisqRequoteWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostInternalBisqRequote POST /internal/bisq/requote
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /internal/bisq/requote (the `PostInternalBisqRequote` operationId).
+	PostInternalBisqRequote(ctx context.Context, body PostInternalBisqRequoteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetInternalCexPermissions GET /internal/cex_permissions
 	//
 	// Corresponds with GET /internal/cex_permissions (the `GetInternalCexPermissions` operationId).
@@ -286,6 +318,40 @@ func (c *Client) PostApiAccountsHealthCheck(ctx context.Context, body PostApiAcc
 // Corresponds with GET /health (the `GetHealth` operationId).
 func (c *Client) GetHealth(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetHealthRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostInternalBisqRequoteWithBody POST /internal/bisq/requote
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /internal/bisq/requote (the `PostInternalBisqRequote` operationId).
+func (c *Client) PostInternalBisqRequoteWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostInternalBisqRequoteRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostInternalBisqRequote POST /internal/bisq/requote
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /internal/bisq/requote (the `PostInternalBisqRequote` operationId).
+func (c *Client) PostInternalBisqRequote(ctx context.Context, body PostInternalBisqRequoteJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostInternalBisqRequoteRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -442,6 +508,46 @@ func NewGetHealthRequest(server string) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewPostInternalBisqRequoteRequest calls the generic PostInternalBisqRequote builder with application/json body
+func NewPostInternalBisqRequoteRequest(server string, body PostInternalBisqRequoteJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostInternalBisqRequoteRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPostInternalBisqRequoteRequestWithBody constructs an http.Request for the PostInternalBisqRequote method, with any body, and a specified content type
+func NewPostInternalBisqRequoteRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/internal/bisq/requote")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -618,6 +724,20 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /health (the `GetHealth` operationId).
 	GetHealthWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetHealthResponse, error)
 
+	// PostInternalBisqRequoteWithBodyWithResponse POST /internal/bisq/requote
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/bisq/requote (the `PostInternalBisqRequote` operationId).
+	PostInternalBisqRequoteWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostInternalBisqRequoteResponse, error)
+
+	// PostInternalBisqRequoteWithResponse POST /internal/bisq/requote
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /internal/bisq/requote (the `PostInternalBisqRequote` operationId).
+	PostInternalBisqRequoteWithResponse(ctx context.Context, body PostInternalBisqRequoteJSONRequestBody, reqEditors ...RequestEditorFn) (*PostInternalBisqRequoteResponse, error)
+
 	// GetInternalCexPermissionsWithResponse GET /internal/cex_permissions
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -751,6 +871,54 @@ func (r GetHealthResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetHealthResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PostInternalBisqRequoteResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *map[string]interface{}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PostInternalBisqRequoteResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PostInternalBisqRequoteResponse) GetJSONDefault() *map[string]interface{} {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PostInternalBisqRequoteResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PostInternalBisqRequoteResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostInternalBisqRequoteResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PostInternalBisqRequoteResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -947,6 +1115,32 @@ func (c *ClientWithResponses) GetHealthWithResponse(ctx context.Context, reqEdit
 	return ParseGetHealthResponse(rsp)
 }
 
+// PostInternalBisqRequoteWithBodyWithResponse POST /internal/bisq/requote
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/bisq/requote (the `PostInternalBisqRequote` operationId).
+func (c *ClientWithResponses) PostInternalBisqRequoteWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostInternalBisqRequoteResponse, error) {
+	rsp, err := c.PostInternalBisqRequoteWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostInternalBisqRequoteResponse(rsp)
+}
+
+// PostInternalBisqRequoteWithResponse POST /internal/bisq/requote
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /internal/bisq/requote (the `PostInternalBisqRequote` operationId).
+func (c *ClientWithResponses) PostInternalBisqRequoteWithResponse(ctx context.Context, body PostInternalBisqRequoteJSONRequestBody, reqEditors ...RequestEditorFn) (*PostInternalBisqRequoteResponse, error) {
+	rsp, err := c.PostInternalBisqRequote(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostInternalBisqRequoteResponse(rsp)
+}
+
 // GetInternalCexPermissionsWithResponse GET /internal/cex_permissions
 //
 // Returns a wrapper object for the known response body format(s).
@@ -1075,6 +1269,48 @@ func ParseGetHealthResponse(rsp *http.Response) (*GetHealthResponse, error) {
 			return nil, err
 		}
 		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	case true:
+		// Content-type (text/plain) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParsePostInternalBisqRequoteResponse parses an HTTP response from a PostInternalBisqRequoteWithResponse call
+func ParsePostInternalBisqRequoteResponse(rsp *http.Response) (*PostInternalBisqRequoteResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostInternalBisqRequoteResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case rsp.StatusCode == 400:
+		break // No content-type
+
+	case rsp.StatusCode == 409:
+		break // No content-type
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest map[string]interface{}
