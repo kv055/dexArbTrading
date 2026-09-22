@@ -1,6 +1,7 @@
 package tradecost
 
 import (
+	"context"
 	"errors"
 	"math"
 	"reflect"
@@ -542,4 +543,35 @@ func TestCachedFeeSharesConcurrentRefresh(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("refresh calls = %d, want 1", calls)
 	}
+}
+
+func TestDexTakerFeeRefreshLoopWarmsCacheAndExits(t *testing.T) {
+	est := fixedCostEstimator("kraken", "bisq", 0.0025, 0.00015, 0.001, 0.00005)
+	est.SetFixedDexFeeForTesting("robosats", 0.00175)
+	est.SetFixedDexFeeForTesting("mostro", 0.003)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		est.RunDexTakerFeeRefreshLoop(ctx)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("refresh loop did not exit after context cancel")
+	}
+
+	// Seeded caches must survive the loop untouched and stay on the
+	// request path (no network fetch for a fresh cache entry).
+	assertFloat(t, est.DexFeeBTC(1, "robosats"), 0.00175)
+	assertFloat(t, est.DexFeeBTC(1, "mostro"), 0.003)
+}
+
+func TestDexTakerFeeRefreshLoopNilEstimator(t *testing.T) {
+	var est *TradeCostEstimator
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	est.RunDexTakerFeeRefreshLoop(ctx)
 }

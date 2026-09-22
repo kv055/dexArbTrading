@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -178,8 +179,12 @@ func newTorHTTPClient() (*http.Client, error) {
 		return nil, fmt.Errorf("tor proxy: %w", err)
 	}
 	return &http.Client{
-		Transport: &http.Transport{Dial: dialer.Dial},
-		Timeout:   15 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, network, addr string) (net.Conn, error) {
+				return dialer.Dial(network, addr)
+			},
+		},
+		Timeout: 15 * time.Second,
 	}, nil
 }
 
@@ -555,6 +560,37 @@ func (e *TradeCostEstimator) getDexFeeFrac(dexExchange string) float64 {
 	}
 
 	return cache.get(fallback, refresh, label)
+}
+
+// dexTakerFeeRefreshExchanges are the DEXes whose taker fee needs a slow live
+// fetch (robosats via Tor, mostro via Nostr relays). Warming them off the
+// request path keeps per-offer pricing on cache or static fallbacks.
+var dexTakerFeeRefreshExchanges = []string{"robosats", "mostro"}
+
+// RunDexTakerFeeRefreshLoop warms the slow DEX taker-fee caches once at boot
+// and refreshes them every half fee TTL until ctx ends, so request-path
+// pricing only ever reads cache or static fallbacks. Slow-fetch failures are
+// absorbed by the cache layer (last known or fallback value is kept).
+func (e *TradeCostEstimator) RunDexTakerFeeRefreshLoop(ctx context.Context) {
+	if e == nil {
+		return
+	}
+	refresh := func() {
+		for _, dexExchange := range dexTakerFeeRefreshExchanges {
+			e.getDexFeeFrac(dexExchange)
+		}
+	}
+	refresh()
+	ticker := time.NewTicker(feeTTL / 2)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refresh()
+		}
+	}
 }
 
 func (e *TradeCostEstimator) TakerFeeBTC(btcAmount float64) float64 {
