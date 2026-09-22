@@ -195,6 +195,7 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - LISTEN_ADDR=:5010
+      - MM_CONTROLLER_API_URL=http://mm-controller:5001
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       # The internal ingest endpoints fail CLOSED when INTERNAL_API_SECRET is
       # empty. Set ALLOW_INSECURE_INTERNAL=true to intentionally run them open
@@ -209,8 +210,6 @@ services:
       - MM_CEX_CAPABILITY_MAX_AGE=${MM_CEX_CAPABILITY_MAX_AGE:-30m}
       - COINBASE_WITHDRAW_RESERVE_FLOOR_SAT=${COINBASE_WITHDRAW_RESERVE_FLOOR_SAT:-10000}
       - COINBASE_WITHDRAW_RESERVE_MULTIPLIER=${COINBASE_WITHDRAW_RESERVE_MULTIPLIER:-2}
-      # Explicit opt-in for money-moving recovery, DEX relay, and hedgeless refill.
-      - ENABLE_AUTOMATED_TRADEFLOW_WORKERS=${ENABLE_AUTOMATED_TRADEFLOW_WORKERS:-false}
       # OpenTelemetry: traces -> Alloy -> Tempo; structured logs scraped from stdout.
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-alloy:4317}
       - OTEL_SERVICE_NAME=unified-api
@@ -465,6 +464,10 @@ services:
     environment:
       - DB_PATH=/app/mm-controller.db
       - API_ADDR=:5001
+      - ENABLE_AUTOMATED_TRADEFLOW_WORKERS=${ENABLE_AUTOMATED_TRADEFLOW_WORKERS:-false}
+      - ROBOSATS_ENABLED=${ROBOSATS_ENABLED:-false}
+      - ROBOSATS_COORDINATORS=${ROBOSATS_COORDINATORS:-}
+      - ROBOSATS_FEDERATION_URL=${ROBOSATS_FEDERATION_URL:-https://raw.githubusercontent.com/RoboSats/robosats/main/frontend/static/federation.json}
       # OpenTelemetry: traces -> Alloy -> Tempo; structured logs scraped from stdout.
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-alloy:4317}
       - OTEL_SERVICE_NAME=mm-controller

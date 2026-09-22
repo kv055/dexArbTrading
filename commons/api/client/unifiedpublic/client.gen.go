@@ -50,7 +50,10 @@ type LiveOffer struct {
 
 	// SourceEventId Signed quote identifier revalidated before taking an offer.
 	SourceEventId *string `json:"source_event_id,omitempty"`
-	VenueNodeName *string `json:"venue_node_name,omitempty"`
+
+	// VenueCoordinatorId Stable RoboSats federation coordinator alias bound to the native order id.
+	VenueCoordinatorId *string `json:"venue_coordinator_id,omitempty"`
+	VenueNodeName      *string `json:"venue_node_name,omitempty"`
 
 	// VenueNodePubkey Nostr author of the Mostro order, scoped to its coordinator.
 	VenueNodePubkey      *string                `json:"venue_node_pubkey,omitempty"`
@@ -63,8 +66,14 @@ type LiveOfferProtocolVersion int
 // PutApiCexPermissionsProviderJSONBody defines parameters for PutApiCexPermissionsProvider.
 type PutApiCexPermissionsProviderJSONBody map[string]interface{}
 
+// PostApiExecutionQuotesJSONBody defines parameters for PostApiExecutionQuotes.
+type PostApiExecutionQuotesJSONBody map[string]interface{}
+
 // PutApiCexPermissionsProviderJSONRequestBody defines body for PutApiCexPermissionsProvider for application/json ContentType.
 type PutApiCexPermissionsProviderJSONRequestBody PutApiCexPermissionsProviderJSONBody
+
+// PostApiExecutionQuotesJSONRequestBody defines body for PostApiExecutionQuotes for application/json ContentType.
+type PostApiExecutionQuotesJSONRequestBody PostApiExecutionQuotesJSONBody
 
 // Getter for additional properties for LiveOffer. Returns the specified
 // element and whether it was found
@@ -113,6 +122,14 @@ func (a *LiveOffer) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("error reading 'source_event_id': %w", err)
 		}
 		delete(object, "source_event_id")
+	}
+
+	if raw, found := object["venue_coordinator_id"]; found {
+		err = json.Unmarshal(raw, &a.VenueCoordinatorId)
+		if err != nil {
+			return fmt.Errorf("error reading 'venue_coordinator_id': %w", err)
+		}
+		delete(object, "venue_coordinator_id")
 	}
 
 	if raw, found := object["venue_node_name"]; found {
@@ -168,6 +185,13 @@ func (a LiveOffer) MarshalJSON() ([]byte, error) {
 		object["source_event_id"], err = json.Marshal(a.SourceEventId)
 		if err != nil {
 			return nil, fmt.Errorf("error marshaling 'source_event_id': %w", err)
+		}
+	}
+
+	if a.VenueCoordinatorId != nil {
+		object["venue_coordinator_id"], err = json.Marshal(a.VenueCoordinatorId)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling 'venue_coordinator_id': %w", err)
 		}
 	}
 
@@ -287,6 +311,20 @@ type ClientInterface interface {
 	// Corresponds with PUT /api/cex_permissions/{provider} (the `PutApiCexPermissionsProvider` operationId).
 	PutApiCexPermissionsProvider(ctx context.Context, provider string, body PutApiCexPermissionsProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// PostApiExecutionQuotesWithBody Create an authoritative execution quote for a custom trade size
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/execution-quotes (the `PostApiExecutionQuotes` operationId).
+	PostApiExecutionQuotesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostApiExecutionQuotes Create an authoritative execution quote for a custom trade size
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/execution-quotes (the `PostApiExecutionQuotes` operationId).
+	PostApiExecutionQuotes(ctx context.Context, body PostApiExecutionQuotesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetApiLiveOffers GET /api/live_offers
 	//
 	// Corresponds with GET /api/live_offers (the `GetApiLiveOffers` operationId).
@@ -354,6 +392,40 @@ func (c *Client) PutApiCexPermissionsProviderWithBody(ctx context.Context, provi
 // Corresponds with PUT /api/cex_permissions/{provider} (the `PutApiCexPermissionsProvider` operationId).
 func (c *Client) PutApiCexPermissionsProvider(ctx context.Context, provider string, body PutApiCexPermissionsProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPutApiCexPermissionsProviderRequest(c.Server, provider, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostApiExecutionQuotesWithBody Create an authoritative execution quote for a custom trade size
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/execution-quotes (the `PostApiExecutionQuotes` operationId).
+func (c *Client) PostApiExecutionQuotesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostApiExecutionQuotesRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PostApiExecutionQuotes Create an authoritative execution quote for a custom trade size
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/execution-quotes (the `PostApiExecutionQuotes` operationId).
+func (c *Client) PostApiExecutionQuotes(ctx context.Context, body PostApiExecutionQuotesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostApiExecutionQuotesRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -506,6 +578,46 @@ func NewPutApiCexPermissionsProviderRequestWithBody(server string, provider stri
 	}
 
 	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewPostApiExecutionQuotesRequest calls the generic PostApiExecutionQuotes builder with application/json body
+func NewPostApiExecutionQuotesRequest(server string, body PostApiExecutionQuotesJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostApiExecutionQuotesRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPostApiExecutionQuotesRequestWithBody constructs an http.Request for the PostApiExecutionQuotes method, with any body, and a specified content type
+func NewPostApiExecutionQuotesRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/execution-quotes")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
@@ -722,6 +834,20 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with PUT /api/cex_permissions/{provider} (the `PutApiCexPermissionsProvider` operationId).
 	PutApiCexPermissionsProviderWithResponse(ctx context.Context, provider string, body PutApiCexPermissionsProviderJSONRequestBody, reqEditors ...RequestEditorFn) (*PutApiCexPermissionsProviderResponse, error)
 
+	// PostApiExecutionQuotesWithBodyWithResponse Create an authoritative execution quote for a custom trade size
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/execution-quotes (the `PostApiExecutionQuotes` operationId).
+	PostApiExecutionQuotesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostApiExecutionQuotesResponse, error)
+
+	// PostApiExecutionQuotesWithResponse Create an authoritative execution quote for a custom trade size
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/execution-quotes (the `PostApiExecutionQuotes` operationId).
+	PostApiExecutionQuotesWithResponse(ctx context.Context, body PostApiExecutionQuotesJSONRequestBody, reqEditors ...RequestEditorFn) (*PostApiExecutionQuotesResponse, error)
+
 	// GetApiLiveOffersWithResponse GET /api/live_offers
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -850,6 +976,54 @@ func (r PutApiCexPermissionsProviderResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r PutApiCexPermissionsProviderResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PostApiExecutionQuotesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *map[string]interface{}
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *map[string]interface{}
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PostApiExecutionQuotesResponse) GetJSON200() *map[string]interface{} {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PostApiExecutionQuotesResponse) GetJSONDefault() *map[string]interface{} {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PostApiExecutionQuotesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PostApiExecutionQuotesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostApiExecutionQuotesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PostApiExecutionQuotesResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -1139,6 +1313,32 @@ func (c *ClientWithResponses) PutApiCexPermissionsProviderWithResponse(ctx conte
 	return ParsePutApiCexPermissionsProviderResponse(rsp)
 }
 
+// PostApiExecutionQuotesWithBodyWithResponse Create an authoritative execution quote for a custom trade size
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/execution-quotes (the `PostApiExecutionQuotes` operationId).
+func (c *ClientWithResponses) PostApiExecutionQuotesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostApiExecutionQuotesResponse, error) {
+	rsp, err := c.PostApiExecutionQuotesWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostApiExecutionQuotesResponse(rsp)
+}
+
+// PostApiExecutionQuotesWithResponse Create an authoritative execution quote for a custom trade size
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/execution-quotes (the `PostApiExecutionQuotes` operationId).
+func (c *ClientWithResponses) PostApiExecutionQuotesWithResponse(ctx context.Context, body PostApiExecutionQuotesJSONRequestBody, reqEditors ...RequestEditorFn) (*PostApiExecutionQuotesResponse, error) {
+	rsp, err := c.PostApiExecutionQuotes(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostApiExecutionQuotesResponse(rsp)
+}
+
 // GetApiLiveOffersWithResponse GET /api/live_offers
 //
 // Returns a wrapper object for the known response body format(s).
@@ -1251,6 +1451,42 @@ func ParsePutApiCexPermissionsProviderResponse(rsp *http.Response) (*PutApiCexPe
 	}
 
 	response := &PutApiCexPermissionsProviderResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	case true:
+		// Content-type (text/plain) unsupported
+
+	}
+
+	return response, nil
+}
+
+// ParsePostApiExecutionQuotesResponse parses an HTTP response from a PostApiExecutionQuotesWithResponse call
+func ParsePostApiExecutionQuotesResponse(rsp *http.Response) (*PostApiExecutionQuotesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostApiExecutionQuotesResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
