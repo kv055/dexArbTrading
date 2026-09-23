@@ -164,4 +164,3 @@ else
 fi
 
 echo "ALL BISQ PIN TESTS PASSED"
-...[truncated 911 chars]
