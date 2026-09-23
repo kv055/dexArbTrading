@@ -260,6 +260,7 @@ jobs:
       - run: |
           set -Eeuo pipefail
           bash scripts/test-image-service-inputs.sh
+          bash scripts/test-bisq-pins.sh
           python3 scripts/test-release-images.py
           bash deploy/test-transactional-deploy.sh
           DEPLOY_TEST_DIGEST=1 bash deploy/test-transactional-deploy.sh
@@ -319,7 +320,7 @@ jobs:
 
   bisq-patches-apply:
     # Fast guard (seconds, not the full image build): prove the bisq source
-    # patches still apply against the pinned BISQ_VERSION. Mirrors the job of
+    # patches still apply against the pinned BISQ_COMMIT. Mirrors the job of
     # the same name in .github/workflows/ci-cd.yml — without it, a patch that
     # no longer applies is only caught deep inside the from-source bisq build.
     name: Bisq patches apply cleanly
@@ -343,17 +344,25 @@ jobs:
       - name: Clone pinned bisq and apply patches
         run: |
           set -Eeuo pipefail
-          version=$(grep -m1 -oP '^ARG BISQ_VERSION=\K[0-9]+\.[0-9]+\.[0-9]+' dexUnifiedApi/Dockerfile.bisq)
-          echo "Checking patches against bisq v${version}"
+          # Fail closed on a missing/malformed pin or a floating-tag clone
+          # (Gitea run #348); verifies exactly what the image builds.
+          eval "$(bash "$GITHUB_WORKSPACE/scripts/bisq-pin-args.sh" \
+            "$GITHUB_WORKSPACE/dexUnifiedApi/Dockerfile.bisq")"
+          echo "Checking patches against bisq v${BISQ_VERSION} @ ${BISQ_COMMIT}"
           # bisq-network is NOT rewritten by the mirror insteadOf (kv055 only),
-          # so this clone goes to real github.com.
-          git clone --depth 1 --branch "v${version}" https://github.com/bisq-network/bisq.git /tmp/bisq
-          cd /tmp/bisq
+          # so this fetch goes to real github.com. Fetch the pinned commit —
+          # never the floating tag — so the check verifies exactly what the
+          # image builds (a tag re-cut must not slip past this job).
+          git init -q /tmp/bisq
+          git -C /tmp/bisq remote add origin https://github.com/bisq-network/bisq.git
+          git -C /tmp/bisq fetch --depth 1 origin "$BISQ_COMMIT"
+          git -C /tmp/bisq checkout -q --detach FETCH_HEAD
+          git -C /tmp/bisq submodule update --init --recursive --depth 1
           for p in "$GITHUB_WORKSPACE"/dexUnifiedApi/bisq-patches/*.patch; do
             echo "applying $(basename "$p")"
-            git apply --3way "$p"
+            git -C /tmp/bisq apply --3way "$p"
           done
-          echo "All patches apply cleanly against v${version}."
+          echo "All patches apply cleanly against v${BISQ_VERSION} @ ${BISQ_COMMIT}."
 
   openapi:
     name: OpenAPI source-of-truth check

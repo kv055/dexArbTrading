@@ -53,7 +53,7 @@ jobs:
           set -Eeuo pipefail
           if [ "$PATCHES_OK" = "true" ]; then
             title="bisq v${NEW} available — bump PR runs on GitHub"
-            body="Upstream Bisq **v${NEW}** is available and both patches in \`dexUnifiedApi/bisq-patches/\` apply cleanly against it. The automated bump PR is opened by the GitHub *Bisq version bump* workflow — review/merge it there. This issue is Gitea-side visibility only."
+            body="Upstream Bisq **v${NEW}** is available and all patches in \`dexUnifiedApi/bisq-patches/\` apply cleanly against it. The automated bump PR is opened by the GitHub *Bisq version bump* workflow — review/merge it there. This issue is Gitea-side visibility only."
           else
             title="bisq v${NEW}: bisq-patches need rebase"
             body="Upstream Bisq **v${NEW}** is available, but \`dexUnifiedApi/bisq-patches/${FAILED}\` no longer applies (\`git apply --3way\` fails). The automated bump is blocked until the patch is rebased against \`v${NEW}\` and committed to \`dexUnifiedApi/bisq-patches/\`. The bisq image build fails at the same point."
