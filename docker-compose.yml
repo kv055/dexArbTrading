@@ -384,9 +384,15 @@ services:
       - bisq-data:/bisq-data:ro
     # - lnd-data:/lnd:ro  # read-only access to macaroon + tls cert
     # Optional: mount the ROOT .env read-write so the Settings page
-    # (PUT /api/app-settings) can persist user-facing variables. Pair with
-    # SETTINGS_ENV_FILE=/settings/root.env in the root .env. Without it the
-    # page is read-only.
+    # (PUT /api/app-settings) can persist user-facing variables. Requires two
+    # changes: root .env values are only compose interpolation and are NOT
+    # auto-injected into the container, so the mount alone is not enough.
+    #   1. uncomment the volume below, and
+    #   2. add "- SETTINGS_ENV_FILE=/settings/root.env" to the environment
+    #      list above (or set it in dexMonitor/.env).
+    # Without both, the page stays read-only. Each save keeps a rotating
+    # .env.bak next to the file; recreate the listed services afterwards
+    # (`docker compose up -d <services>`) for changes to take effect.
     # - ./.env:/settings/root.env:rw
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
