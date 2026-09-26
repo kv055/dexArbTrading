@@ -82,6 +82,12 @@ fi
 if [[ "${1:-} ${2:-} ${3:-}" == 'compose ps -a' && "${4:-}" == -q ]]; then
   exit 0
 fi
+if [[ "${1:-} ${2:-} ${3:-}" == 'image inspect --format' ]]; then
+  # Unified API images declare migrate support; an empty value models an image
+  # built from sources that predate the command.
+  printf '%s\n' "${MOCK_MIGRATE_LABEL-1}"
+  exit 0
+fi
 if [[ "${1:-} ${2:-}" == 'image inspect' ]]; then
   python3 - "$3" <<'PY'
 import json, sys
@@ -96,6 +102,43 @@ printf 'code=%s dexmonitor=%s snapshot=%s fail=%s arg1=%s arg2=%s all=%s\n' \
   "${DEXMONITOR_IMAGE_TAG:-none}" \
   "${UNIFIED_SNAPSHOT_IMAGE_TAG:-none}" \
   "${MOCK_FAIL_SHA:-unset}" "${1:-}" "${2:-}" "$*" >>"${MOCK_LOG:?}"
+if [[ "${1:-} ${2:-}" == 'compose run' ]]; then
+  migrate_pattern='^compose run --rm --no-deps --name dexarb-migrate-[0-9a-f]{40} unified-api \./server migrate$'
+  [[ "$*" =~ $migrate_pattern ]] || {
+    echo "invalid migration invocation: $*" >&2
+    exit 2
+  }
+  marker="$(cat release-marker)"
+  if [[ "$marker" == "${MOCK_MIGRATE_HANG_MARKER:-never}" ]]; then
+    exec sleep 30
+  fi
+  if [[ "$marker" == "${MOCK_MIGRATE_FAIL_MARKER:-never}" ]]; then
+    if [[ "${MOCK_REQUIRE_ROLE_RESTORE:-false}" == true ]]; then
+      : >"$MOCK_LOG.roles-pending"
+    fi
+    echo 'simulated migration SQL failure' >&2
+    exit 1
+  fi
+fi
+if [[ "${1:-} ${2:-}" == 'compose up' ]]; then
+  if [[ " $* " == *' --force-recreate '* && "${!#}" == unified-api ]]; then
+    rm -f "$MOCK_LOG.roles-pending"
+  fi
+  if [[ " $* " == *' --remove-orphans '* && -f "$MOCK_LOG.roles-pending" ]]; then
+    echo 'stack unhealthy: previous database passwords have not been restored' >&2
+    exit 1
+  fi
+fi
+if [[ "${MOCK_DIAGNOSTICS:-false}" == true ]]; then
+  if [[ "${1:-} ${2:-} ${3:-} ${4:-}" == 'compose ps -a --format' ]]; then
+    printf 'unhealthy-app\trunning\tunhealthy\nstarting-app\trunning\tstarting\nstopped-app\texited\t\nhealthy-app\trunning\thealthy\n'
+    exit 0
+  fi
+  if [[ "${1:-}" == inspect ]]; then
+    printf 'state={"OOMKilled":false,"Health":{"Log":[{"ExitCode":1,"Output":"connection refused"}]}} restart_count=2\n'
+    exit 0
+  fi
+fi
 if [ "${1:-}" = compose ] && [ "${2:-}" = up ] &&
    [ "${DEXMONITOR_IMAGE_TAG:-}" = "${MOCK_FAIL_SHA:-never}" ]; then
   exit 1
@@ -209,22 +252,31 @@ grep -q "^UNIFIED_SNAPSHOT_IMAGE_TAG=$candidate_sha$" \
 grep -q "^UNIFIED_SNAPSHOT_IMAGE_TAG=$previous_sha$" \
   "$fake_repo/.deploy/releases/$previous_sha/images.env"
 
-# A service omitted after its last active image's build inputs changed must be
-# rejected before Compose can report a misleading healthy deployment.
+# Source detection belongs to CI. The VPS trusts its changed list and receipts
+# without requiring submodule objects to repeat the diff.
+printf 'omitted-monitor\n' >"$fake_repo/release-marker"
 printf 'stale monitor image\n' >"$fake_repo/dexMonitor/internal/build-input"
-git -C "$fake_repo" add dexMonitor/internal/build-input
+git -C "$fake_repo" add release-marker dexMonitor/internal/build-input
 git -C "$fake_repo" commit -qm "omit changed monitor"
 omitted_monitor_sha="$(git -C "$fake_repo" rev-parse HEAD)"
 stage="$(make_stage "$omitted_monitor_sha" omitted-monitor)"
-if "$deployer" "${deploy_options[@]}" \
+"$deployer" "${deploy_options[@]}" \
   --repo-dir "$fake_repo" \
   --sha "$omitted_monitor_sha" \
   --env-bundle "$stage/env" \
-  --changed-services ""; then
-  echo "expected stale omitted monitor image to be rejected" >&2
-  exit 1
-fi
+  --changed-services ""
+[[ "$(cat "$fake_repo/.deployed_sha")" == "$omitted_monitor_sha" ]]
+
+# The privileged migration step must run before app containers start.
+migrate_line="$(grep -n "code=omitted-monitor .* all=compose run --rm --no-deps --name dexarb-migrate-$omitted_monitor_sha unified-api ./server migrate" "$MOCK_LOG" | head -n1 | cut -d: -f1 || true)"
+up_line="$(grep -n "code=omitted-monitor .* all=compose up -d --remove-orphans" "$MOCK_LOG" | head -n1 | cut -d: -f1 || true)"
+[[ -n "$migrate_line" ]] || { echo "migrate step did not run" >&2; exit 1; }
+[[ -n "$up_line" ]] || { echo "app startup did not run" >&2; exit 1; }
+[[ "$migrate_line" -lt "$up_line" ]] || { echo "migrate step did not run before app startup" >&2; exit 1; }
+
+# Restore the chain the remaining cases assume (candidate as previous).
 git -C "$fake_repo" checkout -q --detach "$candidate_sha"
+printf '%s\n' "$candidate_sha" >"$fake_repo/.deployed_sha"
 
 printf 'frontend\n' >"$fake_repo/release-marker"
 git -C "$fake_repo" add release-marker
@@ -259,6 +311,126 @@ if grep -q "^code=frontend .* all=compose up -d --force-recreate" "$MOCK_LOG"; t
   echo "unchanged config services were force-recreated" >&2
   exit 1
 fi
+
+# Failed migrations abort before candidate app startup and preserve the active
+# release. Rollback must not run schema migrations. Diagnostics include probes
+# for unhealthy/starting containers and process state for stopped containers.
+printf 'migration-failure\n' >"$fake_repo/release-marker"
+git -C "$fake_repo" add release-marker
+git -C "$fake_repo" commit -qm 'migration failure'
+migration_failure_sha="$(git -C "$fake_repo" rev-parse HEAD)"
+stage="$(make_stage "$migration_failure_sha" migration-failure)"
+export MOCK_MIGRATE_FAIL_MARKER=migration-failure
+export MOCK_DIAGNOSTICS=true
+export MOCK_REQUIRE_ROLE_RESTORE=true
+prior_migrations="$(grep -c '^code=frontend .* all=compose run ' "$MOCK_LOG")"
+if "$deployer" "${deploy_options[@]}" \
+  --repo-dir "$fake_repo" --sha "$migration_failure_sha" \
+  --env-bundle "$stage/env" --changed-services "" >"$fixture/migration-failure.log" 2>&1; then
+  echo 'expected migration failure to abort deployment' >&2
+  exit 1
+fi
+unset MOCK_MIGRATE_FAIL_MARKER MOCK_DIAGNOSTICS MOCK_REQUIRE_ROLE_RESTORE
+[[ "$(cat "$fake_repo/.deployed_sha")" == "$frontend_sha" ]]
+[[ "$(git -C "$fake_repo" rev-parse HEAD)" == "$frontend_sha" ]]
+grep -q '^APP_ENCRYPTION_KEY=frontend-' "$fake_repo/.env"
+grep -q 'simulated migration SQL failure' "$fixture/migration-failure.log"
+grep -q 'connection refused' "$fixture/migration-failure.log"
+grep -q "rolled back code, environment, and images to $frontend_sha" "$fixture/migration-failure.log" || {
+  cat "$fixture/migration-failure.log" >&2
+  exit 1
+}
+[[ ! -f "$MOCK_LOG.roles-pending" ]]
+[[ "$(grep -c '^code=frontend .* all=compose run ' "$MOCK_LOG")" == "$prior_migrations" ]]
+if grep -q '^code=migration-failure .* all=compose up -d --remove-orphans' "$MOCK_LOG"; then
+  echo 'candidate apps started after migration failure' >&2
+  exit 1
+fi
+for container in unhealthy-app starting-app stopped-app; do
+  grep -q "arg1=inspect .* $container$" "$MOCK_LOG"
+done
+if grep -q 'arg1=inspect .* healthy-app$' "$MOCK_LOG"; then
+  echo 'healthy container incorrectly selected for failure diagnostics' >&2
+  exit 1
+fi
+[[ "$(grep -c "all=rm -f dexarb-migrate-$migration_failure_sha$" "$MOCK_LOG")" == 2 ]]
+# The failed migration already applied the candidate's role passwords, which
+# differ in this fixture. Compose kept the previous unified-api container, so
+# rollback must restart it to reapply the previous passwords.
+recreate_api='all=compose up -d --force-recreate --no-deps --wait --wait-timeout 600 --no-build unified-api$'
+grep -q "^code=frontend .* $recreate_api" "$MOCK_LOG"
+
+# Unchanged role passwords leave nothing to restore after a failed migration.
+printf 'migration-failure-same-roles\n' >"$fake_repo/release-marker"
+git -C "$fake_repo" add release-marker
+git -C "$fake_repo" commit -qm 'migration failure with unchanged roles'
+same_roles_sha="$(git -C "$fake_repo" rev-parse HEAD)"
+stage="$(make_stage "$same_roles_sha" migration-failure-same-roles)"
+roles_env="$stage/env/dexUnifiedApi/.env"
+{
+  grep -Ev '^POSTGRES_[A-Z0-9_]*PASSWORD=' "$roles_env"
+  grep -E '^POSTGRES_[A-Z0-9_]*PASSWORD=' \
+    "$fake_repo/.deploy/releases/$frontend_sha/env/dexUnifiedApi/.env"
+} >"$roles_env.tmp"
+mv "$roles_env.tmp" "$roles_env"
+prior_recreates="$(grep -c "$recreate_api" "$MOCK_LOG" || true)"
+export MOCK_MIGRATE_FAIL_MARKER=migration-failure-same-roles
+if "$deployer" "${deploy_options[@]}" \
+  --repo-dir "$fake_repo" --sha "$same_roles_sha" \
+  --env-bundle "$stage/env" --changed-services "" >/dev/null 2>&1; then
+  echo 'expected migration failure to abort deployment' >&2
+  exit 1
+fi
+unset MOCK_MIGRATE_FAIL_MARKER
+[[ "$(cat "$fake_repo/.deployed_sha")" == "$frontend_sha" ]]
+[[ "$(grep -c "$recreate_api" "$MOCK_LOG" || true)" == "$prior_recreates" ]]
+
+# A migration that outlives its limit aborts activation and removes its
+# one-off container, which the stopped Compose client may leave running.
+printf 'migration-timeout\n' >"$fake_repo/release-marker"
+git -C "$fake_repo" add release-marker
+git -C "$fake_repo" commit -qm 'migration timeout'
+migration_timeout_sha="$(git -C "$fake_repo" rev-parse HEAD)"
+stage="$(make_stage "$migration_timeout_sha" migration-timeout)"
+export MOCK_MIGRATE_HANG_MARKER=migration-timeout DEPLOY_MIGRATION_TIMEOUT_SEC=1
+if "$deployer" "${deploy_options[@]}" \
+  --repo-dir "$fake_repo" --sha "$migration_timeout_sha" \
+  --env-bundle "$stage/env" --changed-services "" >"$fixture/migration-timeout.log" 2>&1; then
+  echo 'expected migration timeout to abort deployment' >&2
+  exit 1
+fi
+unset MOCK_MIGRATE_HANG_MARKER DEPLOY_MIGRATION_TIMEOUT_SEC
+[[ "$(cat "$fake_repo/.deployed_sha")" == "$frontend_sha" ]]
+grep -q 'database migration exceeded 1s' "$fixture/migration-timeout.log"
+[[ "$(grep -c "all=rm -f dexarb-migrate-$migration_timeout_sha$" "$MOCK_LOG")" == 2 ]]
+if grep -q '^code=migration-timeout .* all=compose up -d --remove-orphans' "$MOCK_LOG"; then
+  echo 'candidate apps started after migration timeout' >&2
+  exit 1
+fi
+
+# An image without the migrate command is refused before it can start a second
+# API server. Nothing touched the roles, so rollback leaves unified-api alone.
+printf 'migration-unsupported\n' >"$fake_repo/release-marker"
+git -C "$fake_repo" add release-marker
+git -C "$fake_repo" commit -qm 'unified-api image without migrate'
+unsupported_sha="$(git -C "$fake_repo" rev-parse HEAD)"
+stage="$(make_stage "$unsupported_sha" migration-unsupported)"
+prior_recreates="$(grep -c "$recreate_api" "$MOCK_LOG" || true)"
+export MOCK_MIGRATE_LABEL=''
+if "$deployer" "${deploy_options[@]}" \
+  --repo-dir "$fake_repo" --sha "$unsupported_sha" \
+  --env-bundle "$stage/env" --changed-services "" >"$fixture/migration-unsupported.log" 2>&1; then
+  echo 'expected an image without the migrate command to be refused' >&2
+  exit 1
+fi
+unset MOCK_MIGRATE_LABEL
+[[ "$(cat "$fake_repo/.deployed_sha")" == "$frontend_sha" ]]
+grep -q 'does not provide the migrate command' "$fixture/migration-unsupported.log"
+if grep -q '^code=migration-unsupported .* all=compose run ' "$MOCK_LOG"; then
+  echo 'migrate ran on an image without the command' >&2
+  exit 1
+fi
+[[ "$(grep -c "$recreate_api" "$MOCK_LOG" || true)" == "$prior_recreates" ]]
 
 # Healthy containers must still roll back if the release manifest cannot commit.
 printf 'manifest-failure\n' >"$fake_repo/release-marker"

@@ -14,7 +14,10 @@ set -euo pipefail
 CHANGED_SERVICES="${CHANGED_SERVICES:-}"
 FETCH_ORIGIN="${FETCH_ORIGIN:-false}"
 POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-15}"
-POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-3600}"
+# Includes migration, candidate and rollback health waits, role restoration,
+# smoke probes and transfer overhead. Both CI activation steps allow 130m and
+# their deploy jobs allow 140m; test-ci-activate.sh checks these budgets agree.
+POLL_TIMEOUT_SEC="${POLL_TIMEOUT_SEC:-7200}"
 SSH_IDENTITY="${SSH_IDENTITY:-$HOME/.ssh/id_ed25519}"
 
 [[ "$REPO_DIR" == /* && "$REPO_DIR" != "/" ]] || {

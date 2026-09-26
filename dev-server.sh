@@ -34,6 +34,9 @@ compose_services=(
 # Vite runs over local HTTP, so its login cookie must not carry Secure.
 export SESSION_COOKIE_SECURE=false
 
+echo "dev-server: migrating the local database"
+bash "$ROOT/scripts/migrate-local-db.sh"
+
 echo "dev-server: starting backend services (detached)"
 docker compose --project-directory "$ROOT" -f "$ROOT/docker-compose.yml" up -d --build "${compose_services[@]}"
 

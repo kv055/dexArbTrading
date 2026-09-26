@@ -788,8 +788,8 @@ jobs:
       needs.detect-changes.outputs.deploy_main == 'true' &&
       needs.pre-deploy.result == 'success'
     runs-on: ubuntu-latest
-    # Leave enough time for a 30-minute cold-start health wait and rollback.
-    timeout-minutes: 75
+    # ci-activate polls for up to 120m, plus staging and cleanup headroom.
+    timeout-minutes: 140
     steps:
       - uses: actions/checkout@v5
         with:
@@ -871,7 +871,7 @@ jobs:
             git push --force "ssh://$SSH_USER@$SSH_HOST$REPO_DIR" "HEAD:refs/deploy/$NEW_SHA"
 
       - name: Activate staged release transactionally
-        timeout-minutes: 65
+        timeout-minutes: 130
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
           SSH_USER: ${{ secrets.VPS_SSH_USER }}

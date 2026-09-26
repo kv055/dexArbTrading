@@ -229,10 +229,9 @@ services:
       retries: 3
       # Generous start window so a slow start during a full-stack recreate on a
       # memory-constrained VPS isn't misread as unhealthy and cascaded to dependents.
-      # Must cover the full startup path: synchronous Tor-proxied mempool fetch,
-      # 30s live-book hydration and any newly added DB migrations all run before
-      # the listener binds (run #332: covering-index + backfill migrations blew
-      # the 40s window and cascaded a healthy release into rollback).
+      # Covers synchronous Tor-proxied mempool fetch and live-book hydration
+      # before the listener binds. Schema migration runs separately before
+      # candidate app activation.
       start_period: 300s
     deploy:
       resources:
@@ -723,9 +722,8 @@ services:
       # totp-api is disabled above.
       postgres:
         condition: service_healthy
-      # Unified API owns schema migrations and is the only application role
-      # allowed to create objects in public.  Do not let this service race its
-      # payment-event schema initialization on a freshly upgraded database.
+      # The migration command prepares the shared schema before app activation;
+      # Unified API checks migration history before reporting healthy.
       unified-api:
         condition: service_healthy
     healthcheck:

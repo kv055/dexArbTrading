@@ -17,7 +17,7 @@ STATICCHECK_VERSION := 2026.1
 DEADCODE_VERSION := v0.48.0
 
 .DEFAULT_GOAL := help
-.PHONY: help staging-up staging-wait staging-down staging-logs staging-rebuild staging-ps staging-env-check \
+.PHONY: help staging-up staging-wait staging-down staging-logs staging-rebuild staging-ps staging-env-check staging-migrate \
 	prune docker-reclaim sonar-up sonar-scan sonar-down sonar-reset compose-validate backend-tools backend-check \
 	api-install api-bundle api-lint api-route-check api-generate api-check api-contract-test
 
@@ -35,13 +35,16 @@ staging-env-check: ## Verify the decrypted .env files needed locally are present
 	fi; \
 	echo "✓ all required .env files present"
 
-staging-up: staging-env-check ## Build from source and start the full stack locally
+staging-migrate: staging-env-check ## Build the API and migrate the local database before app startup
+	@COMPOSE="$(COMPOSE)" bash scripts/migrate-local-db.sh
+
+staging-up: staging-migrate ## Build from source and start the full stack locally
 	$(COMPOSE) up -d --build
 
-staging-wait: staging-env-check ## Build, start, and block until every service is healthy
+staging-wait: staging-migrate ## Build, start, and block until every service is healthy
 	$(COMPOSE) up -d --build --wait --wait-timeout 600
 
-staging-rebuild: staging-env-check ## Force a clean rebuild + recreate of every service
+staging-rebuild: staging-migrate ## Force a clean rebuild + recreate of every service
 	$(COMPOSE) up -d --build --force-recreate
 
 staging-down: ## Stop and remove the local stack (keeps named volumes)
