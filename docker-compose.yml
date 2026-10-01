@@ -102,7 +102,7 @@ services:
       # arg the image silently builds at the Dockerfile's ARG default and the
       # env below drifts out of sync with what actually runs.
       args:
-        - BISQ_VERSION=1.10.7
+        - BISQ_VERSION=1.10.8
     depends_on:
       tor:
         condition: service_healthy
@@ -111,7 +111,7 @@ services:
       unified-api:
         condition: service_healthy
     environment:
-      - BISQ_VERSION=1.10.7
+      - BISQ_VERSION=1.10.8
       - BISQ_ACCOUNT_PROVIDER=Bisq
       - BISQ_ACCOUNT_FILE_PATH=${BISQ_ACCOUNT_FILE_PATH:-}
       - BISQ_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
@@ -195,6 +195,7 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - LISTEN_ADDR=:5010
+      - MM_CONTROLLER_API_URL=http://mm-controller:5001
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       # The internal ingest endpoints fail CLOSED when INTERNAL_API_SECRET is
       # empty. Set ALLOW_INSECURE_INTERNAL=true to intentionally run them open
@@ -209,8 +210,6 @@ services:
       - MM_CEX_CAPABILITY_MAX_AGE=${MM_CEX_CAPABILITY_MAX_AGE:-30m}
       - COINBASE_WITHDRAW_RESERVE_FLOOR_SAT=${COINBASE_WITHDRAW_RESERVE_FLOOR_SAT:-10000}
       - COINBASE_WITHDRAW_RESERVE_MULTIPLIER=${COINBASE_WITHDRAW_RESERVE_MULTIPLIER:-2}
-      # Explicit opt-in for money-moving recovery, DEX relay, and hedgeless refill.
-      - ENABLE_AUTOMATED_TRADEFLOW_WORKERS=${ENABLE_AUTOMATED_TRADEFLOW_WORKERS:-false}
       # OpenTelemetry: traces -> Alloy -> Tempo; structured logs scraped from stdout.
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-alloy:4317}
       - OTEL_SERVICE_NAME=unified-api
@@ -230,7 +229,10 @@ services:
       retries: 3
       # Generous start window so a slow start during a full-stack recreate on a
       # memory-constrained VPS isn't misread as unhealthy and cascaded to dependents.
-      start_period: 40s
+      # Covers synchronous Tor-proxied mempool fetch and live-book hydration
+      # before the listener binds. Schema migration runs separately before
+      # candidate app activation.
+      start_period: 300s
     deploy:
       resources:
         limits:
@@ -381,9 +383,15 @@ services:
       - bisq-data:/bisq-data:ro
     # - lnd-data:/lnd:ro  # read-only access to macaroon + tls cert
     # Optional: mount the ROOT .env read-write so the Settings page
-    # (PUT /api/app-settings) can persist user-facing variables. Pair with
-    # SETTINGS_ENV_FILE=/settings/root.env in the root .env. Without it the
-    # page is read-only.
+    # (PUT /api/app-settings) can persist user-facing variables. Requires two
+    # changes: root .env values are only compose interpolation and are NOT
+    # auto-injected into the container, so the mount alone is not enough.
+    #   1. uncomment the volume below, and
+    #   2. add "- SETTINGS_ENV_FILE=/settings/root.env" to the environment
+    #      list above (or set it in dexMonitor/.env).
+    # Without both, the page stays read-only. Each save keeps a rotating
+    # .env.bak next to the file; recreate the listed services afterwards
+    # (`docker compose up -d <services>`) for changes to take effect.
     # - ./.env:/settings/root.env:rw
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
@@ -461,6 +469,10 @@ services:
     environment:
       - DB_PATH=/app/mm-controller.db
       - API_ADDR=:5001
+      - ENABLE_AUTOMATED_TRADEFLOW_WORKERS=${ENABLE_AUTOMATED_TRADEFLOW_WORKERS:-false}
+      - ROBOSATS_ENABLED=${ROBOSATS_ENABLED:-false}
+      - ROBOSATS_COORDINATORS=${ROBOSATS_COORDINATORS:-}
+      - ROBOSATS_FEDERATION_URL=${ROBOSATS_FEDERATION_URL:-https://raw.githubusercontent.com/RoboSats/robosats/main/frontend/static/federation.json}
       # OpenTelemetry: traces -> Alloy -> Tempo; structured logs scraped from stdout.
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-alloy:4317}
       - OTEL_SERVICE_NAME=mm-controller
@@ -492,7 +504,7 @@ services:
       # bisq container did not publish 9998 to the host.
       - BISQ_GRPC_HOST=bisq:9998
       - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
-      - BISQ_VERSION=1.10.7
+      - BISQ_VERSION=1.10.8
       - BISQ2_REST_HOST=bisq2:8090
       - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
       - BISQ2_VERSION=2.1.11
@@ -710,9 +722,8 @@ services:
       # totp-api is disabled above.
       postgres:
         condition: service_healthy
-      # Unified API owns schema migrations and is the only application role
-      # allowed to create objects in public.  Do not let this service race its
-      # payment-event schema initialization on a freshly upgraded database.
+      # The migration command prepares the shared schema before app activation;
+      # Unified API checks migration history before reporting healthy.
       unified-api:
         condition: service_healthy
     healthcheck:

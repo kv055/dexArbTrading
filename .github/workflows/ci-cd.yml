@@ -18,8 +18,11 @@ on:
       - 'dexMmTradingLogicHummingBot/**'
       - '.gitignore'
       - 'LICENSE'
+  # No `main` here on purpose: the auto-opened develop → main promote PR
+  # must not start a second run (the push run already tested that SHA).
+  # Feature PRs targeting develop still get CI.
   pull_request:
-    branches: [main, develop]
+    branches: [develop]
     paths-ignore:
       - '**.md'
       - '.vscode/**'
@@ -239,6 +242,7 @@ jobs:
       - run: |
           set -Eeuo pipefail
           bash scripts/test-image-service-inputs.sh
+          bash scripts/test-bisq-pins.sh
           python3 scripts/test-release-images.py
           bash deploy/test-transactional-deploy.sh
           DEPLOY_TEST_DIGEST=1 bash deploy/test-transactional-deploy.sh
@@ -272,7 +276,7 @@ jobs:
 
   bisq-patches-apply:
     # Fast guard (seconds, not the full image build): prove the bisq source
-    # patches still apply against the pinned BISQ_VERSION. A version bump that
+    # patches still apply against the pinned BISQ_COMMIT. A version bump that
     # refactors the patched files fails here immediately instead of deep inside
     # the slow from-source image build.
     name: Bisq patches apply cleanly
@@ -290,15 +294,24 @@ jobs:
       - name: Clone pinned bisq and apply patches
         run: |
           set -Eeuo pipefail
-          version=$(grep -m1 -oP '^ARG BISQ_VERSION=\K[0-9]+\.[0-9]+\.[0-9]+' dexUnifiedApi/Dockerfile.bisq)
-          echo "Checking patches against bisq v${version}"
-          git clone --depth 1 --branch "v${version}" https://github.com/bisq-network/bisq.git /tmp/bisq
-          cd /tmp/bisq
+          # Fail closed on a missing/malformed pin or a floating-tag clone
+          # (Gitea run #348); verifies exactly what the image builds.
+          eval "$(bash "$GITHUB_WORKSPACE/scripts/bisq-pin-args.sh" \
+            "$GITHUB_WORKSPACE/dexUnifiedApi/Dockerfile.bisq")"
+          echo "Checking patches against bisq v${BISQ_VERSION} @ ${BISQ_COMMIT}"
+          # Fetch the pinned commit — never the floating tag — so the check
+          # verifies exactly what the image builds (a tag re-cut must not
+          # slip past this job).
+          git init -q /tmp/bisq
+          git -C /tmp/bisq remote add origin https://github.com/bisq-network/bisq.git
+          git -C /tmp/bisq fetch --depth 1 origin "$BISQ_COMMIT"
+          git -C /tmp/bisq checkout -q --detach FETCH_HEAD
+          git -C /tmp/bisq submodule update --init --recursive --depth 1
           for p in "$GITHUB_WORKSPACE"/dexUnifiedApi/bisq-patches/*.patch; do
             echo "applying $(basename "$p")"
-            git apply --3way "$p"
+            git -C /tmp/bisq apply --3way "$p"
           done
-          echo "All patches apply cleanly against v${version}."
+          echo "All patches apply cleanly against v${BISQ_VERSION} @ ${BISQ_COMMIT}."
 
   compose-validate:
     name: Compose topology validation
@@ -705,8 +718,8 @@ jobs:
       github.ref == 'refs/heads/main' &&
       needs.pre-deploy.result == 'success'
     runs-on: ubuntu-latest
-    # Leave enough time for a 30-minute cold-start health wait and rollback.
-    timeout-minutes: 75
+    # ci-activate polls for up to 120m, plus staging and cleanup headroom.
+    timeout-minutes: 140
     steps:
       - uses: actions/checkout@v5
         with:
@@ -759,7 +772,7 @@ jobs:
           bash deploy/ci-stage-env.sh "$NEW_SHA"
 
       - name: Activate staged release transactionally
-        timeout-minutes: 65
+        timeout-minutes: 130
         env:
           SSH_HOST: ${{ secrets.VPS_SSH_HOST }}
           SSH_USER: ${{ secrets.VPS_SSH_USER }}

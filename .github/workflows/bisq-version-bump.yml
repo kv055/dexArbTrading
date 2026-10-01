@@ -88,6 +88,7 @@ jobs:
         if: steps.check.outputs.bump == 'true' && steps.check.outputs.patches_ok == 'true' && steps.dedupe.outputs.exists == 'false'
         env:
           NEW: ${{ steps.check.outputs.latest }}
+          NEW_COMMIT: ${{ steps.check.outputs.latest_commit }}
         run: |
           set -Eeuo pipefail
           cd dexUnifiedApi
@@ -102,6 +103,18 @@ jobs:
             echo "ERROR: Dockerfile.bisq still contains a non-${NEW} ARG after sed" >&2
             exit 1
           fi
+          # The image builds BISQ_COMMIT, never the floating tag: a re-cut tag
+          # must not silently change a build, and changing the ARG busts the
+          # stale clone layer cache.
+          if ! grep -qP '^ARG BISQ_COMMIT=[0-9a-f]{40}$' Dockerfile.bisq; then
+            echo "ERROR: Dockerfile.bisq has no well-formed ARG BISQ_COMMIT to bump" >&2
+            exit 1
+          fi
+          sed -i "s/^ARG BISQ_COMMIT=.*/ARG BISQ_COMMIT=${NEW_COMMIT}/" Dockerfile.bisq
+          if grep -P '^ARG BISQ_COMMIT=(?!'"${NEW_COMMIT}"'$)' Dockerfile.bisq; then
+            echo "ERROR: Dockerfile.bisq still contains a non-${NEW_COMMIT} BISQ_COMMIT after sed" >&2
+            exit 1
+          fi
           git add Dockerfile.bisq
           if git diff --cached --quiet; then
             echo "ERROR: expected Dockerfile.bisq to change but nothing is staged (already at ${NEW}?)" >&2
@@ -114,6 +127,8 @@ jobs:
         if: steps.check.outputs.bump == 'true' && steps.check.outputs.patches_ok == 'true' && steps.dedupe.outputs.exists == 'false'
         env:
           NEW: ${{ steps.check.outputs.latest }}
+          NEW_COMMIT: ${{ steps.check.outputs.latest_commit }}
+          REPIN: ${{ steps.check.outputs.repin }}
           # A real PAT (not the default GITHUB_TOKEN) is required so the branch push and PR
           # actually trigger CI — GITHUB_TOKEN-created PRs do not start workflow runs.
           GH_TOKEN: ${{ secrets.GH_PAT }}
@@ -132,12 +147,19 @@ jobs:
             echo "ERROR: expected compose/submodule changes but nothing is staged" >&2
             exit 1
           fi
-          git commit -m "chore(bisq): bump BISQ_VERSION to ${NEW}"
+          if [ "${REPIN}" = "true" ]; then
+            TITLE="chore(bisq): re-pin BISQ_COMMIT for v${NEW} (upstream tag re-cut)"
+            BODY="Upstream re-cut the v${NEW} tag without a version change, so only the pinned source commit moves (${NEW_COMMIT}). All bisq-patches were pre-verified to apply against ${NEW_COMMIT}; the bisq-patches-apply job and the full bisq image build re-verify on this PR."
+          else
+            TITLE="chore(bisq): bump BISQ_VERSION to ${NEW}"
+            BODY="Automated Bisq bump to ${NEW} (pinned source ${NEW_COMMIT}). All bisq-patches were pre-verified to apply against v${NEW}; the bisq-patches-apply job and the full bisq image build re-verify on this PR."
+          fi
+          git commit -m "$TITLE"
           git push -u origin "$BRANCH" --force
           gh pr create \
             --base develop --head "$BRANCH" \
-            --title "chore(bisq): bump BISQ_VERSION to ${NEW}" \
-            --body "Automated Bisq bump to ${NEW}. Both bisq-patches were pre-verified to apply against v${NEW}; the bisq-patches-apply job and the full bisq image build re-verify on this PR. Review and merge into develop once green; it then reaches prod via the usual develop -> main promotion."
+            --title "$TITLE" \
+            --body "${BODY} Review and merge into develop once green; it then reaches prod via the usual develop -> main promotion."
           # Try auto-merge (needs GitHub Pro / 'Allow auto-merge' — unavailable on a Free
           # private repo). If it isn't available, leave the PR open for a manual merge so
           # the bump never silently fails and a human gates the version change.

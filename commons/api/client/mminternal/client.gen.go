@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for CexPreTradeCheckRequestMarketSide.
@@ -190,6 +191,107 @@ type APIError struct {
 	Provider  *string `json:"provider,omitempty"`
 }
 
+// BisqExecutionAcceptRequest defines model for BisqExecutionAcceptRequest.
+type BisqExecutionAcceptRequest struct {
+	IdempotencyKey string             `json:"idempotency_key"`
+	QuoteId        openapi_types.UUID `json:"quote_id"`
+}
+
+// BisqExecutionAccepted defines model for BisqExecutionAccepted.
+type BisqExecutionAccepted struct {
+	Accepted      bool   `json:"accepted"`
+	Stage         string `json:"stage"`
+	TradeMode     string `json:"trade_mode"`
+	TransactionId int    `json:"transaction_id"`
+}
+
+// BisqExecutionQuote defines model for BisqExecutionQuote.
+type BisqExecutionQuote struct {
+	ExpiresAt               time.Time          `json:"expires_at"`
+	FiatAmount              float32            `json:"fiat_amount"`
+	FundingAddress          string             `json:"funding_address"`
+	HedgelessNetworkFeeSats *int               `json:"hedgeless_network_fee_sats,omitempty"`
+	IsBtcWalletFunded       bool               `json:"is_btc_wallet_funded"`
+	Limits                  BisqSpendingLimits `json:"limits"`
+	MiningFeeSats           int                `json:"mining_fee_sats"`
+	MissingSats             int                `json:"missing_sats"`
+	PaymentAccountId        string             `json:"payment_account_id"`
+	QuoteId                 string             `json:"quote_id"`
+	SecurityDepositSats     int                `json:"security_deposit_sats"`
+	TakerFeeSats            int                `json:"taker_fee_sats"`
+	TotalToPaySats          int                `json:"total_to_pay_sats"`
+	TradeAmountSats         int                `json:"trade_amount_sats"`
+	TradeMode               TradeMode          `json:"trade_mode"`
+	Volume                  *string            `json:"volume,omitempty"`
+}
+
+// BisqExecutionQuoteRequest defines model for BisqExecutionQuoteRequest.
+type BisqExecutionQuoteRequest struct {
+	BtcAmount          *float32                `json:"btc_amount,omitempty"`
+	BtcAmountSats      *int                    `json:"btc_amount_sats,omitempty"`
+	FiatCurrency       *string                 `json:"fiat_currency,omitempty"`
+	MaxCexFiatSpend    *float32                `json:"max_cex_fiat_spend,omitempty"`
+	MaxWalletDebitSats *int                    `json:"max_wallet_debit_sats,omitempty"`
+	MinFiatProceeds    *float32                `json:"min_fiat_proceeds,omitempty"`
+	OfferId            string                  `json:"offer_id"`
+	PaymentMethod      string                  `json:"payment_method"`
+	PaymentMethods     *[]string               `json:"payment_methods,omitempty"`
+	Provider           string                  `json:"provider"`
+	ResolvedRoute      ResolvedRoute           `json:"resolved_route"`
+	SelectedOffer      *map[string]interface{} `json:"selected_offer,omitempty"`
+	TradeMode          TradeMode               `json:"trade_mode"`
+}
+
+// BisqFundingDestination defines model for BisqFundingDestination.
+type BisqFundingDestination struct {
+	Address   string     `json:"address"`
+	CreatedAt *time.Time `json:"created_at,omitempty"`
+	Id        int        `json:"id"`
+	IsActive  bool       `json:"is_active"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// BisqFundingDestinationEnvelope defines model for BisqFundingDestinationEnvelope.
+type BisqFundingDestinationEnvelope struct {
+	Destination *BisqFundingDestination `json:"destination"`
+}
+
+// BisqFundingDestinationRequest defines model for BisqFundingDestinationRequest.
+type BisqFundingDestinationRequest struct {
+	Address string `json:"address"`
+}
+
+// BisqPaymentAccountMapping defines model for BisqPaymentAccountMapping.
+type BisqPaymentAccountMapping struct {
+	BisqPaymentAccountId string     `json:"bisq_payment_account_id"`
+	CreatedAt            *time.Time `json:"created_at,omitempty"`
+	Currency             string     `json:"currency"`
+	Id                   int        `json:"id"`
+	LocalAccountId       int        `json:"local_account_id"`
+	PaymentMethodName    string     `json:"payment_method_name"`
+	UpdatedAt            *time.Time `json:"updated_at,omitempty"`
+}
+
+// BisqPaymentAccountMappingList defines model for BisqPaymentAccountMappingList.
+type BisqPaymentAccountMappingList struct {
+	Mappings []BisqPaymentAccountMapping `json:"mappings"`
+}
+
+// BisqPaymentAccountMappingRequest defines model for BisqPaymentAccountMappingRequest.
+type BisqPaymentAccountMappingRequest struct {
+	BisqPaymentAccountId string `json:"bisq_payment_account_id"`
+	Currency             string `json:"currency"`
+	LocalAccountId       *int   `json:"local_account_id,omitempty"`
+	PaymentMethodName    string `json:"payment_method_name"`
+}
+
+// BisqSpendingLimits defines model for BisqSpendingLimits.
+type BisqSpendingLimits struct {
+	MaxCexFiatSpend    *float32 `json:"max_cex_fiat_spend,omitempty"`
+	MaxWalletDebitSats *int     `json:"max_wallet_debit_sats,omitempty"`
+	MinFiatProceeds    *float32 `json:"min_fiat_proceeds,omitempty"`
+}
+
 // CexDepositAddress defines model for CexDepositAddress.
 type CexDepositAddress struct {
 	Address              string                 `json:"address"`
@@ -221,6 +323,7 @@ type CexPreTradeCheckRequest struct {
 	PaymentMethod  *string                            `json:"payment_method,omitempty"`
 	PaymentMethods *[]string                          `json:"payment_methods,omitempty"`
 	Provider       *string                            `json:"provider,omitempty"`
+	QuoteId        *string                            `json:"quote_id,omitempty"`
 
 	// RequiredBtcLiquidity Position BTC plus security deposit. Required for hedgeless on-chain liquidity-pool checks and for Swap_main2lightning Lightning liquidity.
 	RequiredBtcLiquidity   *float32                           `json:"required_btc_liquidity,omitempty"`
@@ -263,6 +366,12 @@ type CexSpotTrade struct {
 	AdditionalProperties map[string]interface{} `json:"-"`
 }
 
+// CexTradeflowAccepted defines model for CexTradeflowAccepted.
+type CexTradeflowAccepted struct {
+	StatusUrl     string `json:"status_url"`
+	TransactionId int    `json:"transaction_id"`
+}
+
 // CexTradeflowRequest defines model for CexTradeflowRequest.
 type CexTradeflowRequest struct {
 	BtcAmount              float32                       `json:"btc_amount"`
@@ -273,12 +382,14 @@ type CexTradeflowRequest struct {
 	HedgeNotionalBtc       *float32                      `json:"hedge_notional_btc,omitempty"`
 	HedgeSide              *CexTradeflowRequestHedgeSide `json:"hedge_side,omitempty"`
 	HedgeVenue             *string                       `json:"hedge_venue,omitempty"`
+	IdempotencyKey         *string                       `json:"idempotency_key,omitempty"`
 	Leverage               *float32                      `json:"leverage,omitempty"`
 	MarketSide             CexTradeflowRequestMarketSide `json:"market_side"`
 	OfferId                *string                       `json:"offer_id,omitempty"`
 	PaymentMethod          *string                       `json:"payment_method,omitempty"`
 	PaymentMethods         *[]string                     `json:"payment_methods,omitempty"`
 	Provider               string                        `json:"provider"`
+	QuoteId                *string                       `json:"quote_id,omitempty"`
 	RequiredBtcLiquidity   *float32                      `json:"required_btc_liquidity,omitempty"`
 	RequiredCapital        float32                       `json:"required_capital"`
 	ResolvedRoute          *ResolvedRoute                `json:"resolved_route,omitempty"`
@@ -531,6 +642,11 @@ type PostApiBisqWalletUnlockJSONBody map[string]interface{}
 // PostApiBisqWalletWithdrawJSONBody defines parameters for PostApiBisqWalletWithdraw.
 type PostApiBisqWalletWithdrawJSONBody map[string]interface{}
 
+// StartCexTradeflow202JSONResponseBody defines parameters for StartCexTradeflow.
+type StartCexTradeflow202JSONResponseBody struct {
+	union json.RawMessage
+}
+
 // TrackCexWithdrawalParams defines parameters for TrackCexWithdrawal.
 type TrackCexWithdrawalParams struct {
 	Provider        string  `form:"provider" json:"provider"`
@@ -579,6 +695,18 @@ type PostApiTransactionsIdPoolRefillReconcileJSONBody map[string]interface{}
 
 // PostApiAccountsHealthCheckJSONRequestBody defines body for PostApiAccountsHealthCheck for application/json ContentType.
 type PostApiAccountsHealthCheckJSONRequestBody PostApiAccountsHealthCheckJSONBody
+
+// AcceptBisqExecutionJSONRequestBody defines body for AcceptBisqExecution for application/json ContentType.
+type AcceptBisqExecutionJSONRequestBody = BisqExecutionAcceptRequest
+
+// QuoteBisqExecutionJSONRequestBody defines body for QuoteBisqExecution for application/json ContentType.
+type QuoteBisqExecutionJSONRequestBody = BisqExecutionQuoteRequest
+
+// SetBisqFundingDestinationJSONRequestBody defines body for SetBisqFundingDestination for application/json ContentType.
+type SetBisqFundingDestinationJSONRequestBody = BisqFundingDestinationRequest
+
+// UpsertBisqPaymentAccountMappingJSONRequestBody defines body for UpsertBisqPaymentAccountMapping for application/json ContentType.
+type UpsertBisqPaymentAccountMappingJSONRequestBody = BisqPaymentAccountMappingRequest
 
 // PostApiBisqPaymentAccountsJSONRequestBody defines body for PostApiBisqPaymentAccounts for application/json ContentType.
 type PostApiBisqPaymentAccountsJSONRequestBody PostApiBisqPaymentAccountsJSONBody
@@ -1272,6 +1400,68 @@ func (a MMTransactionStatus) MarshalJSON() ([]byte, error) {
 	return json.Marshal(object)
 }
 
+// AsCexTradeflowAccepted returns the union data inside the StartCexTradeflow202JSONResponseBody as a CexTradeflowAccepted
+func (t StartCexTradeflow202JSONResponseBody) AsCexTradeflowAccepted() (CexTradeflowAccepted, error) {
+	var body CexTradeflowAccepted
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromCexTradeflowAccepted overwrites any union data inside the StartCexTradeflow202JSONResponseBody as the provided CexTradeflowAccepted
+func (t *StartCexTradeflow202JSONResponseBody) FromCexTradeflowAccepted(v CexTradeflowAccepted) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeCexTradeflowAccepted performs a merge with any union data inside the StartCexTradeflow202JSONResponseBody, using the provided CexTradeflowAccepted
+func (t *StartCexTradeflow202JSONResponseBody) MergeCexTradeflowAccepted(v CexTradeflowAccepted) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsBisqExecutionAccepted returns the union data inside the StartCexTradeflow202JSONResponseBody as a BisqExecutionAccepted
+func (t StartCexTradeflow202JSONResponseBody) AsBisqExecutionAccepted() (BisqExecutionAccepted, error) {
+	var body BisqExecutionAccepted
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromBisqExecutionAccepted overwrites any union data inside the StartCexTradeflow202JSONResponseBody as the provided BisqExecutionAccepted
+func (t *StartCexTradeflow202JSONResponseBody) FromBisqExecutionAccepted(v BisqExecutionAccepted) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeBisqExecutionAccepted performs a merge with any union data inside the StartCexTradeflow202JSONResponseBody, using the provided BisqExecutionAccepted
+func (t *StartCexTradeflow202JSONResponseBody) MergeBisqExecutionAccepted(v BisqExecutionAccepted) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t StartCexTradeflow202JSONResponseBody) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *StartCexTradeflow202JSONResponseBody) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
 
@@ -1359,6 +1549,76 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/accounts/health_check (the `PostApiAccountsHealthCheck` operationId).
 	PostApiAccountsHealthCheck(ctx context.Context, body PostApiAccountsHealthCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AcceptBisqExecutionWithBody Accept a stored Bisq quote or recover an earlier acceptance
+	//
+	// Retries of the same quote and idempotency key return the existing transaction and current stage without starting another execution.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/bisq/execution/accept (the `AcceptBisqExecution` operationId).
+	AcceptBisqExecutionWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AcceptBisqExecution Accept a stored Bisq quote or recover an earlier acceptance
+	//
+	// Retries of the same quote and idempotency key return the existing transaction and current stage without starting another execution.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/bisq/execution/accept (the `AcceptBisqExecution` operationId).
+	AcceptBisqExecution(ctx context.Context, body AcceptBisqExecutionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// QuoteBisqExecutionWithBody Quote a Bisq v1 take-offer without reserving the offer
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/bisq/execution/quote (the `QuoteBisqExecution` operationId).
+	QuoteBisqExecutionWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// QuoteBisqExecution Quote a Bisq v1 take-offer without reserving the offer
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/bisq/execution/quote (the `QuoteBisqExecution` operationId).
+	QuoteBisqExecution(ctx context.Context, body QuoteBisqExecutionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetBisqFundingDestination Get the designated Bisq funding address
+	//
+	// Corresponds with GET /api/bisq/funding-destination (the `GetBisqFundingDestination` operationId).
+	GetBisqFundingDestination(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetBisqFundingDestinationWithBody Set the designated Bisq funding address
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/bisq/funding-destination (the `SetBisqFundingDestination` operationId).
+	SetBisqFundingDestinationWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetBisqFundingDestination Set the designated Bisq funding address
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/bisq/funding-destination (the `SetBisqFundingDestination` operationId).
+	SetBisqFundingDestination(ctx context.Context, body SetBisqFundingDestinationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListBisqPaymentAccountMappings List local-to-Bisq payment account mappings
+	//
+	// Corresponds with GET /api/bisq/payment-account-mappings (the `ListBisqPaymentAccountMappings` operationId).
+	ListBisqPaymentAccountMappings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpsertBisqPaymentAccountMappingWithBody Bind a local receiving account to a Bisq daemon payment account
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/bisq/payment-account-mappings (the `UpsertBisqPaymentAccountMapping` operationId).
+	UpsertBisqPaymentAccountMappingWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpsertBisqPaymentAccountMapping Bind a local receiving account to a Bisq daemon payment account
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/bisq/payment-account-mappings (the `UpsertBisqPaymentAccountMapping` operationId).
+	UpsertBisqPaymentAccountMapping(ctx context.Context, body UpsertBisqPaymentAccountMappingJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetApiBisqPaymentAccounts GET /api/bisq/payment-accounts
 	//
@@ -1812,6 +2072,176 @@ func (c *Client) PostApiAccountsHealthCheckWithBody(ctx context.Context, content
 // Corresponds with POST /api/accounts/health_check (the `PostApiAccountsHealthCheck` operationId).
 func (c *Client) PostApiAccountsHealthCheck(ctx context.Context, body PostApiAccountsHealthCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPostApiAccountsHealthCheckRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// AcceptBisqExecutionWithBody Accept a stored Bisq quote or recover an earlier acceptance
+//
+// Retries of the same quote and idempotency key return the existing transaction and current stage without starting another execution.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/bisq/execution/accept (the `AcceptBisqExecution` operationId).
+func (c *Client) AcceptBisqExecutionWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAcceptBisqExecutionRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// AcceptBisqExecution Accept a stored Bisq quote or recover an earlier acceptance
+//
+// Retries of the same quote and idempotency key return the existing transaction and current stage without starting another execution.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/bisq/execution/accept (the `AcceptBisqExecution` operationId).
+func (c *Client) AcceptBisqExecution(ctx context.Context, body AcceptBisqExecutionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAcceptBisqExecutionRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// QuoteBisqExecutionWithBody Quote a Bisq v1 take-offer without reserving the offer
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/bisq/execution/quote (the `QuoteBisqExecution` operationId).
+func (c *Client) QuoteBisqExecutionWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewQuoteBisqExecutionRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// QuoteBisqExecution Quote a Bisq v1 take-offer without reserving the offer
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/bisq/execution/quote (the `QuoteBisqExecution` operationId).
+func (c *Client) QuoteBisqExecution(ctx context.Context, body QuoteBisqExecutionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewQuoteBisqExecutionRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetBisqFundingDestination Get the designated Bisq funding address
+//
+// Corresponds with GET /api/bisq/funding-destination (the `GetBisqFundingDestination` operationId).
+func (c *Client) GetBisqFundingDestination(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetBisqFundingDestinationRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetBisqFundingDestinationWithBody Set the designated Bisq funding address
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/bisq/funding-destination (the `SetBisqFundingDestination` operationId).
+func (c *Client) SetBisqFundingDestinationWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetBisqFundingDestinationRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetBisqFundingDestination Set the designated Bisq funding address
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/bisq/funding-destination (the `SetBisqFundingDestination` operationId).
+func (c *Client) SetBisqFundingDestination(ctx context.Context, body SetBisqFundingDestinationJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetBisqFundingDestinationRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListBisqPaymentAccountMappings List local-to-Bisq payment account mappings
+//
+// Corresponds with GET /api/bisq/payment-account-mappings (the `ListBisqPaymentAccountMappings` operationId).
+func (c *Client) ListBisqPaymentAccountMappings(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListBisqPaymentAccountMappingsRequest(c.Server)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpsertBisqPaymentAccountMappingWithBody Bind a local receiving account to a Bisq daemon payment account
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/bisq/payment-account-mappings (the `UpsertBisqPaymentAccountMapping` operationId).
+func (c *Client) UpsertBisqPaymentAccountMappingWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpsertBisqPaymentAccountMappingRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpsertBisqPaymentAccountMapping Bind a local receiving account to a Bisq daemon payment account
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/bisq/payment-account-mappings (the `UpsertBisqPaymentAccountMapping` operationId).
+func (c *Client) UpsertBisqPaymentAccountMapping(ctx context.Context, body UpsertBisqPaymentAccountMappingJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpsertBisqPaymentAccountMappingRequest(c.Server, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2990,6 +3420,220 @@ func NewPostApiAccountsHealthCheckRequestWithBody(server string, contentType str
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewAcceptBisqExecutionRequest calls the generic AcceptBisqExecution builder with application/json body
+func NewAcceptBisqExecutionRequest(server string, body AcceptBisqExecutionJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAcceptBisqExecutionRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewAcceptBisqExecutionRequestWithBody constructs an http.Request for the AcceptBisqExecution method, with any body, and a specified content type
+func NewAcceptBisqExecutionRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/bisq/execution/accept")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewQuoteBisqExecutionRequest calls the generic QuoteBisqExecution builder with application/json body
+func NewQuoteBisqExecutionRequest(server string, body QuoteBisqExecutionJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewQuoteBisqExecutionRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewQuoteBisqExecutionRequestWithBody constructs an http.Request for the QuoteBisqExecution method, with any body, and a specified content type
+func NewQuoteBisqExecutionRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/bisq/execution/quote")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetBisqFundingDestinationRequest constructs an http.Request for the GetBisqFundingDestination method
+func NewGetBisqFundingDestinationRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/bisq/funding-destination")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetBisqFundingDestinationRequest calls the generic SetBisqFundingDestination builder with application/json body
+func NewSetBisqFundingDestinationRequest(server string, body SetBisqFundingDestinationJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetBisqFundingDestinationRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewSetBisqFundingDestinationRequestWithBody constructs an http.Request for the SetBisqFundingDestination method, with any body, and a specified content type
+func NewSetBisqFundingDestinationRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/bisq/funding-destination")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListBisqPaymentAccountMappingsRequest constructs an http.Request for the ListBisqPaymentAccountMappings method
+func NewListBisqPaymentAccountMappingsRequest(server string) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/bisq/payment-account-mappings")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpsertBisqPaymentAccountMappingRequest calls the generic UpsertBisqPaymentAccountMapping builder with application/json body
+func NewUpsertBisqPaymentAccountMappingRequest(server string, body UpsertBisqPaymentAccountMappingJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpsertBisqPaymentAccountMappingRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewUpsertBisqPaymentAccountMappingRequestWithBody constructs an http.Request for the UpsertBisqPaymentAccountMapping method, with any body, and a specified content type
+func NewUpsertBisqPaymentAccountMappingRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/bisq/payment-account-mappings")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
@@ -4814,6 +5458,80 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /api/accounts/health_check (the `PostApiAccountsHealthCheck` operationId).
 	PostApiAccountsHealthCheckWithResponse(ctx context.Context, body PostApiAccountsHealthCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*PostApiAccountsHealthCheckResponse, error)
 
+	// AcceptBisqExecutionWithBodyWithResponse Accept a stored Bisq quote or recover an earlier acceptance
+	//
+	// Retries of the same quote and idempotency key return the existing transaction and current stage without starting another execution.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/bisq/execution/accept (the `AcceptBisqExecution` operationId).
+	AcceptBisqExecutionWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcceptBisqExecutionResponse, error)
+
+	// AcceptBisqExecutionWithResponse Accept a stored Bisq quote or recover an earlier acceptance
+	//
+	// Retries of the same quote and idempotency key return the existing transaction and current stage without starting another execution.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/bisq/execution/accept (the `AcceptBisqExecution` operationId).
+	AcceptBisqExecutionWithResponse(ctx context.Context, body AcceptBisqExecutionJSONRequestBody, reqEditors ...RequestEditorFn) (*AcceptBisqExecutionResponse, error)
+
+	// QuoteBisqExecutionWithBodyWithResponse Quote a Bisq v1 take-offer without reserving the offer
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/bisq/execution/quote (the `QuoteBisqExecution` operationId).
+	QuoteBisqExecutionWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*QuoteBisqExecutionResponse, error)
+
+	// QuoteBisqExecutionWithResponse Quote a Bisq v1 take-offer without reserving the offer
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/bisq/execution/quote (the `QuoteBisqExecution` operationId).
+	QuoteBisqExecutionWithResponse(ctx context.Context, body QuoteBisqExecutionJSONRequestBody, reqEditors ...RequestEditorFn) (*QuoteBisqExecutionResponse, error)
+
+	// GetBisqFundingDestinationWithResponse Get the designated Bisq funding address
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/bisq/funding-destination (the `GetBisqFundingDestination` operationId).
+	GetBisqFundingDestinationWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetBisqFundingDestinationResponse, error)
+
+	// SetBisqFundingDestinationWithBodyWithResponse Set the designated Bisq funding address
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/bisq/funding-destination (the `SetBisqFundingDestination` operationId).
+	SetBisqFundingDestinationWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetBisqFundingDestinationResponse, error)
+
+	// SetBisqFundingDestinationWithResponse Set the designated Bisq funding address
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/bisq/funding-destination (the `SetBisqFundingDestination` operationId).
+	SetBisqFundingDestinationWithResponse(ctx context.Context, body SetBisqFundingDestinationJSONRequestBody, reqEditors ...RequestEditorFn) (*SetBisqFundingDestinationResponse, error)
+
+	// ListBisqPaymentAccountMappingsWithResponse List local-to-Bisq payment account mappings
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/bisq/payment-account-mappings (the `ListBisqPaymentAccountMappings` operationId).
+	ListBisqPaymentAccountMappingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListBisqPaymentAccountMappingsResponse, error)
+
+	// UpsertBisqPaymentAccountMappingWithBodyWithResponse Bind a local receiving account to a Bisq daemon payment account
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/bisq/payment-account-mappings (the `UpsertBisqPaymentAccountMapping` operationId).
+	UpsertBisqPaymentAccountMappingWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpsertBisqPaymentAccountMappingResponse, error)
+
+	// UpsertBisqPaymentAccountMappingWithResponse Bind a local receiving account to a Bisq daemon payment account
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/bisq/payment-account-mappings (the `UpsertBisqPaymentAccountMapping` operationId).
+	UpsertBisqPaymentAccountMappingWithResponse(ctx context.Context, body UpsertBisqPaymentAccountMappingJSONRequestBody, reqEditors ...RequestEditorFn) (*UpsertBisqPaymentAccountMappingResponse, error)
+
 	// GetApiBisqPaymentAccountsWithResponse GET /api/bisq/payment-accounts
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -5354,6 +6072,336 @@ func (r PostApiAccountsHealthCheckResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r PostApiAccountsHealthCheckResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type AcceptBisqExecutionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *BisqExecutionAccepted
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Conflict
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Unavailable
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r AcceptBisqExecutionResponse) GetJSON202() *BisqExecutionAccepted {
+	return r.JSON202
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r AcceptBisqExecutionResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r AcceptBisqExecutionResponse) GetJSON409() *Conflict {
+	return r.JSON409
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r AcceptBisqExecutionResponse) GetJSON503() *Unavailable {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r AcceptBisqExecutionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r AcceptBisqExecutionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AcceptBisqExecutionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r AcceptBisqExecutionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type QuoteBisqExecutionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BisqExecutionQuote
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Conflict
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Unavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r QuoteBisqExecutionResponse) GetJSON200() *BisqExecutionQuote {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r QuoteBisqExecutionResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r QuoteBisqExecutionResponse) GetJSON409() *Conflict {
+	return r.JSON409
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r QuoteBisqExecutionResponse) GetJSON503() *Unavailable {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r QuoteBisqExecutionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r QuoteBisqExecutionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r QuoteBisqExecutionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r QuoteBisqExecutionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetBisqFundingDestinationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BisqFundingDestinationEnvelope
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Unavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetBisqFundingDestinationResponse) GetJSON200() *BisqFundingDestinationEnvelope {
+	return r.JSON200
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetBisqFundingDestinationResponse) GetJSON503() *Unavailable {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r GetBisqFundingDestinationResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetBisqFundingDestinationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetBisqFundingDestinationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetBisqFundingDestinationResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetBisqFundingDestinationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BisqFundingDestination
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Unavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetBisqFundingDestinationResponse) GetJSON200() *BisqFundingDestination {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r SetBisqFundingDestinationResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r SetBisqFundingDestinationResponse) GetJSON503() *Unavailable {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r SetBisqFundingDestinationResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetBisqFundingDestinationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetBisqFundingDestinationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetBisqFundingDestinationResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListBisqPaymentAccountMappingsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BisqPaymentAccountMappingList
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Unavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListBisqPaymentAccountMappingsResponse) GetJSON200() *BisqPaymentAccountMappingList {
+	return r.JSON200
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r ListBisqPaymentAccountMappingsResponse) GetJSON503() *Unavailable {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r ListBisqPaymentAccountMappingsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListBisqPaymentAccountMappingsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListBisqPaymentAccountMappingsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListBisqPaymentAccountMappingsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpsertBisqPaymentAccountMappingResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BisqPaymentAccountMapping
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Unavailable
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpsertBisqPaymentAccountMappingResponse) GetJSON200() *BisqPaymentAccountMapping {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r UpsertBisqPaymentAccountMappingResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r UpsertBisqPaymentAccountMappingResponse) GetJSON503() *Unavailable {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r UpsertBisqPaymentAccountMappingResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpsertBisqPaymentAccountMappingResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpsertBisqPaymentAccountMappingResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpsertBisqPaymentAccountMappingResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -6106,6 +7154,8 @@ type StartCexTradeflowResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *CexTradeflowResult
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *StartCexTradeflow202JSONResponseBody
 	// JSON400 the response for an HTTP 400 `application/json` response
 	JSON400 *BadRequest
 	// JSON409 the response for an HTTP 409 `application/json` response
@@ -6119,6 +7169,11 @@ type StartCexTradeflowResponse struct {
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r StartCexTradeflowResponse) GetJSON200() *CexTradeflowResult {
 	return r.JSON200
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r StartCexTradeflowResponse) GetJSON202() *StartCexTradeflow202JSONResponseBody {
+	return r.JSON202
 }
 
 // GetJSON400 returns the response for an HTTP 400 `application/json` response
@@ -8028,6 +9083,140 @@ func (c *ClientWithResponses) PostApiAccountsHealthCheckWithResponse(ctx context
 	return ParsePostApiAccountsHealthCheckResponse(rsp)
 }
 
+// AcceptBisqExecutionWithBodyWithResponse Accept a stored Bisq quote or recover an earlier acceptance
+//
+// Retries of the same quote and idempotency key return the existing transaction and current stage without starting another execution.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/bisq/execution/accept (the `AcceptBisqExecution` operationId).
+func (c *ClientWithResponses) AcceptBisqExecutionWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcceptBisqExecutionResponse, error) {
+	rsp, err := c.AcceptBisqExecutionWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAcceptBisqExecutionResponse(rsp)
+}
+
+// AcceptBisqExecutionWithResponse Accept a stored Bisq quote or recover an earlier acceptance
+//
+// Retries of the same quote and idempotency key return the existing transaction and current stage without starting another execution.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/bisq/execution/accept (the `AcceptBisqExecution` operationId).
+func (c *ClientWithResponses) AcceptBisqExecutionWithResponse(ctx context.Context, body AcceptBisqExecutionJSONRequestBody, reqEditors ...RequestEditorFn) (*AcceptBisqExecutionResponse, error) {
+	rsp, err := c.AcceptBisqExecution(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAcceptBisqExecutionResponse(rsp)
+}
+
+// QuoteBisqExecutionWithBodyWithResponse Quote a Bisq v1 take-offer without reserving the offer
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/bisq/execution/quote (the `QuoteBisqExecution` operationId).
+func (c *ClientWithResponses) QuoteBisqExecutionWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*QuoteBisqExecutionResponse, error) {
+	rsp, err := c.QuoteBisqExecutionWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseQuoteBisqExecutionResponse(rsp)
+}
+
+// QuoteBisqExecutionWithResponse Quote a Bisq v1 take-offer without reserving the offer
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/bisq/execution/quote (the `QuoteBisqExecution` operationId).
+func (c *ClientWithResponses) QuoteBisqExecutionWithResponse(ctx context.Context, body QuoteBisqExecutionJSONRequestBody, reqEditors ...RequestEditorFn) (*QuoteBisqExecutionResponse, error) {
+	rsp, err := c.QuoteBisqExecution(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseQuoteBisqExecutionResponse(rsp)
+}
+
+// GetBisqFundingDestinationWithResponse Get the designated Bisq funding address
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/bisq/funding-destination (the `GetBisqFundingDestination` operationId).
+func (c *ClientWithResponses) GetBisqFundingDestinationWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetBisqFundingDestinationResponse, error) {
+	rsp, err := c.GetBisqFundingDestination(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetBisqFundingDestinationResponse(rsp)
+}
+
+// SetBisqFundingDestinationWithBodyWithResponse Set the designated Bisq funding address
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/bisq/funding-destination (the `SetBisqFundingDestination` operationId).
+func (c *ClientWithResponses) SetBisqFundingDestinationWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetBisqFundingDestinationResponse, error) {
+	rsp, err := c.SetBisqFundingDestinationWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetBisqFundingDestinationResponse(rsp)
+}
+
+// SetBisqFundingDestinationWithResponse Set the designated Bisq funding address
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/bisq/funding-destination (the `SetBisqFundingDestination` operationId).
+func (c *ClientWithResponses) SetBisqFundingDestinationWithResponse(ctx context.Context, body SetBisqFundingDestinationJSONRequestBody, reqEditors ...RequestEditorFn) (*SetBisqFundingDestinationResponse, error) {
+	rsp, err := c.SetBisqFundingDestination(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetBisqFundingDestinationResponse(rsp)
+}
+
+// ListBisqPaymentAccountMappingsWithResponse List local-to-Bisq payment account mappings
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/bisq/payment-account-mappings (the `ListBisqPaymentAccountMappings` operationId).
+func (c *ClientWithResponses) ListBisqPaymentAccountMappingsWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*ListBisqPaymentAccountMappingsResponse, error) {
+	rsp, err := c.ListBisqPaymentAccountMappings(ctx, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListBisqPaymentAccountMappingsResponse(rsp)
+}
+
+// UpsertBisqPaymentAccountMappingWithBodyWithResponse Bind a local receiving account to a Bisq daemon payment account
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/bisq/payment-account-mappings (the `UpsertBisqPaymentAccountMapping` operationId).
+func (c *ClientWithResponses) UpsertBisqPaymentAccountMappingWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpsertBisqPaymentAccountMappingResponse, error) {
+	rsp, err := c.UpsertBisqPaymentAccountMappingWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpsertBisqPaymentAccountMappingResponse(rsp)
+}
+
+// UpsertBisqPaymentAccountMappingWithResponse Bind a local receiving account to a Bisq daemon payment account
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/bisq/payment-account-mappings (the `UpsertBisqPaymentAccountMapping` operationId).
+func (c *ClientWithResponses) UpsertBisqPaymentAccountMappingWithResponse(ctx context.Context, body UpsertBisqPaymentAccountMappingJSONRequestBody, reqEditors ...RequestEditorFn) (*UpsertBisqPaymentAccountMappingResponse, error) {
+	rsp, err := c.UpsertBisqPaymentAccountMapping(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpsertBisqPaymentAccountMappingResponse(rsp)
+}
+
 // GetApiBisqPaymentAccountsWithResponse GET /api/bisq/payment-accounts
 //
 // Returns a wrapper object for the known response body format(s).
@@ -8987,6 +10176,246 @@ func ParsePostApiAccountsHealthCheckResponse(rsp *http.Response) (*PostApiAccoun
 	return response, nil
 }
 
+// ParseAcceptBisqExecutionResponse parses an HTTP response from a AcceptBisqExecutionWithResponse call
+func ParseAcceptBisqExecutionResponse(rsp *http.Response) (*AcceptBisqExecutionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AcceptBisqExecutionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest BisqExecutionAccepted
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Unavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseQuoteBisqExecutionResponse parses an HTTP response from a QuoteBisqExecutionWithResponse call
+func ParseQuoteBisqExecutionResponse(rsp *http.Response) (*QuoteBisqExecutionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &QuoteBisqExecutionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BisqExecutionQuote
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Conflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Unavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetBisqFundingDestinationResponse parses an HTTP response from a GetBisqFundingDestinationWithResponse call
+func ParseGetBisqFundingDestinationResponse(rsp *http.Response) (*GetBisqFundingDestinationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetBisqFundingDestinationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BisqFundingDestinationEnvelope
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Unavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetBisqFundingDestinationResponse parses an HTTP response from a SetBisqFundingDestinationWithResponse call
+func ParseSetBisqFundingDestinationResponse(rsp *http.Response) (*SetBisqFundingDestinationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetBisqFundingDestinationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BisqFundingDestination
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Unavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListBisqPaymentAccountMappingsResponse parses an HTTP response from a ListBisqPaymentAccountMappingsWithResponse call
+func ParseListBisqPaymentAccountMappingsResponse(rsp *http.Response) (*ListBisqPaymentAccountMappingsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListBisqPaymentAccountMappingsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BisqPaymentAccountMappingList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Unavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpsertBisqPaymentAccountMappingResponse parses an HTTP response from a UpsertBisqPaymentAccountMappingWithResponse call
+func ParseUpsertBisqPaymentAccountMappingResponse(rsp *http.Response) (*UpsertBisqPaymentAccountMappingResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpsertBisqPaymentAccountMappingResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BisqPaymentAccountMapping
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Unavailable
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetApiBisqPaymentAccountsResponse parses an HTTP response from a GetApiBisqPaymentAccountsWithResponse call
 func ParseGetApiBisqPaymentAccountsResponse(rsp *http.Response) (*GetApiBisqPaymentAccountsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -9565,6 +10994,13 @@ func ParseStartCexTradeflowResponse(rsp *http.Response) (*StartCexTradeflowRespo
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest StartCexTradeflow202JSONResponseBody
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
 		var dest BadRequest

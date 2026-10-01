@@ -3,6 +3,52 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Keep both hosts' outer deadlines above the remote operation's default waits.
+# Use the configured values so increasing a migration/health timeout cannot
+# silently put rollback outside the CI polling window again.
+python3 - "$repo_root" <<'PY'
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1])
+activate = (root / 'deploy/ci-activate.sh').read_text()
+transaction = (root / 'deploy/transactional-deploy.sh').read_text()
+
+def seconds(pattern, text, label):
+    match = re.search(pattern, text, re.M)
+    assert match, f'cannot find {label} ({pattern})'
+    return int(match[1])
+
+poll = seconds(r'POLL_TIMEOUT_SEC:-([0-9]+)', activate, 'poll timeout')
+migration = seconds(r'DEPLOY_MIGRATION_TIMEOUT_SEC:-([0-9]+)', transaction, 'migration timeout')
+kill_grace = seconds(r'timeout --kill-after=([0-9]+)', transaction, 'migration kill grace')
+migration_pg = seconds(r'^MIGRATION_PG_WAIT_SEC=([0-9]+)$', transaction, 'migration postgres wait')
+reconcile_pg = seconds(r'^RECONCILE_PG_WAIT_SEC=([0-9]+)$', transaction, 'reconcile postgres wait')
+reconcile_api = seconds(r'^RECONCILE_API_WAIT_SEC=([0-9]+)$', transaction, 'reconcile API wait')
+stack = seconds(r'^STACK_WAIT_SEC=([0-9]+)$', transaction, 'stack health wait')
+restart = seconds(r'^RESTART_WAIT_SEC=([0-9]+)$', transaction, 'config restart wait')
+# Worst-case critical path: migration once, then the stack and restart waits
+# for both candidate and rollback, plus the rollback-only role restoration,
+# plus 20 minutes for smoke probes, pulls and other I/O.
+minimum_poll = (migration_pg + migration + kill_grace
+                + 2 * (stack + restart)
+                + reconcile_pg + reconcile_api
+                + 20 * 60)
+assert poll >= minimum_poll, f'polling budget {poll}s is below remote waits/headroom {minimum_poll}s'
+
+for name in ('.github/workflows/ci-cd.yml', '.gitea/workflows/ci.yml'):
+    workflow = (root / name).read_text()
+    deploy = re.search(r'^  deploy:\n(.*?)(?=^  [\w-]+:\n|\Z)', workflow, re.M | re.S)[1]
+    job = int(re.search(r'^    timeout-minutes: ([0-9]+)$', deploy, re.M)[1]) * 60
+    step = re.search(r'- name: Activate staged release transactionally\n\s+timeout-minutes: ([0-9]+)', deploy)
+    activation = int(step[1]) * 60
+    assert activation >= poll + 5 * 60, f'{name}: activation needs 5m beyond the poll deadline'
+    assert job >= activation + 10 * 60, f'{name}: deploy job needs 10m for staging and cleanup'
+print('ok deployment timeout budgets on GitHub and Gitea')
+PY
+
 fixture="$(mktemp -d)"
 live_pid=""
 cleanup() {

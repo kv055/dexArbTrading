@@ -18,7 +18,7 @@ The repository is organized as a parent deployment repo with several component r
 
 At runtime the stack centers on Postgres:
 
-1. `dexUnifiedApi` bootstraps database roles and schema migrations.
+1. The `dexUnifiedApi` migration command bootstraps roles, applies schema migrations, and seeds payment methods before apps start.
 2. The Bisq and snapshot containers gather live and historical offers.
 3. `dexUnifiedApi` keeps live offer state in memory and exposes `/api/live_offers` plus `/ws/live_offers`.
 4. `dexMonitor` reads shared tables, serves the dashboard, enriches offer data with trade-cost and premium calculations, and proxies selected MM controller data.
@@ -61,10 +61,10 @@ cp dexMmController/.env.example dexMmController/.env
 cp dexFiatController/.env.example dexFiatController/.env
 ```
 
-Fill in the generated files with real passwords, API keys, and wallet/account secrets. Then start the stack:
+Fill in the generated files with real passwords, API keys, and wallet/account secrets. Then migrate and start the stack:
 
 ```bash
-docker compose up --build -d
+make staging-up
 ```
 
 Main local URLs:
@@ -134,7 +134,7 @@ After changing LND flags, run `docker compose up -d lnd` only and wait for `Chai
 
 ## Database And Backups
 
-`dexUnifiedApi` owns schema setup and application role creation. The Compose stack starts a `postgres-backup` sidecar that runs `pg_dump -Fc`, validates the archive with `pg_restore --list`, keeps local files in the `postgres-backups` volume, and optionally uploads with `rclone`.
+`dexUnifiedApi` owns schema setup and application role creation. Deploys run `./server migrate` before app activation; the local staging targets, `dev-server.sh`, and the post-checkout rebuild hook do the same through `scripts/migrate-local-db.sh`. API and snapshot startup check migration history without applying schema changes. Role/password reconciliation remains at startup, and a rollback after a password-changing migrate step restarts `unified-api` to restore the previous credentials (see [deploy/README.md](deploy/README.md)). The Compose stack starts a `postgres-backup` sidecar that runs `pg_dump -Fc`, validates the archive with `pg_restore --list`, keeps local files in the `postgres-backups` volume, and optionally uploads with `rclone`.
 
 By default, backup upload targets Proton Drive:
 

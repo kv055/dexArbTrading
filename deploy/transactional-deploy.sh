@@ -36,6 +36,19 @@ done
    -d "$repo_dir/.git" ]] || usage
 [[ "$new_sha" =~ ^[0-9a-f]{40}$ ]] || usage
 [[ -d "$env_bundle" ]] || usage
+migration_timeout="${DEPLOY_MIGRATION_TIMEOUT_SEC:-900}"
+[[ "$migration_timeout" =~ ^[1-9][0-9]*$ ]] || {
+  echo "DEPLOY_MIGRATION_TIMEOUT_SEC must be a positive number of seconds" >&2
+  exit 2
+}
+# Remote wait budgets. test-ci-activate.sh reads these constants to derive the
+# CI polling ceiling from the true critical path, so keep each name unique and
+# on its own NAME=seconds line.
+MIGRATION_PG_WAIT_SEC=180
+RECONCILE_PG_WAIT_SEC=180
+RECONCILE_API_WAIT_SEC=600
+STACK_WAIT_SEC=1800
+RESTART_WAIT_SEC=120
 
 repo_dir="$(cd "$repo_dir" && pwd)"
 stage_dir="$(cd "$(dirname "$env_bundle")" && pwd)"
@@ -121,6 +134,9 @@ for service in "${image_services[@]}"; do
 done
 config_services=(grafana prometheus loki tempo alloy nginx)
 changed_services=()
+migration_container="dexarb-migrate-$new_sha"
+migration_started=false
+reconcile_roles=false
 
 image_var_for_service() {
   local wanted="$1" index
@@ -423,43 +439,10 @@ build_candidate_image_manifest() {
   validate_image_manifest "$destination"
 }
 
-service_image_inputs_changed() {
-  IMAGE_INPUTS_REPO="$repo_dir" image_service_inputs_changed "$@"
-}
-
-# The workflow supplies image services to rebuild, but the VPS is the source
-# of truth for which image tag is actually active. Refuse a candidate when an
-# inherited service image was built from older inputs than the target commit.
-# This turns a missed cumulative CI diff into a visible failure instead of a
-# healthy, permanently version-skewed deployment.
-validate_changed_services_cover_image_inputs() {
-  local base_manifest="$1" target_sha="$2" index service variable image_sha
-  local failed=false
-  declare -A requested=() active_tags=()
-
-  [[ -n "$base_manifest" ]] || return 0
-  validate_image_manifest "$base_manifest" || return 1
-
-  for service in "${changed_services[@]}"; do
-    requested["$service"]=1
-  done
-  while IFS='=' read -r variable image_sha; do
-    active_tags["$variable"]="$image_sha"
-  done <"$base_manifest"
-
-  for index in "${!image_services[@]}"; do
-    service="${image_services[$index]}"
-    variable="${image_vars[$index]}"
-    image_sha="${active_tags[$variable]}"
-    if [[ -z "${requested[$service]:-}" ]] &&
-       service_image_inputs_changed "$service" "$image_sha" "$target_sha"; then
-      echo "changed service list omits stale image: $service ($image_sha -> $target_sha)" >&2
-      failed=true
-    fi
-  done
-
-  ! "$failed"
-}
+# CI compares each service's image source against the candidate using the
+# production baseline. The VPS checks that baseline has not changed and that
+# build receipts match the requested services; it does not repeat source diffs
+# that depend on submodule objects unavailable on the deployment host.
 
 sync_tree() {
   local sha="$1"
@@ -631,8 +614,55 @@ pull_changed_images() {
   fi
 }
 
+# Unified API owns the shared schema. The candidate image applies it with the
+# staged environment before any candidate container starts. The previous
+# release keeps serving meanwhile, so migrations must stay compatible with it.
+run_candidate_migration() {
+  local image label status=0
+  echo "starting postgres for database migration"
+  docker compose up -d --wait --wait-timeout "$MIGRATION_PG_WAIT_SEC" postgres || return 1
+  image="$(docker compose config --format json unified-api | python3 -c \
+    'import json, sys; print(json.load(sys.stdin)["services"]["unified-api"]["image"])')" || return 1
+  docker image inspect "$image" >/dev/null 2>&1 || docker compose pull unified-api || return 1
+  # Binaries without the command ignore the argument and would start a second
+  # API server against production instead of migrating.
+  label="$(docker image inspect \
+    --format '{{index .Config.Labels "dexarbtrading.unified-api.migrate"}}' "$image")" || return 1
+  if [[ "$label" != 1 ]]; then
+    echo "unified-api image $image does not provide the migrate command; check the dexUnifiedApi submodule pointer" >&2
+    return 1
+  fi
+
+  echo "running database migrations (candidate schema, limit ${migration_timeout}s)"
+  migration_started=true
+  docker rm -f "$migration_container" >/dev/null 2>&1 || true
+  timeout --kill-after=30 "$migration_timeout" docker compose run --rm --no-deps \
+    --name "$migration_container" unified-api ./server migrate || status=$?
+  if ((status == 0)); then
+    return 0
+  fi
+  # Stopping the Compose client does not necessarily stop its container.
+  docker rm -f "$migration_container" >/dev/null 2>&1 || true
+  if ((status == 124 || status == 137)); then
+    echo "database migration exceeded ${migration_timeout}s; aborting before activation" >&2
+  else
+    echo "database migration failed; aborting before activation" >&2
+  fi
+  return 1
+}
+
+# Compared, never printed: these are live database credentials.
+database_role_passwords() {
+  grep -E '^[[:space:]]*POSTGRES_[A-Z0-9_]*PASSWORD[[:space:]]*=' \
+    "$1/dexUnifiedApi/.env" | sort || true
+}
+
+database_role_passwords_match() {
+  cmp -s <(database_role_passwords "$1") <(database_role_passwords "$2")
+}
+
 start_release() {
-  local sha="$1" bundle="$2" manifest="$3" issue_certificate="$4" from_sha="$5"
+  local sha="$1" bundle="$2" manifest="$3" is_candidate="$4" from_sha="$5"
   local certificate_before certificate_after certificate_changed=false
   local restart_services=()
   unset COMPOSE_FILE
@@ -642,7 +672,7 @@ start_release() {
   load_image_manifest "$manifest" || return 1
   if ! "$legacy_images"; then
     local digest_manifest="$release_root/$sha/images.json"
-    if [[ "$issue_certificate" == true ]]; then
+    if [[ "$is_candidate" == true ]]; then
       digest_manifest="$stage_dir/candidate.json"
       python3 "$digest_tool" prepare --repo "$repo_dir" --baseline "$baseline_file" \
         --receipts "$stage_dir/receipts" --sha "$sha" --changed "$changed_services_csv" \
@@ -660,7 +690,7 @@ start_release() {
     export COMPOSE_FILE="$repo_dir/docker-compose.yml:$state_root/active.compose.json"
   fi
   compose_preflight || return 1
-  if [[ "$issue_certificate" == true ]]; then
+  if [[ "$is_candidate" == true ]]; then
     certificate_before="$(certificate_bundle_checksum)"
     ensure_trusted_certificate || return 1
     certificate_after="$(certificate_bundle_checksum)"
@@ -673,18 +703,32 @@ start_release() {
     # Pulling exact digests also restores images absent from the local cache.
     docker compose pull || return 1
   fi
+  # Rollback never applies migrations.
+  if [[ "$is_candidate" == true ]]; then
+    run_candidate_migration || return 1
+  fi
+  if "$reconcile_roles"; then
+    # Restore credentials before waiting for the full stack: containers using
+    # the previous passwords may already be unhealthy. Recreate the API with
+    # the restored bundle so its startup reconciles roles even if Compose
+    # would otherwise keep the existing container.
+    echo "recreating unified-api to restore the previous database role passwords"
+    docker compose up -d --wait --wait-timeout "$RECONCILE_PG_WAIT_SEC" postgres || return 1
+    docker compose up -d --force-recreate --no-deps \
+      --wait --wait-timeout "$RECONCILE_API_WAIT_SEC" --no-build unified-api || return 1
+  fi
   # Unified Snapshot's first cycle calls several external/Tor markets and can
   # legitimately exceed twenty minutes before writing its success marker. With
   # per-service tags, Compose keeps its existing container unless its image or
   # service configuration actually changed.
   docker compose up -d --remove-orphans \
-    --wait --wait-timeout 1800 --no-build || return 1
+    --wait --wait-timeout "$STACK_WAIT_SEC" --no-build || return 1
   mapfile -t restart_services < <(
     config_services_to_recreate "$from_sha" "$sha" "$certificate_changed"
   )
   if ((${#restart_services[@]})); then
     docker compose up -d --force-recreate --no-deps \
-      --wait --wait-timeout 120 --no-build "${restart_services[@]}" || return 1
+      --wait --wait-timeout "$RESTART_WAIT_SEC" --no-build "${restart_services[@]}" || return 1
   fi
   smoke || return 1
 }
@@ -696,10 +740,14 @@ dump_failing_logs() {
   while IFS= read -r service; do
     [[ -n "$service" ]] || continue
     echo "=== $service ==="
+    # Inspect only runtime state, not Config.Env (which contains secrets).
+    # State.Health includes probe timestamps, exit codes and output; State also
+    # exposes OOMKilled/ExitCode for failures absent from application logs.
+    docker inspect --format 'state={{json .State}} restart_count={{.RestartCount}}' "$service" 2>&1 || true
     docker logs --tail 80 "$service" 2>&1 || true
   done < <(
     docker compose ps -a --format '{{.Name}}\t{{.State}}\t{{.Health}}' 2>/dev/null |
-      awk -F '\t' 'tolower($2) != "running" || tolower($3) == "unhealthy" {print $1}'
+      awk -F '\t' 'tolower($2) != "running" || tolower($3) == "unhealthy" || tolower($3) == "starting" {print $1}'
   )
   echo "--- all container states ---"
   docker compose ps -a 2>/dev/null || true
@@ -711,8 +759,6 @@ if [[ "$prev_sha" =~ ^[0-9a-f]{40}$ ]]; then
   ensure_previous_image_manifest "$prev_sha" || exit 1
   previous_manifest="$release_root/$prev_sha/images.env"
 fi
-validate_changed_services_cover_image_inputs \
-  "$previous_manifest" "$new_sha" || exit 1
 build_candidate_image_manifest "$previous_manifest" "$candidate_manifest"
 
 finalize_release() {
@@ -745,6 +791,10 @@ echo "deploy of $new_sha failed; rolling back to ${prev_sha:-<none>}" >&2
 if [[ "$prev_sha" =~ ^[0-9a-f]{40}$ &&
       -d "$release_root/$prev_sha/env" &&
       -f "$release_root/$prev_sha/images.env" ]]; then
+  if "$migration_started" &&
+     ! database_role_passwords_match "$env_bundle" "$release_root/$prev_sha/env"; then
+    reconcile_roles=true
+  fi
   if start_release \
     "$prev_sha" \
     "$release_root/$prev_sha/env" \

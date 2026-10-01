@@ -4,10 +4,57 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"sync"
 	"time"
 
 	"commons/hedge"
 )
+
+// persistedFeeSnapshotCacheTTL bounds staleness of in-memory CEX fee
+// snapshots. Snapshots refresh on the snapshot cadence and stay usable for
+// FeeSnapshotStaleAfter (an hour); a minute-scale TTL keeps pricing fresh
+// while collapsing the thousands of per-request snapshot reads — one per CEX
+// per spot/withdrawal/availability access inside the per-offer pricing loop —
+// into one read per CEX per TTL window.
+const persistedFeeSnapshotCacheTTL = time.Minute
+
+type cachedFeeSnapshot struct {
+	fees      PersistedFees
+	fetchedAt time.Time
+}
+
+// persistedFeeSnapshotCache coalesces snapshot reads for one CEX.
+type persistedFeeSnapshotCache struct {
+	mu      sync.Mutex
+	ttl     time.Duration
+	entries map[string]cachedFeeSnapshot
+}
+
+func newPersistedFeeSnapshotCache(ttl time.Duration) *persistedFeeSnapshotCache {
+	return &persistedFeeSnapshotCache{ttl: ttl, entries: make(map[string]cachedFeeSnapshot)}
+}
+
+// get returns the cached snapshot for cex, loading it once per TTL window.
+// Load errors are not cached, so a failing database is retried on the next
+// access instead of serving a stale error.
+func (c *persistedFeeSnapshotCache) get(cex string, load func() (PersistedFees, error)) (PersistedFees, error) {
+	now := time.Now()
+	c.mu.Lock()
+	if e, ok := c.entries[cex]; ok && now.Sub(e.fetchedAt) < c.ttl {
+		fees := e.fees
+		c.mu.Unlock()
+		return fees, nil
+	}
+	c.mu.Unlock()
+	fees, err := load()
+	if err != nil {
+		return fees, err
+	}
+	c.mu.Lock()
+	c.entries[cex] = cachedFeeSnapshot{fees: fees, fetchedAt: now}
+	c.mu.Unlock()
+	return fees, nil
+}
 
 // Input carries everything the CEX-combo optimizer needs to price and rank the
 // active exchanges for one offer.
@@ -92,10 +139,13 @@ func NewEngine(db *sql.DB) *Engine {
 func NewEngineWithWithdrawalResolver(db *sql.DB, resolver func(cex string, persisted float64) float64) *Engine {
 	cexes := SupportedCEXes()
 	reader := persistedFeeReader{db: db}
+	snapshotCache := newPersistedFeeSnapshotCache(persistedFeeSnapshotCacheTTL)
 	load := func(cex string) (PersistedFees, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return reader.get(ctx, cex)
+		return snapshotCache.get(cex, func() (PersistedFees, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return reader.get(ctx, cex)
+		})
 	}
 	cache := newCachedHedgeInput(feeTTL, nil, &reader)
 	return &Engine{

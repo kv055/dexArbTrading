@@ -34,6 +34,9 @@ compose_services=(
 # Vite runs over local HTTP, so its login cookie must not carry Secure.
 export SESSION_COOKIE_SECURE=false
 
+echo "dev-server: migrating the local database"
+bash "$ROOT/scripts/migrate-local-db.sh"
+
 echo "dev-server: starting backend services (detached)"
 docker compose --project-directory "$ROOT" -f "$ROOT/docker-compose.yml" up -d --build "${compose_services[@]}"
 
@@ -47,3 +50,7 @@ fi
 echo "dev-server: backend and Vite are running detached"
 echo "dev-server: attach to Vite logs with: tmux attach -t vite"
 echo "dev-server: stop Vite with: tmux kill-session -t vite"
+
+# Advisory only: dependency findings or registry outages must not fail startup.
+node "$ROOT/scripts/audit-frontend-dependencies.cjs" "$FRONTEND" || \
+	echo "dev-server: WARNING: dependency audit could not run; check manually with npm audit --include=dev in $FRONTEND" >&2

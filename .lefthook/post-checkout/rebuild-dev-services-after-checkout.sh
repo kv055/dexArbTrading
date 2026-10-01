@@ -111,5 +111,14 @@ if ((${#affected_services[@]} == 0)); then
 fi
 
 echo "dev-server: branch checkout changed: ${affected_services[*]}"
+for service in "${affected_services[@]}"; do
+	case "$service" in
+		unified-api|unified-snapshot)
+			echo "dev-server: migrating the local database before restarting $service"
+			bash "$root_dir/scripts/migrate-local-db.sh"
+			break
+			;;
+	esac
+done
 echo "dev-server: rebuilding affected running services"
 "${compose[@]}" up -d --build "${affected_services[@]}"

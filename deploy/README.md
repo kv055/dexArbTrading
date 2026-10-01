@@ -178,6 +178,46 @@ Tests and image builds run in GitHub Actions ([`.github/workflows/ci-cd.yml`](..
    rollout. Run artifacts: `.deploy/runs/<sha>/{pid,deploy.log,result}`.
 4. Post-activate cleanup removes staging only when that SHA is not still running.
 
+Activation starts Postgres, runs `unified-api ./server migrate` from the pinned
+candidate image with the staged environment, then starts the app services. A
+migration failure aborts candidate app startup. Rollback restores the prior
+release without applying schema migrations; schema changes must therefore be
+compatible with the previous release (see the expand/contract rule and
+`TestNewMigrationsDeclareRollbackCompatibility` in `dexUnifiedApi/README.md`). App startup retains role/password
+reconciliation, but only checks schema history.
+
+The migrate step is bounded while the previous release keeps serving:
+
+- It runs only on images labelled `dexarbtrading.unified-api.migrate=1`. An
+  older binary would ignore the argument and start a second API server, so an
+  unlabelled image (usually a stale `dexUnifiedApi` submodule pointer) fails
+  activation immediately.
+- The one-off `dexarb-migrate-<sha>` container is stopped and removed after
+  `DEPLOY_MIGRATION_TIMEOUT_SEC` (default 900).
+- Each migration waits at most 5 seconds for a table lock and retries up to 10
+  times, so a long application transaction cannot queue live queries behind a
+  pending exclusive lock.
+- The migrate step applies the candidate's database role passwords. If
+  activation then fails and those passwords differ from the previous release,
+  rollback starts Postgres and recreates `unified-api` with the restored
+  environment before waiting for the whole stack. Its startup reapplies the
+  previous passwords, allowing unhealthy containers to reconnect.
+
+CI polls the detached deployment for up to 120 minutes. Both GitHub and Gitea
+allow 130 minutes for activation and 140 minutes for the deploy job, reserving
+time for staging and cleanup. This covers the worst-case critical path —
+migration, both 30-minute stack health waits, password restoration — plus
+smoke probes and transfer overhead. These are maximum waits; successful
+deployments finish immediately. When overriding migration or polling limits,
+adjust the enclosing CI limits too.
+
+CI computes image changes against each service's source in the production
+baseline. The VPS verifies that baseline is still current and checks build
+receipts and digests; it does not recompute source diffs from submodule objects.
+Failed activation logs include Docker healthcheck timestamps, exit codes and
+output, OOM/exit state, restart counts, and recent application logs for unhealthy,
+starting, or stopped containers.
+
 This keeps the VPS thin: no builds, no test runs — just an SSH endpoint for docker compose commands.
 
 To pull private GHCR images, run `docker login ghcr.io` once as the deploy user on the VPS using a read-only PAT (classic token with `read:packages` scope).

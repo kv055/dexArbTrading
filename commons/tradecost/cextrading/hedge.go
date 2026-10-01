@@ -19,20 +19,29 @@ func round2(v float64) float64 { return math.Round(v*1e2) / 1e2 }
 // Hedge perp-input cache (live funding/fee inputs per venue)
 // ---------------------------------------------------------------------------
 
+// feeSnapshotSource loads one provider's persisted fee snapshot. It is an
+// interface (rather than *persistedFeeReader directly) so tests can stub the
+// database with a counting fake.
+type feeSnapshotSource interface {
+	get(ctx context.Context, provider string) (PersistedFees, error)
+}
+
 type cachedHedgeInput struct {
 	mu        sync.Mutex
 	values    map[hedge.Venue]hedge.LivePerpInputs
 	fetched   map[hedge.Venue]time.Time
+	fetchErr  map[hedge.Venue]error
 	inflight  map[hedge.Venue]chan struct{}
 	ttl       time.Duration
 	provider  exchangecredentials.Provider
-	feeReader *persistedFeeReader
+	feeReader feeSnapshotSource
 }
 
-func newCachedHedgeInput(ttl time.Duration, provider exchangecredentials.Provider, feeReader *persistedFeeReader) *cachedHedgeInput {
+func newCachedHedgeInput(ttl time.Duration, provider exchangecredentials.Provider, feeReader feeSnapshotSource) *cachedHedgeInput {
 	return &cachedHedgeInput{
 		values:    map[hedge.Venue]hedge.LivePerpInputs{},
 		fetched:   map[hedge.Venue]time.Time{},
+		fetchErr:  map[hedge.Venue]error{},
 		inflight:  map[hedge.Venue]chan struct{}{},
 		ttl:       ttl,
 		provider:  provider,
@@ -43,20 +52,17 @@ func newCachedHedgeInput(ttl time.Duration, provider exchangecredentials.Provide
 func (c *cachedHedgeInput) get(venue hedge.Venue) (hedge.LivePerpInputs, error) {
 	c.mu.Lock()
 	if fetchedAt, ok := c.fetched[venue]; ok && time.Since(fetchedAt) < c.ttl {
-		value := c.values[venue]
+		value, ferr := c.values[venue], c.fetchErr[venue]
 		c.mu.Unlock()
-		return value, nil
+		return value, ferr
 	}
 	if ch, ok := c.inflight[venue]; ok {
 		c.mu.Unlock()
 		<-ch
 		c.mu.Lock()
-		value, ok := c.values[venue]
+		value, ferr := c.values[venue], c.fetchErr[venue]
 		c.mu.Unlock()
-		if ok {
-			return value, nil
-		}
-		return hedge.LivePerpInputs{}, fmt.Errorf("hedge inputs unavailable for %s", venue)
+		return value, ferr
 	}
 	ch := make(chan struct{})
 	c.inflight[venue] = ch
@@ -100,8 +106,15 @@ func (c *cachedHedgeInput) get(venue hedge.Venue) (hedge.LivePerpInputs, error) 
 	c.mu.Lock()
 	if err == nil {
 		c.values[venue] = inputs
-		c.fetched[venue] = time.Now()
+	} else {
+		// Drop any stale success so the fresh failure is authoritative below.
+		delete(c.values, venue)
 	}
+	// Stamp even on failure: incomplete persisted fees won't resolve within
+	// seconds, and without this every offer re-fetches per venue (thousands
+	// of redundant reads per request). Same convention as cachedFee.
+	c.fetchErr[venue] = err
+	c.fetched[venue] = time.Now()
 	close(ch)
 	delete(c.inflight, venue)
 	c.mu.Unlock()

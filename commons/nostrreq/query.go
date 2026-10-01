@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/nbd-wtf/go-nostr"
 )
 
 const (
@@ -42,6 +43,27 @@ type Event struct {
 	Kind      int        `json:"kind"`
 	Tags      [][]string `json:"tags"`
 	Content   string     `json:"content"`
+	Sig       string     `json:"sig"`
+}
+
+// ValidSignature verifies both the canonical NIP-01 event id and its Schnorr
+// signature. Public order-book data is an execution input, so callers must not
+// allow an unsigned or forged replaceable event to supersede valid state.
+func (e Event) ValidSignature() bool {
+	tags := make(nostr.Tags, len(e.Tags))
+	for i := range e.Tags {
+		tags[i] = nostr.Tag(e.Tags[i])
+	}
+	event := nostr.Event{
+		ID: e.ID, PubKey: e.PubKey, CreatedAt: nostr.Timestamp(e.CreatedAt),
+		Kind: e.Kind, Content: e.Content, Sig: e.Sig,
+		Tags: tags,
+	}
+	if !event.CheckID() {
+		return false
+	}
+	ok, err := event.CheckSignature()
+	return err == nil && ok
 }
 
 // TagValue returns the first value for tag name, or "".
@@ -174,7 +196,13 @@ func queryWithDialer(ctx context.Context, dialer *websocket.Dialer, relays []str
 		}
 		return out, lastErr
 	}
-	out.Events = mergeAddressable(all)
+	verified := all[:0]
+	for _, event := range all {
+		if event.ValidSignature() {
+			verified = append(verified, event)
+		}
+	}
+	out.Events = mergeAddressable(verified)
 	return out, nil
 }
 

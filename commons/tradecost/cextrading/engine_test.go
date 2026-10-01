@@ -1,11 +1,25 @@
 package cextrading
 
 import (
+	"context"
 	"database/sql"
 	"math"
 	"testing"
 	"time"
+
+	"commons/hedge"
 )
+
+type countingFeeSnapshotSource struct {
+	calls int
+	fees  PersistedFees
+	err   error
+}
+
+func (f *countingFeeSnapshotSource) get(context.Context, string) (PersistedFees, error) {
+	f.calls++
+	return f.fees, f.err
+}
 
 func TestBestUsesLastKnownKrakenFeesForHedgefullAndHedgeless(t *testing.T) {
 	now := time.Now()
@@ -287,5 +301,118 @@ func TestAllowNoHedgeReturnsSpotOnlyWhenHedgesDisabled(t *testing.T) {
 	}
 	if sel.HedgeFeeBTC != 0 || sel.Hedge.Venue != "" {
 		t.Fatalf("expected empty hedge on spot-only selection: %+v", sel)
+	}
+}
+
+// TestPersistedFeeSnapshotCacheCoalescesReads guards the per-offer pricing
+// loop: repeated snapshot reads for one CEX must hit the database once per
+// TTL window, not once per fee access (taker + withdrawal + availability per
+// CEX per offer previously issued a query each).
+func TestPersistedFeeSnapshotCacheCoalescesReads(t *testing.T) {
+	calls := 0
+	cache := newPersistedFeeSnapshotCache(time.Minute)
+	load := func() (PersistedFees, error) {
+		calls++
+		return PersistedFees{SpotTakerFeeRate: sql.NullFloat64{Float64: 0.001, Valid: true}}, nil
+	}
+	for i := 0; i < 10; i++ {
+		fees, err := cache.get("kraken", load)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if fees.SpotTakerFeeRate.Float64 != 0.001 {
+			t.Fatalf("cached fee = %v, want 0.001", fees.SpotTakerFeeRate.Float64)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("loader called %d times for 10 reads, want 1", calls)
+	}
+	if _, err := cache.get("coinbase", load); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("loader called %d times after second CEX, want 2", calls)
+	}
+}
+
+// TestPersistedFeeSnapshotCacheReloadsAfterTTL ensures entries expire: with a
+// zero TTL every access reloads, and load errors are never cached.
+func TestPersistedFeeSnapshotCacheReloadsAfterTTL(t *testing.T) {
+	calls := 0
+	cache := newPersistedFeeSnapshotCache(0)
+	load := func() (PersistedFees, error) {
+		calls++
+		return PersistedFees{}, nil
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := cache.get("kraken", load); err != nil {
+			t.Fatalf("get: %v", err)
+		}
+	}
+	if calls != 3 {
+		t.Fatalf("loader called %d times for 3 reads past TTL, want 3", calls)
+	}
+
+	failures := 0
+	failing := func() (PersistedFees, error) {
+		failures++
+		return PersistedFees{}, sql.ErrNoRows
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := cache.get("kraken", failing); err == nil {
+			t.Fatal("expected load error to propagate")
+		}
+	}
+	if failures != 2 {
+		t.Fatalf("failing loader called %d times, want 2 (errors must not cache)", failures)
+	}
+}
+
+// TestCachedHedgeInputCachesFailures guards the per-offer pricing loop:
+// venues with incomplete persisted fees must fetch once per TTL window, not
+// once per offer per venue (previously every failing lookup re-queried,
+// thousands of redundant reads per request).
+func TestCachedHedgeInputCachesFailures(t *testing.T) {
+	src := &countingFeeSnapshotSource{err: sql.ErrNoRows}
+	cache := newCachedHedgeInput(time.Minute, nil, src)
+	for i := 0; i < 10; i++ {
+		if _, err := cache.get(hedge.VenueKrakenFutures); err == nil {
+			t.Fatal("expected load error to propagate")
+		}
+	}
+	if src.calls != 1 {
+		t.Fatalf("failing reader called %d times for 10 reads, want 1", src.calls)
+	}
+	if _, err := cache.get(hedge.VenueCoinbaseFutures); err == nil {
+		t.Fatal("expected load error to propagate")
+	}
+	if src.calls != 2 {
+		t.Fatalf("failing reader called %d times after second venue, want 2", src.calls)
+	}
+}
+
+// TestCachedHedgeInputCachesSuccesses ensures the success path still
+// coalesces reads after the failure-caching change.
+func TestCachedHedgeInputCachesSuccesses(t *testing.T) {
+	now := time.Now()
+	src := &countingFeeSnapshotSource{fees: PersistedFees{
+		FuturesOpenTakerRate:   sql.NullFloat64{Float64: 0.0005, Valid: true},
+		FuturesCloseTakerRate:  sql.NullFloat64{Float64: 0.0005, Valid: true},
+		FuturesFundingRate:     sql.NullFloat64{Float64: 0.0001, Valid: true},
+		FundingIntervalSeconds: sql.NullInt64{Int64: 28800, Valid: true},
+		FetchedAt:              sql.NullTime{Time: now, Valid: true},
+	}}
+	cache := newCachedHedgeInput(time.Minute, nil, src)
+	for i := 0; i < 5; i++ {
+		inputs, err := cache.get(hedge.VenueKrakenFutures)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if inputs.Venue != string(hedge.VenueKrakenFutures) {
+			t.Fatalf("venue = %q, want kraken futures", inputs.Venue)
+		}
+	}
+	if src.calls != 1 {
+		t.Fatalf("reader called %d times for 5 reads, want 1", src.calls)
 	}
 }
