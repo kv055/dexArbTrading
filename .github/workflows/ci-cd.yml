@@ -18,8 +18,11 @@ on:
       - 'dexMmTradingLogicHummingBot/**'
       - '.gitignore'
       - 'LICENSE'
+  # No `main` here on purpose: the auto-opened develop → main promote PR
+  # must not start a second run (the push run already tested that SHA).
+  # Feature PRs targeting develop still get CI.
   pull_request:
-    branches: [main, develop]
+    branches: [develop]
     paths-ignore:
       - '**.md'
       - '.vscode/**'
