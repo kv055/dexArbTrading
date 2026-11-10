@@ -102,7 +102,7 @@ services:
       # arg the image silently builds at the Dockerfile's ARG default and the
       # env below drifts out of sync with what actually runs.
       args:
-        - BISQ_VERSION=1.10.8
+        - BISQ_VERSION=1.10.11
     depends_on:
       tor:
         condition: service_healthy
@@ -111,7 +111,7 @@ services:
       unified-api:
         condition: service_healthy
     environment:
-      - BISQ_VERSION=1.10.8
+      - BISQ_VERSION=1.10.11
       - BISQ_ACCOUNT_PROVIDER=Bisq
       - BISQ_ACCOUNT_FILE_PATH=${BISQ_ACCOUNT_FILE_PATH:-}
       - BISQ_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
@@ -139,7 +139,7 @@ services:
       context: ./dexUnifiedApi
       dockerfile: Dockerfile.bisq2
       args:
-        - BISQ2_VERSION=2.1.11
+        - BISQ2_VERSION=2.1.15
     depends_on:
       tor:
         condition: service_healthy
@@ -148,7 +148,7 @@ services:
       unified-api:
         condition: service_healthy
     environment:
-      - BISQ2_VERSION=2.1.11
+      - BISQ2_VERSION=2.1.15
       - BISQ2_ACCOUNT_FILE_PATH=${BISQ2_ACCOUNT_FILE_PATH:-}
       - BISQ2_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       - BISQ2_SEED_BACKUP_DATABASE_URL=postgres://dex_unified_api:${POSTGRES_UNIFIED_API_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
@@ -161,8 +161,9 @@ services:
     ports:
       # Loopback only: host-side dev tooling / curl reaches the REST API.
       # Sibling containers use http://bisq2:8090, not this publish. The API has
-      # no static-password auth in v2.1.11 (only device-pairing), so it must
-      # never be published on a public interface.
+      # no static-password auth (only device-pairing; bisq2-startup.sh turns
+      # authorization and session handling off), so it must never be published
+      # on a public interface.
       - "127.0.0.1:8090:8090"
     deploy:
       resources:
@@ -504,10 +505,10 @@ services:
       # bisq container did not publish 9998 to the host.
       - BISQ_GRPC_HOST=bisq:9998
       - BISQ_API_PASSWORD=${BISQ_API_PASSWORD:-}
-      - BISQ_VERSION=1.10.8
+      - BISQ_VERSION=1.10.11
       - BISQ2_REST_HOST=bisq2:8090
       - BISQ2_API_PASSWORD=${BISQ2_API_PASSWORD:-}
-      - BISQ2_VERSION=2.1.11
+      - BISQ2_VERSION=2.1.15
       - ACCOUNT_HEALTH_INTERVAL=${ACCOUNT_HEALTH_INTERVAL:-10m}
       - MM_CEX_CAPABILITY_MAX_AGE=${MM_CEX_CAPABILITY_MAX_AGE:-30m}
       # Alert after a Bisq buyer's fiat-sent signal remains unmatched this long.

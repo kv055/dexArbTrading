@@ -142,7 +142,7 @@ func (ndf *NetworkDataFetcher) FetchBlockHeight() (int32, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return 0, fmt.Errorf("failed to read response body: %w", err)
 	}

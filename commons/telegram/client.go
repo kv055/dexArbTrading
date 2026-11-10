@@ -95,7 +95,7 @@ func postWithToken(ctx context.Context, token, method string, body map[string]an
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(resp.Body)
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return raw, resp.StatusCode, nil
 }
 
@@ -141,7 +141,7 @@ func (c *Client) post(ctx context.Context, method string, body map[string]any) (
 	}
 	defer resp.Body.Close()
 	recordAPICall(method, resp.StatusCode, nil)
-	raw, _ := io.ReadAll(resp.Body)
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return raw, resp.StatusCode, nil
 }
 
