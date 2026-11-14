@@ -1,4 +1,4 @@
-site_name: dexArbTrading Docs
+site_name: dexPendulum Docs
 docs_dir: src
 site_dir: /tmp/mkdocs-site
 
@@ -12,4 +12,4 @@ nav:
   - PushPush Relay pairing: pushpush-relay-pairing.md
   - dexMonitor: '!include ../dexMonitor/mkdocs.yml'
   - dexUnifiedApi: '!include ../dexUnifiedApi/mkdocs.yml'
-  - dexMmController: '!include ../dexMmController/mkdocs.yml'
+  - dexTakerController: '!include ../dexTakerController/mkdocs.yml'

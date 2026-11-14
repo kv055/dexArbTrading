@@ -1,5 +1,5 @@
 // Package metrics provides shared Prometheus HTTP instrumentation for the
-// dexArbTrading Go services.
+// dexPendulum Go services.
 //
 // Each service builds its registry via NewServiceRegistry, wraps its
 // http.ServeMux with Middleware, and exposes /metrics with Handler.

@@ -10,7 +10,7 @@
 #   .env
 #   dexUnifiedApi/.env
 #   dexMonitor/.env
-#   dexMmController/.env
+#   dexTakerController/.env
 #   dexFiatController/.env
 set -euo pipefail
 
@@ -187,7 +187,7 @@ validate_tree() {
   validate_file root "$mode" "$root/$suffix"
   validate_file unified-api "$mode" "$root/dexUnifiedApi/$suffix"
   validate_file monitor "$mode" "$root/dexMonitor/$suffix"
-  validate_file mm-controller "$mode" "$root/dexMmController/$suffix"
+  validate_file mm-controller "$mode" "$root/dexTakerController/$suffix"
   validate_file fiat-controller "$mode" "$root/dexFiatController/$suffix"
 }
 

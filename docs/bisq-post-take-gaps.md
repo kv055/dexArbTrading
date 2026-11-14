@@ -27,7 +27,7 @@ The Bisq integration spans four services:
 
 | Component | Role |
 |---|---|
-| `dexMmController` | Orchestrator: pre-trade checks, LND pool → Bisq wallet funding, offer taking, release worker |
+| `dexTakerController` | Orchestrator: pre-trade checks, LND pool → Bisq wallet funding, offer taking, release worker |
 | `dexFiatController` | Scrapes fiat payment notifications (email/push), matches them to trades, triggers release webhook |
 | `dexUnifiedApi` | Fetches Bisq v1 offers via gRPC snapshotter, routes/resolves trades |
 | `dexMonitor` | Dormant Bisq closed-trades stats reader (`internal/bisqstats/`) |
@@ -35,28 +35,28 @@ The Bisq integration spans four services:
 ### Key files
 
 **Bisq v1 gRPC client (dynamic protobuf, complete):**
-- `dexMmController/internal/exchangeconnectors/dex/bisq/client.go` — full client incl. hand-built file descriptor (lines 749–951): `TakeOffer` (:340), `GetPosition` (:397), `GetOpenPositions` (:379), `ConfirmPaymentReceived` (:423), `GetCounterpartyPayment` (:439), `GetFundingAddresses` (:515), `FundingAddress` (:532), payment-account CRUD (:202–337)
+- `dexTakerController/internal/exchangeconnectors/dex/bisq/client.go` — full client incl. hand-built file descriptor (lines 749–951): `TakeOffer` (:340), `GetPosition` (:397), `GetOpenPositions` (:379), `ConfirmPaymentReceived` (:423), `GetCounterpartyPayment` (:439), `GetFundingAddresses` (:515), `FundingAddress` (:532), payment-account CRUD (:202–337)
 
-**Bisq 2 connector:** `dexMmController/internal/exchangeconnectors/dex/bisq2/client.go` — **chat transport only**. No offer/take/trade APIs.
+**Bisq 2 connector:** `dexTakerController/internal/exchangeconnectors/dex/bisq2/client.go` — **chat transport only**. No offer/take/trade APIs.
 
-**Orchestration:** `dexMmController/internal/tradeflow/{tradeflow,hedgeless,persist,recovery}.go`; taker/releaser in `dexMmController/internal/dexaccount/{taker,releaser,payments,direct_resolver}.go`
+**Orchestration:** `dexTakerController/internal/tradeflow/{tradeflow,hedgeless,persist,recovery}.go`; taker/releaser in `dexTakerController/internal/dexaccount/{taker,releaser,payments,direct_resolver}.go`
 
 ### Step-by-step assessment
 
 #### 1. Offer selection — implemented
 
 - `dexUnifiedApi/cmd/snapshot/main.go:301-333` — fetches Bisq v1 offers over gRPC (`stub.GetOffers`). Uses patched `offerinfo-witness.patch` for account-age witness data.
-- `dexMmController/internal/premiumoffers/watcher.go:308` (`bestOffer` — highest net-premium) and `:355` (`takeBestOffer`) auto-select and record candidates; also manual UI selection flows into `tradeflow.Order.OfferID` (`tradeflow/tradeflow.go:64`).
+- `dexTakerController/internal/premiumoffers/watcher.go:308` (`bestOffer` — highest net-premium) and `:355` (`takeBestOffer`) auto-select and record candidates; also manual UI selection flows into `tradeflow.Order.OfferID` (`tradeflow/tradeflow.go:64`).
 
 #### 2. Pre-trade checks — implemented
 
-- `dexMmController/internal/pretrade/checker.go` — `BidChecker` (858 lines): CEX balance, whitelist, API permissions, payment setup/chat templates, LND/Lightning pool liquidity, LSP/swap-quote checks.
+- `dexTakerController/internal/pretrade/checker.go` — `BidChecker` (858 lines): CEX balance, whitelist, API permissions, payment setup/chat templates, LND/Lightning pool liquidity, LSP/swap-quote checks.
 - Invoked in hedgefull path at `tradeflow/tradeflow.go:345` (gating at `preTradePassed` :519, with `onchain_direct` whitelist exemption :525) and hedgeless path at `tradeflow/hedgeless.go:123-139`.
 
 #### 3. BTC from LND pool/wallet to Bisq wallet — implemented
 
 - Hedgeless route: `tradeflow/hedgeless.go:222-256` (`fundHedgelessDEX`, bisq branch) — explicit ordering "LND send → observe Bisq balance → take offer": `tf.hedgelessWallet.SendOnChain(ctx, address, amountSat, ...)` at :241, then `waitForBisqFunding` (:362-382, polls `DirectBalanceBTC` vs baseline+amount, 10 min timeout).
-- Address/balance source: `dexMmController/internal/dexaccount/direct_resolver.go:26` (`DirectDestination` → `bisq.FundingAddress`) and `:41` (`DirectBalanceBTC` → `GetFundingAddresses`).
+- Address/balance source: `dexTakerController/internal/dexaccount/direct_resolver.go:26` (`DirectDestination` → `bisq.FundingAddress`) and `:41` (`DirectBalanceBTC` → `GetFundingAddresses`).
 - Hedgefull direct route: CEX withdrawal targets the Bisq wallet directly (`tradeflow/tradeflow.go:536-549`, `resolveWithdrawTarget`).
 
 #### 4. Pool refill — implemented (hedgeless mode)
@@ -127,7 +127,7 @@ A later message asked for a more detailed explanation of Gap 1 before building. 
 
 **Context:** Today `StatusDexPositionTaken` rows for Bisq only get anomaly checks (`healthcheck.go:362-363`); fiat arrival relies solely on dexFiatController scraping. If a notification is missed, the trade stalls silently.
 
-**Where:** `verifyDexPositionTaken`, case `db.DexBisq` (`dexMmController/internal/healthcheck/healthcheck.go:362`) — this already runs every tick (~30s) via `RunPeriodic`.
+**Where:** `verifyDexPositionTaken`, case `db.DexBisq` (`dexTakerController/internal/healthcheck/healthcheck.go:362`) — this already runs every tick (~30s) via `RunPeriodic`.
 
 **Changes (original plan):**
 
@@ -150,14 +150,14 @@ A later message asked for a more detailed explanation of Gap 1 before building. 
 
 ### Gap 3 — Dead code cleanup (not in first implementation)
 
-**Where:** `pollBisqDeposit` (`dexMmController/internal/dexaccount/taker.go:222-233`) fetches the trade then discards it.
+**Where:** `pollBisqDeposit` (`dexTakerController/internal/dexaccount/taker.go:222-233`) fetches the trade then discards it.
 
 **Options:** either delete it and its dispatch entry (Bisq deposits are pre-funded, so it serves no purpose), or implement it to return the trade's deposit tx data for persistence into `TakeResult.Execution`. Deletion is the recommended option.
 
 ### Testing & verification (original plan)
 
 - Unit tests per module following existing patterns: healthcheck tests for the three new Bisq branches (phase escalation, release completion, dispute alerting), connector tests for the phase helper.
-- Run `go build ./... && go test ./...` in `dexMmController`.
+- Run `go build ./... && go test ./...` in `dexTakerController`.
 - Docs: update `healthcheck/README.md` and `docs/internal/exchanges/dex/bisq/client.md` if signatures change (a docs-sync pass fits the repo's skill).
 
 ### Open questions from the original plan (resolved)
@@ -262,7 +262,7 @@ comparisons against Bisq internals.
 
 ### Verification
 
-`go build ./... && go test ./...` in `dexMmController`, then a docs-sync pass on the touched doc pages.
+`go build ./... && go test ./...` in `dexTakerController`, then a docs-sync pass on the touched doc pages.
 
 ---
 

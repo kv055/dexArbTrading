@@ -44,7 +44,7 @@ Anything else (or no destination) → GitHub.
 |------|-------------------|-----------------|
 | Parent branch | `develop` | `develop` |
 | Submodule branch | `main` (all four) | `main` (all four) |
-| Submodules | `dexFiatController`, `dexMmController`, `dexMonitor`, `dexUnifiedApi` | same |
+| Submodules | `dexFiatController`, `dexTakerController`, `dexMonitor`, `dexUnifiedApi` | same |
 | CI workflow | `.github/workflows/ci-cd.yml` | `.gitea/workflows/ci.yml` |
 | CI monitor | `gh` CLI — [references/github-ci.md](references/github-ci.md) | Gitea API — [references/gitea-ci.md](references/gitea-ci.md) |
 | Creds / auth | `gh` (logged-in GitHub account) | `deploy/provision/gitea/.env.gitea` (`GITEA_URL`, `GITEA_OWNER`, `GITEA_TOKEN`) |

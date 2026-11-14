@@ -2,7 +2,7 @@
 
 Requires `gh` authenticated to github.com (token already available via keyring for this repo). Never print tokens.
 
-Parent repo: `kv055/dexArbTrading`. Workflow file: `.github/workflows/ci-cd.yml` (name: **CI/CD**).
+Parent repo: `kv055/dexPendulum`. Workflow file: `.github/workflows/ci-cd.yml` (name: **CI/CD**).
 
 ## Find the run for a pushed SHA
 
@@ -71,4 +71,4 @@ Only re-run after the underlying cause is fixed (or user asked to retry without 
 gh run view "$RUN_ID" --json url -q .url
 ```
 
-Shape: `https://github.com/kv055/dexArbTrading/actions/runs/<id>`
+Shape: `https://github.com/kv055/dexPendulum/actions/runs/<id>`

@@ -124,7 +124,7 @@ env_paths=(
   ".env"
   "dexUnifiedApi/.env"
   "dexMonitor/.env"
-  "dexMmController/.env"
+  "dexTakerController/.env"
   "dexFiatController/.env"
 )
 mapfile -t image_services < <(image_input_services)

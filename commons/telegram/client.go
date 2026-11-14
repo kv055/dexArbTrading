@@ -1,5 +1,5 @@
 // Package telegram provides a shared Telegram Bot API client and trade-chat relay
-// utilities used by dexMmController and dexFiatController.
+// utilities used by dexTakerController and dexFiatController.
 package telegram
 
 import (

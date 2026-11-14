@@ -1,4 +1,4 @@
-# dexArbTrading Docs
+# dexPendulum Docs
 
 This wiki collects the generated Go code documentation for the main trading
 services in this repository.
@@ -13,7 +13,7 @@ services in this repository.
 - [dexUnifiedApi](dexUnifiedApi/README.md) documents the unified API, snapshot
   ingestion, database helpers, lifecycle persistence, and payment notification
   code.
-- [dexMmController](dexMmController/README.md) documents the market-maker controller,
+- [dexTakerController](dexTakerController/README.md) documents the market-maker controller,
   exchange clients, wallet bridge, account health checks, and related
   orchestration code.
 

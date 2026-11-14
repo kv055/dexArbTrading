@@ -107,7 +107,7 @@ The VPS IP changes whenever Terraform recreates the box. `deploy/provision/dbeav
 deploy/provision/dbeaver-sync.sh
 ```
 
-Import it via DBeaver: **File → Import → DBeaver → Project**, then select `deploy/provision/dbeaver-out/dexarb-vps.dbp`. It imports as a separate project (`dexArbTrading-vps-import`) with the password bundled. The import always creates a new project, so to re-import after an IP change, delete the existing `dexArbTrading-vps-import` project first.
+Import it via DBeaver: **File → Import → DBeaver → Project**, then select `deploy/provision/dbeaver-out/dexarb-vps.dbp`. It imports as a separate project (`dexPendulum-vps-import`) with the password bundled. The import always creates a new project, so to re-import after an IP change, delete the existing `dexPendulum-vps-import` project first.
 
 The script also writes `deploy/provision/dbeaver-out/tabularis-dexarb-vps.json` — the same connection as a Tabularis import payload. Import via Tabularis: **Connections page → Import dropup → Tabularis JSON**. Re-importing merges by id, so regenerating and re-importing after an IP change updates the connection in place (no duplicates). Note: like Tabularis' own exports, this JSON contains the DB password in plaintext; it lives in the gitignored output directory with 600 perms.
 
@@ -271,7 +271,7 @@ chmod +x "$HOME/.local/bin/gitleaks"
 lefthook install
 
 # Each submodule
-for repo in dexFiatController dexMmController dexMonitor dexUnifiedApi; do
+for repo in dexFiatController dexTakerController dexMonitor dexUnifiedApi; do
   (cd "$repo" && lefthook install)
 done
 ```
@@ -359,7 +359,7 @@ grep DOTENV_PRIVATE_KEY_ENC .env.keys
 # Submodules
 grep DOTENV_PRIVATE_KEY_ENC dexUnifiedApi/.env.keys
 grep DOTENV_PRIVATE_KEY_ENC dexMonitor/.env.keys
-grep DOTENV_PRIVATE_KEY_ENC dexMmController/.env.keys
+grep DOTENV_PRIVATE_KEY_ENC dexTakerController/.env.keys
 grep DOTENV_PRIVATE_KEY_ENC dexFiatController/.env.keys
 ```
 
@@ -370,7 +370,7 @@ Add each value to **Settings → Secrets and variables → Actions** in the GitH
 | `DOTENV_PRIVATE_KEY_ROOT` | root `.env.keys` |
 | `DOTENV_PRIVATE_KEY_UNIFIED_API` | `dexUnifiedApi/.env.keys` |
 | `DOTENV_PRIVATE_KEY_MONITOR` | `dexMonitor/.env.keys` |
-| `DOTENV_PRIVATE_KEY_MM_CONTROLLER` | `dexMmController/.env.keys` |
+| `DOTENV_PRIVATE_KEY_MM_CONTROLLER` | `dexTakerController/.env.keys` |
 | `DOTENV_PRIVATE_KEY_FIAT_CONTROLLER` | `dexFiatController/.env.keys` |
 
 Keep `.env.keys` backed up securely (password manager, encrypted vault). If a key is lost the `.env.enc` cannot be decrypted and secrets must be rotated.
@@ -386,7 +386,7 @@ dotenvx rotate -f .env.enc
 # Submodules
 dotenvx rotate -f dexUnifiedApi/.env.enc
 dotenvx rotate -f dexMonitor/.env.enc
-dotenvx rotate -f dexMmController/.env.enc
+dotenvx rotate -f dexTakerController/.env.enc
 dotenvx rotate -f dexFiatController/.env.enc
 ```
 
@@ -438,17 +438,17 @@ If CI is unavailable, decrypt the `.env.enc` files locally and SCP them manually
 dotenvx decrypt -f .env.enc
 dotenvx decrypt -f dexUnifiedApi/.env.enc
 dotenvx decrypt -f dexMonitor/.env.enc
-dotenvx decrypt -f dexMmController/.env.enc
+dotenvx decrypt -f dexTakerController/.env.enc
 dotenvx decrypt -f dexFiatController/.env.enc
 
 # Upload
 scp .env.enc                  deploy@<vps-host>:/opt/dexArbTrading/.env
 scp dexUnifiedApi/.env.enc    deploy@<vps-host>:/opt/dexArbTrading/dexUnifiedApi/.env
 scp dexMonitor/.env.enc       deploy@<vps-host>:/opt/dexArbTrading/dexMonitor/.env
-scp dexMmController/.env.enc  deploy@<vps-host>:/opt/dexArbTrading/dexMmController/.env
+scp dexTakerController/.env.enc  deploy@<vps-host>:/opt/dexArbTrading/dexTakerController/.env
 scp dexFiatController/.env.enc deploy@<vps-host>:/opt/dexArbTrading/dexFiatController/.env
 
-ssh deploy@<vps-host> "chmod 600 /opt/dexArbTrading/.env /opt/dexArbTrading/{dexUnifiedApi,dexMonitor,dexMmController,dexFiatController}/.env"
+ssh deploy@<vps-host> "chmod 600 /opt/dexArbTrading/.env /opt/dexArbTrading/{dexUnifiedApi,dexMonitor,dexTakerController,dexFiatController}/.env"
 ```
 
 ## One-time VPS Setup
@@ -518,7 +518,7 @@ apt-get install -y docker.io docker-compose-plugin
 usermod -aG docker deploy
 
 # Clone the repo
-git clone https://github.com/<owner>/dexArbTrading.git /opt/dexArbTrading
+git clone https://github.com/<owner>/dexPendulum.git /opt/dexArbTrading
 
 # Authenticate for GHCR pulls (one-time, using a PAT with read:packages)
 sudo -u deploy docker login ghcr.io

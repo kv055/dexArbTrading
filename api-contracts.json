@@ -35,17 +35,17 @@
     },
     {
       "id": "mm-public",
-      "service": "dexMmController",
+      "service": "dexTakerController",
       "audience": "public",
-      "source": "dexMmController/api/public.openapi.yaml",
+      "source": "dexTakerController/api/public.openapi.yaml",
       "bundle": "api-docs/specs/dex-mm-controller/public.openapi.yaml",
       "migrationState": "validated-legacy"
     },
     {
       "id": "mm-internal",
-      "service": "dexMmController",
+      "service": "dexTakerController",
       "audience": "internal",
-      "source": "dexMmController/api/internal.openapi.yaml",
+      "source": "dexTakerController/api/internal.openapi.yaml",
       "bundle": "api-docs/specs/dex-mm-controller/internal.openapi.yaml",
       "migrationState": "validated-legacy"
     },
@@ -68,7 +68,7 @@
   ],
   "operationalRoutes": {
     "dexUnifiedApi": ["GET /metrics"],
-    "dexMmController": ["GET /metrics"],
+    "dexTakerController": ["GET /metrics"],
     "dexMonitor": ["GET /metrics"],
     "dexFiatController": ["GET /metrics", "* /{path...}"]
   }
