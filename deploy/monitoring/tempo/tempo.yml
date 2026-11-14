@@ -1,4 +1,4 @@
-# Tempo single-binary config for the dexArbTrading trace stack.
+# Tempo single-binary config for the dexPendulum trace stack.
 #
 # Receives OTLP from Alloy (which the Go services push to) and stores traces on
 # local disk. Reachable only on the docker network — Grafana queries it at

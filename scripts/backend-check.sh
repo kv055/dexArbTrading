@@ -18,7 +18,7 @@ if [[ ! -x "$STATICCHECK" || ! -x "$DEADCODE" ]]; then
 	exit 2
 fi
 
-modules=(commons dexFiatController dexMmController dexMonitor dexUnifiedApi)
+modules=(commons dexFiatController dexTakerController dexMonitor dexUnifiedApi)
 
 module_packages() {
 	local module="$1"

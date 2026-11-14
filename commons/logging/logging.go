@@ -1,4 +1,4 @@
-// Package logging configures slog for the dexArbTrading Go services.
+// Package logging configures slog for the dexPendulum Go services.
 //
 // Output is structured JSON on stdout, which Grafana Alloy scrapes into Loki.
 // Each record is decorated with the active trace_id/span_id (when the call site

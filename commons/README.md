@@ -1,8 +1,8 @@
 # commons
 
-`commons` is the shared Go module used by the dexArbTrading services for market data, trade-cost modelling, Bitcoin fee analysis, and hedge calculations.
+`commons` is the shared Go module used by the dexPendulum services for market data, trade-cost modelling, Bitcoin fee analysis, and hedge calculations.
 
-It is not a standalone service. It is imported by modules such as `dexMonitor`, `dexUnifiedApi`, and `dexMmController` through local module replacement in the parent workspace.
+It is not a standalone service. It is imported by modules such as `dexMonitor`, `dexUnifiedApi`, and `dexTakerController` through local module replacement in the parent workspace.
 
 ## Packages
 

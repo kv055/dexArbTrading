@@ -1,4 +1,4 @@
-// Package session provides the shared cookie-session layer for the dexArbTrading
+// Package session provides the shared cookie-session layer for the dexPendulum
 // dashboard login. A single scs session manager, backed by the Postgres
 // `sessions` table, is constructed here so every service validates the same
 // `dex_session` cookie identically (DRY).

@@ -14,7 +14,7 @@ IMAGE_INPUTS_REPO="$repo_root"
 cd "$repo_root"
 
 ALL_SERVICES="$(image_input_services | paste -sd, -)"
-ALL_MODULES="commons,dexUnifiedApi,dexMmController,dexMonitor,dexFiatController"
+ALL_MODULES="commons,dexUnifiedApi,dexTakerController,dexMonitor,dexFiatController"
 ZERO="0000000000000000000000000000000000000000"
 EVENT="${EVENT:-}"
 BEFORE="${BEFORE:-}"
@@ -113,7 +113,7 @@ test_modules_for_services() {
     *,dexmonitor,*) modules=$(add_csv "$modules" dexMonitor) ;;
   esac
   case ",$services," in
-    *,mm-controller,*) modules=$(add_csv "$modules" dexMmController) ;;
+    *,mm-controller,*) modules=$(add_csv "$modules" dexTakerController) ;;
   esac
   case ",$services," in
     *,fiat-controller,*) modules=$(add_csv "$modules" dexFiatController) ;;
@@ -123,11 +123,11 @@ test_modules_for_services() {
     modules=$(add_csv "$modules" commons)
     modules=$(add_csv "$modules" dexUnifiedApi)
     modules=$(add_csv "$modules" dexMonitor)
-    modules=$(add_csv "$modules" dexMmController)
+    modules=$(add_csv "$modules" dexTakerController)
     modules=$(add_csv "$modules" dexFiatController)
   fi
   local module
-  for module in dexUnifiedApi dexMonitor dexMmController dexFiatController; do
+  for module in dexUnifiedApi dexMonitor dexTakerController dexFiatController; do
     if repo_tree_paths_changed "$module" "$BASE" "$HEAD"; then
       modules=$(add_csv "$modules" "$module")
     fi

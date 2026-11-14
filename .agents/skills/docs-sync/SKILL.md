@@ -1,7 +1,7 @@
 ---
 name: docs-sync
 description:
-  Audit, write, rewrite, or synchronize dexArbTrading documentation with the
+  Audit, write, rewrite, or synchronize dexPendulum documentation with the
   current code. Use this skill for requests to update MkDocs pages, replace
   generated low-value docs, document Go functions, explain call flows, check
   whether service docs match implementation behavior, or update docs for
@@ -24,9 +24,9 @@ Documentation work is limited to:
 
 - Root docs: `docs/index.md`, `docs/mkdocs.yml`
 - Service docs: `dexMonitor/docs/**`, `dexUnifiedApi/docs/**`,
-  `dexMmController/docs/**`
+  `dexTakerController/docs/**`
 - Service nav files: `dexMonitor/mkdocs.yml`, `dexUnifiedApi/mkdocs.yml`,
-  `dexMmController/mkdocs.yml`
+  `dexTakerController/mkdocs.yml`
 
 Treat source code, Docker Compose configuration, scripts, migrations, and
 existing runtime behavior as the source of truth.

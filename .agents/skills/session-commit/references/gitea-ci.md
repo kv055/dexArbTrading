@@ -9,11 +9,11 @@ set -a
 # shellcheck disable=SC1091
 source deploy/provision/gitea/.env.gitea
 set +a
-REPO="${GITEA_OWNER}/dexArbTrading"
+REPO="${GITEA_OWNER}/dexPendulum"
 AUTH=(-H "Authorization: Bearer ${GITEA_TOKEN}")
 ```
 
-Repo name is `dexArbTrading` for the parent. Submodule mirrors use the same owner and their directory names.
+Repo name is `dexPendulum` for the parent. Submodule mirrors use the same owner and their directory names.
 
 ## Find the run for a pushed SHA
 
@@ -90,5 +90,5 @@ Only re-run after the underlying cause is fixed (or user asked to retry without 
 Prefer `html_url` from the run JSON when present. Fallback shape:
 
 ```text
-${GITEA_URL}/${GITEA_OWNER}/dexArbTrading/actions/runs/${RUN_ID}
+${GITEA_URL}/${GITEA_OWNER}/dexPendulum/actions/runs/${RUN_ID}
 ```

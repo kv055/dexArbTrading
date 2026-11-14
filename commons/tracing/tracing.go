@@ -1,4 +1,4 @@
-// Package tracing wires the OpenTelemetry trace SDK for the dexArbTrading Go
+// Package tracing wires the OpenTelemetry trace SDK for the dexPendulum Go
 // services and provides thin helpers to instrument the boundaries where
 // containers talk to each other (HTTP servers and clients).
 //

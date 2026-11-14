@@ -117,9 +117,9 @@ single source of truth shared with the secrets scripts. By default:
 
 | Repo | What it is |
 |---|---|
-| `dexArbTrading` | Root repo (the one you're running this from) |
+| `dexPendulum` | Root repo (the one you're running this from) |
 | `dexUnifiedApi` | Submodule |
-| `dexMmController` | Submodule |
+| `dexTakerController` | Submodule |
 | `dexMonitor` | Submodule |
 | `dexFiatController` | Submodule |
 

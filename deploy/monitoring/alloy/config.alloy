@@ -1,4 +1,4 @@
-// Grafana Alloy config for dexArbTrading.
+// Grafana Alloy config for dexPendulum.
 //
 // One agent does both observability collection jobs:
 //   1. LOGS  — discover docker containers, read their stdout/stderr, parse the
