@@ -454,12 +454,12 @@ services:
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-mm-controller:${MM_CONTROLLER_IMAGE_TAG:-${IMAGE_TAG:-latest}}
     build:
       context: .
-      dockerfile: dexMmController/Dockerfile
+      dockerfile: dexTakerController/Dockerfile
     # Bridge network: all upstreams (lnd, tor, unified-api, bisq) are reached
     # via docker DNS, not localhost. The 127.0.0.1:5001 publish below keeps
     # host-side callers (dev tooling, curl localhost:5001) working.
     env_file:
-      - ./dexMmController/.env
+      - ./dexTakerController/.env
     depends_on:
       postgres:
         condition: service_healthy
@@ -538,8 +538,8 @@ services:
       - "127.0.0.1:5001:5001"
     volumes:
       - lnd-data-fresh:/lnd:ro
-      # - ./dexMmController/secrets/lnd_seed_mnemonic:/run/secrets/lnd_seed_mnemonic:ro
-      # - ./dexMmController/secrets/lnd_aezeed_passphrase:/run/secrets/lnd_aezeed_passphrase:ro
+      # - ./dexTakerController/secrets/lnd_seed_mnemonic:/run/secrets/lnd_seed_mnemonic:ro
+      # - ./dexTakerController/secrets/lnd_aezeed_passphrase:/run/secrets/lnd_aezeed_passphrase:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5001/livez"]
       interval: 15s
@@ -953,7 +953,7 @@ services:
       - docs
     environment:
       URLS: >-
-        [{"name":"dexUnifiedApi — public","url":"/specs/dex-unified-api/public.openapi.yaml"},{"name":"dexUnifiedApi — internal","url":"/specs/dex-unified-api/internal.openapi.yaml"},{"name":"dexMmController — public","url":"/specs/dex-mm-controller/public.openapi.yaml"},{"name":"dexMmController — internal","url":"/specs/dex-mm-controller/internal.openapi.yaml"},{"name":"dexMonitor — public","url":"/specs/dex-monitor/public.openapi.yaml"},{"name":"dexMonitor — bisqstats","url":"/specs/dex-monitor/bisqstats.public.openapi.yaml"},{"name":"dexFiatController — public","url":"/specs/dex-fiat-controller/public.openapi.yaml"},{"name":"dexFiatController — internal","url":"/specs/dex-fiat-controller/internal.openapi.yaml"}]
+        [{"name":"dexUnifiedApi — public","url":"/specs/dex-unified-api/public.openapi.yaml"},{"name":"dexUnifiedApi — internal","url":"/specs/dex-unified-api/internal.openapi.yaml"},{"name":"dexTakerController — public","url":"/specs/dex-mm-controller/public.openapi.yaml"},{"name":"dexTakerController — internal","url":"/specs/dex-mm-controller/internal.openapi.yaml"},{"name":"dexMonitor — public","url":"/specs/dex-monitor/public.openapi.yaml"},{"name":"dexMonitor — bisqstats","url":"/specs/dex-monitor/bisqstats.public.openapi.yaml"},{"name":"dexFiatController — public","url":"/specs/dex-fiat-controller/public.openapi.yaml"},{"name":"dexFiatController — internal","url":"/specs/dex-fiat-controller/internal.openapi.yaml"}]
       URLS_PRIMARY_NAME: dexMonitor — public
       DISPLAY_REQUEST_DURATION: "true"
       PERSIST_AUTHORIZATION: "true"

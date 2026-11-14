@@ -16,7 +16,7 @@ Each HTTP service owns handwritten OpenAPI 3.1 source files under its `api/`
 directory. Public and service-to-service contracts are separate:
 
 - `dexUnifiedApi/api/{public,internal}.openapi.yaml`
-- `dexMmController/api/{public,internal}.openapi.yaml`
+- `dexTakerController/api/{public,internal}.openapi.yaml`
 - `dexMonitor/api/public.openapi.yaml` and
   `dexMonitor/api/bisqstats.public.openapi.yaml`
 - `dexFiatController/api/{public,internal}.openapi.yaml`

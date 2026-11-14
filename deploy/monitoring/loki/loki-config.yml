@@ -1,4 +1,4 @@
-# Loki single-binary config for the dexArbTrading log-aggregation stack.
+# Loki single-binary config for the dexPendulum log-aggregation stack.
 #
 # Filesystem storage on a single host (no object store, no clustering). Logs are
 # heavier than metrics, so retention is 7d here vs Prometheus' 30d. Reachable

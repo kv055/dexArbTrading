@@ -18,7 +18,7 @@ on:
       - '.codex'
       - '.agents/**'
       - 'deploy/provision/**'
-      - 'dexMmController/docs/**'
+      - 'dexTakerController/docs/**'
       - 'dexMonitor/docs/**'
       - 'dexUnifiedApi/docs/**'
       - 'dexMmTradingLogicHummingBot/**'
@@ -278,7 +278,7 @@ jobs:
       # Gitea act does not fan out fromJson(needs.*.outputs) matrices — keep a
       # static list and skip unchanged modules per job (see build-and-push).
       matrix:
-        module: [commons, dexUnifiedApi, dexMmController, dexMonitor, dexFiatController]
+        module: [commons, dexUnifiedApi, dexTakerController, dexMonitor, dexFiatController]
     steps:
       - name: Check if this module needs testing
         id: check
@@ -528,7 +528,7 @@ jobs:
             dockerfile: dexMonitor/Dockerfile
           - service: mm-controller
             context: .
-            dockerfile: dexMmController/Dockerfile
+            dockerfile: dexTakerController/Dockerfile
           # totp-api disabled (see docker-compose.yml / services/totp-api/Dockerfile)
           - service: fiat-controller
             context: .

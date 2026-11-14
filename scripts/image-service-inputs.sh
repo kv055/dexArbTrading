@@ -36,7 +36,7 @@ image_service_build() {
     unified-snapshot) echo '. dexUnifiedApi/Dockerfile.snapshot' ;;
     postgres-backup) echo '. dexUnifiedApi/Dockerfile.backup' ;;
     dexmonitor) echo '. dexMonitor/Dockerfile' ;;
-    mm-controller) echo '. dexMmController/Dockerfile' ;;
+    mm-controller) echo '. dexTakerController/Dockerfile' ;;
     fiat-controller) echo '. dexFiatController/Dockerfile' ;;
     *) return 1 ;;
   esac
@@ -198,7 +198,7 @@ image_service_inputs_changed() {
         ':!:**/*_test.ts' ':!:**/*_test.tsx' ':!:**/e2e/**'
       ;;
     mm-controller)
-      repo_tree_paths_changed dexMmController "$from_sha" "$to_sha" \
+      repo_tree_paths_changed dexTakerController "$from_sha" "$to_sha" \
         Dockerfile go.mod go.sum main.go main_lnd_backup.go main_lnd_provision.go \
         boltz_runtime.go internal ':!:**/*_test.go' ':!:**/testdata/**'
       ;;

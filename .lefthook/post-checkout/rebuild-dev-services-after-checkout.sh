@@ -91,7 +91,7 @@ for path in "${changed_paths[@]}"; do
 		dexMonitor|dexMonitor/*)
 			add_service dexmonitor
 			;;
-		dexMmController|dexMmController/*)
+		dexTakerController|dexTakerController/*)
 			add_service mm-controller
 			;;
 		dexFiatController|dexFiatController/*)

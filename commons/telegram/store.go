@@ -8,7 +8,7 @@ import (
 
 // Store is a concurrency-safe, hot-reloadable holder for Telegram bot Config and
 // the derived *Client. It is the runtime replacement for the env-only Config
-// loaded once at startup: both dexMmController and dexFiatController read it, and
+// loaded once at startup: both dexTakerController and dexFiatController read it, and
 // the settings poller calls Set whenever the shared telegram_settings row changes
 // so a config swap propagates without a restart.
 //

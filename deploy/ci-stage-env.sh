@@ -44,7 +44,7 @@ chmod 700 "$bundle"
 mkdir -p \
   "$bundle/dexUnifiedApi" \
   "$bundle/dexMonitor" \
-  "$bundle/dexMmController" \
+  "$bundle/dexTakerController" \
   "$bundle/dexFiatController"
 
 decrypt_copy() {
@@ -66,7 +66,7 @@ decrypt_copy dexUnifiedApi/.env.enc "$bundle/dexUnifiedApi/.env" \
   "$KEY_UNIFIED_API" DOTENV_PRIVATE_KEY_UNIFIED_API
 decrypt_copy dexMonitor/.env.enc "$bundle/dexMonitor/.env" \
   "$KEY_MONITOR" DOTENV_PRIVATE_KEY_MONITOR
-decrypt_copy dexMmController/.env.enc "$bundle/dexMmController/.env" \
+decrypt_copy dexTakerController/.env.enc "$bundle/dexTakerController/.env" \
   "$KEY_MM_CONTROLLER" DOTENV_PRIVATE_KEY_MM_CONTROLLER
 decrypt_copy dexFiatController/.env.enc "$bundle/dexFiatController/.env" \
   "$KEY_FIAT_CONTROLLER" DOTENV_PRIVATE_KEY_FIAT_CONTROLLER

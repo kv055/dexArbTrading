@@ -1,15 +1,15 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/brand/wordmark-dark.svg">
-  <img src="assets/brand/wordmark-light.svg" alt="dexArbPendulum — BTC DEX ↔ CEX Arbitrage Stack" height="110">
+  <img src="assets/brand/wordmark-light.svg" alt="dexPendulum — BTC DEX ↔ CEX Arbitrage Stack" height="110">
 </picture>
 
-`dexArbTrading` is a Docker Compose workspace for monitoring Bitcoin DEX/CEX spreads and coordinating the supporting services for arbitrage experiments.
+`dexPendulum` is a Docker Compose workspace for monitoring Bitcoin DEX/CEX spreads and coordinating the supporting services for arbitrage experiments.
 
 The repository is organized as a parent deployment repo with several component repositories mounted as submodules:
 
 - `dexUnifiedApi` owns the shared Postgres schema, live offer ingestion API, Bisq snapshot worker, payment notification receiver, and database backup sidecar.
 - `dexMonitor` serves the React dashboard plus monitor-facing REST and WebSocket APIs.
-- `dexMmController` tracks arbitrage transactions, wallet addresses, account health, premium offers, LND wallet access, and DEX offer execution.
+- `dexTakerController` tracks arbitrage transactions, wallet addresses, account health, premium offers, LND wallet access, and DEX offer execution.
 - `dexFiatController` automates fiat account monitoring and payment notification forwarding for PayPal, Wise, and Revolut.
 - `commons` is a shared Go module for price feeds, trade-cost calculation, hedge modelling, and Bitcoin fee analysis.
 - `deploy` contains the VPS webhook deploy helper.
@@ -22,7 +22,7 @@ At runtime the stack centers on Postgres:
 2. The Bisq and snapshot containers gather live and historical offers.
 3. `dexUnifiedApi` keeps live offer state in memory and exposes `/api/live_offers` plus `/ws/live_offers`.
 4. `dexMonitor` reads shared tables, serves the dashboard, enriches offer data with trade-cost and premium calculations, and proxies selected MM controller data.
-5. `dexMmController` consumes premium offer streams, records transactions, tracks account health, manages wallet-address state, and can take qualified DEX offers.
+5. `dexTakerController` consumes premium offer streams, records transactions, tracks account health, manages wallet-address state, and can take qualified DEX offers.
 6. `dexFiatController` reads connector credentials from the shared database, monitors fiat services, and forwards payment events to `dexUnifiedApi`.
 7. `postgres-backup` periodically creates compressed logical backups and uploads them with `rclone`.
 
@@ -37,7 +37,7 @@ External dependencies include Tor, Bisq, LND, optional OpenClaw services, CEX AP
 +-- commons/                        # Shared Go module for cost, price, hedge, and BTC fee logic
 +-- dexUnifiedApi/                  # Schema, live API, snapshot worker, backup helper
 +-- dexMonitor/                     # Dashboard server and React frontend
-+-- dexMmController/                # Transaction, wallet, account-health, and offer execution service
++-- dexTakerController/                # Transaction, wallet, account-health, and offer execution service
 +-- dexFiatController/              # Fiat connector automation and TOTP helper service
 +-- nginx/                          # Local reverse proxy for dashboard/API
 +-- deploy/                     # Webhook-based deployment scripts
@@ -57,7 +57,7 @@ Create local env files from the examples:
 cp .env.example .env
 cp dexUnifiedApi/.env.example dexUnifiedApi/.env
 cp dexMonitor/.env.example dexMonitor/.env
-cp dexMmController/.env.example dexMmController/.env
+cp dexTakerController/.env.example dexTakerController/.env
 cp dexFiatController/.env.example dexFiatController/.env
 ```
 

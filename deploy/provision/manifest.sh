@@ -21,7 +21,7 @@ ROOT_REPO="dexArbTrading"
 REPOS=(
   "dexArbTrading|.|DOTENV_PRIVATE_KEY_ROOT"
   "dexUnifiedApi|dexUnifiedApi|DOTENV_PRIVATE_KEY_UNIFIED_API"
-  "dexMmController|dexMmController|DOTENV_PRIVATE_KEY_MM_CONTROLLER"
+  "dexMmController|dexTakerController|DOTENV_PRIVATE_KEY_MM_CONTROLLER"
   "dexMonitor|dexMonitor|DOTENV_PRIVATE_KEY_MONITOR"
   "dexFiatController|dexFiatController|DOTENV_PRIVATE_KEY_FIAT_CONTROLLER"
 )

@@ -45,7 +45,7 @@ cleanup() {
 		fi
 	done
 	# Remove dirs we created only to host a placeholder .env (if empty).
-	for d in dexUnifiedApi dexMonitor dexMmController; do
+	for d in dexUnifiedApi dexMonitor dexTakerController; do
 		if [ -d "$d" ] && [ -z "$(ls -A "$d" 2>/dev/null)" ]; then
 			rmdir "$d" 2>/dev/null || true
 		fi

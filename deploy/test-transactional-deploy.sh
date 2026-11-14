@@ -52,7 +52,7 @@ write_bundle() {
 ROOT|.
 UNIFIED_API|dexUnifiedApi
 MONITOR|dexMonitor
-MM_CONTROLLER|dexMmController
+MM_CONTROLLER|dexTakerController
 FIAT_CONTROLLER|dexFiatController
 EOF
 }

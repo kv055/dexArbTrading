@@ -438,7 +438,7 @@ function generate() {
 
 const routeSources = {
   dexUnifiedApi: ['dexUnifiedApi/cmd/server/routes.go'],
-  dexMmController: ['dexMmController/internal/api/server.go'],
+  dexTakerController: ['dexTakerController/internal/api/server.go'],
   dexMonitor: [
     'dexMonitor/cmd/server/routes.go',
     'dexMonitor/internal/auth/auth.go',

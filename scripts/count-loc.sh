@@ -121,7 +121,7 @@ echo "External = dependencies (vendor, node_modules, lockfiles) and generated"
 echo "code (OpenAPI, protobuf, bundled specs, and other codegen output)."
 echo "────────────────────────────────────────────────────"
 
-count_loc "$ROOT" "dexArbTrading (root)"
+count_loc "$ROOT" "dexPendulum (root)"
 
 while IFS= read -r sm_path; do
   [ -n "$sm_path" ] || continue

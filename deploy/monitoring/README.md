@@ -1,6 +1,6 @@
 # Monitoring Stack
 
-Prometheus + Grafana setup for the dexArbTrading stack. All services run as Docker Compose services alongside the application.
+Prometheus + Grafana setup for the dexPendulum stack. All services run as Docker Compose services alongside the application.
 
 ## Architecture
 
@@ -179,7 +179,7 @@ HTTP sidecar can sit beside it without changing the script).
 {
   "mcpServers": {
     "grafana": {
-      "command": "/absolute/path/to/dexArbTrading/deploy/monitoring/grafana/run-mcp.sh"
+      "command": "/absolute/path/to/dexPendulum/deploy/monitoring/grafana/run-mcp.sh"
     }
   }
 }

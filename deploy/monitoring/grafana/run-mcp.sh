@@ -7,7 +7,7 @@
 # Writes nothing to stdout so the MCP protocol stays intact.
 #
 # Usage (Cursor user MCP — .cursor/ is gitignored, so this is not project config):
-#   "command": "/absolute/path/to/dexArbTrading/deploy/monitoring/grafana/run-mcp.sh"
+#   "command": "/absolute/path/to/dexPendulum/deploy/monitoring/grafana/run-mcp.sh"
 #
 # Override GRAFANA_URL (default https://localhost/grafana) or
 # GRAFANA_AGENT_TOKEN in the environment; existing values win over .env.
