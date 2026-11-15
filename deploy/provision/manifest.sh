@@ -11,7 +11,7 @@
 
 # Root repo: owns the Actions secrets + runner registration, and is the
 # default-branch / workflow_dispatch target.
-ROOT_REPO="dexArbTrading"
+ROOT_REPO="dexPendulum"
 
 # One entry per repo to mirror/secure, in order. Fields: name|dir|dotenv_secret
 #   name          repo name on the remote
@@ -19,9 +19,9 @@ ROOT_REPO="dexArbTrading"
 #   dotenv_secret name of the DOTENV_PRIVATE_KEY_* Actions secret built from
 #                 <dir>/.env.keys (leave empty if the repo has no .env.keys)
 REPOS=(
-  "dexArbTrading|.|DOTENV_PRIVATE_KEY_ROOT"
+  "dexPendulum|.|DOTENV_PRIVATE_KEY_ROOT"
   "dexUnifiedApi|dexUnifiedApi|DOTENV_PRIVATE_KEY_UNIFIED_API"
-  "dexMmController|dexTakerController|DOTENV_PRIVATE_KEY_MM_CONTROLLER"
+  "dexTakerController|dexTakerController|DOTENV_PRIVATE_KEY_MM_CONTROLLER"
   "dexMonitor|dexMonitor|DOTENV_PRIVATE_KEY_MONITOR"
   "dexFiatController|dexFiatController|DOTENV_PRIVATE_KEY_FIAT_CONTROLLER"
 )
