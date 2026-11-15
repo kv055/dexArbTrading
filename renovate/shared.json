@@ -1,17 +1,16 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Dependency policy for every repo of the family (root + the four service repos), applied by the self-hosted bot as the defaults for each repo (scripts/renovate-run.sh merges it into the global config). Repo renovate.json files only add repo-specific rules.",
+  "description": "Dependency policy for every repo of the family (root + the four service repos), applied by the self-hosted bot as the defaults for each repo (scripts/renovate-run.sh merges it into the global config). One run = one PR per repo: every update, majors and security fixes included, lands in a single 'all dependencies' PR that each run refreshes. The CI job's 24h last-checked stamp is the only throttle; there is no Renovate schedule. Repo renovate.json files only add repo-specific rules.",
   "extends": [
     "config:recommended",
     ":semanticCommits",
     ":dependencyDashboard"
   ],
-  "timezone": "Europe/Berlin",
-  "schedule": [
-    "* 0-5 * * 1"
+  "ignorePresets": [
+    "group:monorepos",
+    "group:recommended"
   ],
-  "prHourlyLimit": 4,
-  "prConcurrentLimit": 10,
+  "timezone": "Europe/Berlin",
   "labels": [
     "dependencies"
   ],
@@ -23,21 +22,16 @@
   "osvVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
     "enabled": true,
+    "groupName": "all dependencies",
+    "groupSlug": "all",
     "labels": [
       "dependencies",
       "security"
     ],
-    "schedule": [
-      "at any time"
-    ],
-    "minimumReleaseAge": null,
-    "groupName": "security fixes"
+    "minimumReleaseAge": null
   },
   "lockFileMaintenance": {
-    "enabled": true,
-    "schedule": [
-      "* 0-5 1 * *"
-    ]
+    "enabled": false
   },
   "postUpdateOptions": [
     "gomodTidy",
@@ -52,88 +46,18 @@
       "minimumReleaseAgeBehaviour": "timestamp-optional"
     },
     {
-      "description": "Go modules: one batched PR for all non-major updates per repo.",
-      "matchManagers": [
-        "gomod"
-      ],
-      "matchDepTypes": [
-        "require",
-        "indirect"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest",
-        "pin"
-      ],
-      "groupName": "go modules (non-major)"
-    },
-    {
-      "description": "Go toolchain: the go.mod `go` directive and the golang builder images move together.",
-      "matchDatasources": [
-        "golang-version"
-      ],
-      "groupName": "go toolchain"
-    },
-    {
-      "matchDatasources": [
-        "docker"
-      ],
+      "description": "One PR per repo per run: every update joins the 'all dependencies' group (renovate/all branch).",
       "matchPackageNames": [
-        "golang"
+        "*"
       ],
-      "groupName": "go toolchain"
+      "groupName": "all dependencies",
+      "groupSlug": "all"
     },
     {
-      "description": "npm: one batched PR for all non-major updates per package.json.",
-      "matchManagers": [
-        "npm"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch"
-      ],
-      "groupName": "npm (non-major)"
-    },
-    {
-      "description": "CI actions: one batched PR for all non-major action updates.",
-      "matchManagers": [
-        "github-actions"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest",
-        "pin"
-      ],
-      "groupName": "ci actions (non-major)"
-    },
-    {
-      "description": "Generic OS/runtime base images: one batched PR for non-major updates.",
-      "matchDatasources": [
-        "docker"
-      ],
-      "matchPackageNames": [
-        "alpine",
-        "node",
-        "python",
-        "eclipse-temurin",
-        "debian",
-        "ubuntu"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest"
-      ],
-      "groupName": "base images (non-major)"
-    },
-    {
-      "description": "Majors always get their own PR plus a label the (future) LLM fix-up pipeline keys on.",
+      "description": "Label PRs that carry a major update; the (future) LLM fix-up pipeline keys on it.",
       "matchUpdateTypes": [
         "major"
       ],
-      "groupName": null,
       "addLabels": [
         "major-update"
       ]
@@ -152,16 +76,20 @@
       "enabled": false
     },
     {
-      "description": "Stateful / money-handling software: never open a PR until approved on the Dependency Dashboard (data migrations, wallet formats).",
+      "description": "Stateful / money-handling software (data migrations, wallet formats): kept out of the all-dependencies PR and only proposed, as its own PR, once approved on the Dependency Dashboard.",
       "matchPackageNames": [
         "postgres",
         "lightningnetwork/lnd",
         "lightninglabs/lnd"
       ],
+      "groupName": "stateful services (approval required)",
+      "groupSlug": "stateful",
       "dependencyDashboardApproval": true
     }
   ],
   "ignoreDeps": [
     "commons"
-  ]
+  ],
+  "separateMajorMinor": false,
+  "separateMultipleMajor": false
 }

@@ -61,24 +61,6 @@
         "major"
       ],
       "enabled": false
-    },
-    {
-      "description": "Observability stack (compose): one batched PR for non-major image updates.",
-      "matchManagers": [
-        "docker-compose"
-      ],
-      "matchPackageNames": [
-        "prom/**",
-        "grafana/**",
-        "gcr.io/cadvisor/**",
-        "prometheuscommunity/**"
-      ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch",
-        "digest"
-      ],
-      "groupName": "monitoring stack (non-major)"
     }
   ]
 }
