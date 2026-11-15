@@ -74,10 +74,10 @@ echo "Repo  : $REPO"
 echo ""
 
 set_secret() {
-  local name="$1" value="$2"
+  local name="$1" value="$2" base="${3:-/repos/$REPO/actions/secrets}"
   local http_code
   http_code=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
-    "$GITEA_URL/api/v1/repos/$REPO/actions/secrets/$name" \
+    "$GITEA_URL/api/v1$base/$name" \
     -H "Authorization: Bearer $GITEA_TOKEN" \
     -H "Content-Type: application/json" \
     --data-binary @- <<JSON
@@ -128,6 +128,17 @@ set_secret REGISTRY_URL                       "${GITEA_REGISTRY_URL_VALUE:-$GITE
 set_secret REGISTRY_USER                      "${GITEA_REGISTRY_USER:-$GITEA_OWNER}"
 set_secret REGISTRY_TOKEN                     "$GITEA_TOKEN"
 count=$((count + 3))
+
+# The service repos' own CI (.gitea/workflows/ci.yml in each submodule repo)
+# clones the private root repo and its submodules, so REGISTRY_URL/TOKEN are
+# also written as owner-level secrets, visible to every repo of the owner.
+SECRET_API_BASE="/user/actions/secrets"
+if curl -fsS -o /dev/null -H "Authorization: Bearer $GITEA_TOKEN" "$GITEA_URL/api/v1/orgs/$GITEA_OWNER" 2>/dev/null; then
+  SECRET_API_BASE="/orgs/$GITEA_OWNER/actions/secrets"
+fi
+set_secret REGISTRY_URL   "${GITEA_REGISTRY_URL_VALUE:-$GITEA_URL}" "$SECRET_API_BASE"
+set_secret REGISTRY_TOKEN "$GITEA_TOKEN"                            "$SECRET_API_BASE"
+count=$((count + 2))
 
 echo ""
 echo "Done — $count secrets written to gitea:$REPO"

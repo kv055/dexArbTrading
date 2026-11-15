@@ -38,7 +38,8 @@ echo "Disabling reconciliation and removing the homeserver runner stack..."
 # shellcheck disable=SC2029
 ssh "$SSH_TARGET" "cd $HOMESERVER_RUNNER_DIR && ./teardown.sh"
 
-runner_base="/repos/$GITEA_OWNER/$ROOT_REPO/actions/runners"
+# Matches setup-gitea.sh: runners are registered at owner (user/org) scope.
+runner_base="/user/actions/runners"
 if curl -fsS -o /dev/null "${AUTH[@]}" "$API/orgs/$GITEA_OWNER" 2>/dev/null; then
   runner_base="/orgs/$GITEA_OWNER/actions/runners"
 fi
