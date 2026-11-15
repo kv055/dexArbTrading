@@ -311,7 +311,10 @@ jobs:
         if: steps.check.outputs.run == 'true'
         with:
           go-version-file: ${{ matrix.module }}/go.mod
-          cache-dependency-path: ${{ matrix.module }}/go.sum
+          # Go/npm caches are persistent volumes the runner mounts into every job
+          # (deploy/provision/gitea/runner-config.yaml), so the tarball cache is off:
+          # packing/unpacking ~250 MB per job costs more than it saves on this host.
+          cache: false
 
       - name: Run tests
         if: steps.check.outputs.run == 'true'
@@ -384,15 +387,15 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: |
-            tools/openapi/package-lock.json
-            dexMonitor/react-frontend/package-lock.json
+          # ~/.npm is a persistent runner volume (see setup-go note in test-go).
 
       - uses: actions/setup-go@v6
         with:
           go-version-file: tools/openapi/go.mod
-          cache-dependency-path: tools/openapi/go.sum
+          # Go/npm caches are persistent volumes the runner mounts into every job
+          # (deploy/provision/gitea/runner-config.yaml), so the tarball cache is off:
+          # packing/unpacking ~250 MB per job costs more than it saves on this host.
+          cache: false
 
       - name: Install pinned generators
         run: make api-install
@@ -433,8 +436,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: dexMonitor/react-frontend/package-lock.json
+          # ~/.npm is a persistent runner volume (see setup-go note above).
 
       - run: npm ci
 

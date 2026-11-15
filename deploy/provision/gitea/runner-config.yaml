@@ -70,7 +70,9 @@ cache:
   enabled: true
   # The directory to store the cache data.
   # If it's empty, the cache data will be stored in $HOME/.cache/actcache.
-  dir: ""
+  # In the act-runner-data volume, so actions/cache entries (incl. the Renovate
+  # last-checked stamp) survive runner container re-creation.
+  dir: /data/actcache
   # The host of the cache server.
   # It's not for the address to listen, but the address to connect from job containers.
   # So 0.0.0.0 is a bad choice, leave it empty to detect automatically.
@@ -100,7 +102,20 @@ container:
   # `docker`/`docker buildx` work. The source path is resolved by the DinD daemon (which
   # creates the job containers), so it's DinD's socket — builds stay inside DinD, not on
   # the host. No DOCKER_HOST/TLS needed in jobs; they use the default /var/run/docker.sock.
-  options: "-v /var/run/docker.sock:/var/run/docker.sock"
+  #
+  # Persistent Go/npm caches (named volumes on the DinD daemon, shared by every job):
+  # this host is a 2-core i3, so compiling every package from scratch in each job was
+  # the bulk of CI time (OpenAPI contract tests alone: ~19 min of compiling). Go's
+  # build/test cache and module cache are safe for concurrent use; tarball caching via
+  # setup-go/setup-node is switched off in .gitea/workflows/ci.yml accordingly.
+  #
+  # --add-host: job containers resolve Gitea's ROOT_URL host (checkout, API calls).
+  options: >-
+    -v /var/run/docker.sock:/var/run/docker.sock
+    -v gitea-ci-gocache:/root/.cache/go-build
+    -v gitea-ci-gomodcache:/root/go/pkg/mod
+    -v gitea-ci-npm:/root/.npm
+    --add-host=gitea.horst.infra:100.91.14.68
   # The parent directory of a job's working directory.
   # NOTE: There is no need to add the first '/' of the path as act_runner will add it automatically. 
   # If the path starts with '/', the '/' will be trimmed.
@@ -118,6 +133,9 @@ container:
   #   - '**'
   valid_volumes:
     - /var/run/docker.sock   # permit the DinD-socket bind mount declared in `options`
+    - gitea-ci-gocache       # persistent Go build + test cache
+    - gitea-ci-gomodcache    # persistent Go module cache
+    - gitea-ci-npm           # persistent npm cache
   # Overrides the docker client host with the specified one.
   # If it's empty, act_runner will find an available docker host automatically.
   # If it's "-", act_runner will find an available docker host automatically, but the docker host won't be mounted to the job containers and service containers.
@@ -126,8 +144,9 @@ container:
   # on the DinD daemon, but does NOT auto-mount it into jobs — we mount DinD's socket via
   # `options` above instead.
   docker_host: "-"
-  # Pull docker image(s) even if already present
-  force_pull: true
+  # Pull docker image(s) even if already present. Off: re-pulling the job image for
+  # every job is pure overhead; refresh it with `docker pull` in DinD when needed.
+  force_pull: false
   # Rebuild docker image(s) even if already present
   force_rebuild: false
   # Always require a reachable docker daemon, even if not required by act_runner
