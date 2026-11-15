@@ -14,5 +14,8 @@
   "gitAuthor": "renovate[bot] <29139614+renovate[bot]@users.noreply.github.com>",
   "binarySource": "install",
   "repositoryCache": "enabled",
-  "persistRepoData": false
+  "persistRepoData": false,
+  "allowedCommands": [
+    "^bash /tmp/renovate-tools/npm-peer-sync\\.sh [A-Za-z0-9._/-]+$"
+  ]
 }

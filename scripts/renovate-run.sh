@@ -14,7 +14,9 @@
 #      clones repos to <baseDir>/repos/<platform>/<owner>/<repo>, so without
 #      <baseDir>/repos/<platform>/<owner>/commons its `go get` fails and every
 #      Go PR ships a stale go.sum.
-#   3. Runs the Renovate image. Files move in/out with `docker cp`, never bind
+#   3. Copies the post-upgrade task scripts (scripts/renovate/) into the
+#      container at /tmp/renovate-tools, then runs the Renovate image.
+#      Files move in/out with `docker cp`, never bind
 #      mounts: on the Gitea runner the daemon is Docker-in-Docker, where a
 #      bind-mount path resolves on the daemon host, not in this job.
 #
@@ -88,6 +90,8 @@ fi
 cid=$(docker create "${opts[@]}" "$RENOVATE_IMAGE")
 docker cp "$work/config.json" "$cid:/tmp/renovate-config.json"
 docker cp "$base/." "$cid:/tmp/renovate"
+# Post-upgrade task scripts (allowedCommands in renovate/global.json).
+docker cp "$REPO_ROOT/scripts/renovate/." "$cid:/tmp/renovate-tools"
 rc=0
 docker start -a "$cid" || rc=$?
 

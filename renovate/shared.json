@@ -54,6 +54,22 @@
       "groupSlug": "all"
     },
     {
+      "description": "npm: Renovate bumps each package independently and never checks peer ranges, so the all-dependencies PR can be uninstallable (ERESOLVE). Whenever the branch carries an npm update, scripts/renovate/npm-peer-sync.sh replaces Renovate's npm edits with the newest peer-compatible set (npm-check-updates --peer) and regenerates the lock file. Renovate's own npm lock step cannot be skipped inside a mixed group, so the top-level npmrc (legacy-peer-deps, allow-remote for tarball-URL deps such as Tailwind's wasm package) keeps that superseded step from failing; the task itself resolves peers strictly.",
+      "matchManagers": [
+        "npm"
+      ],
+      "postUpgradeTasks": {
+        "commands": [
+          "bash /tmp/renovate-tools/npm-peer-sync.sh {{{baseBranch}}}"
+        ],
+        "fileFilters": [
+          "**/package.json",
+          "**/package-lock.json"
+        ],
+        "executionMode": "branch"
+      }
+    },
+    {
       "description": "Label PRs that carry a major update; the (future) LLM fix-up pipeline keys on it.",
       "matchUpdateTypes": [
         "major"
@@ -91,5 +107,6 @@
     "commons"
   ],
   "separateMajorMinor": false,
-  "separateMultipleMajor": false
+  "separateMultipleMajor": false,
+  "npmrc": "legacy-peer-deps=true\nallow-remote=all"
 }
