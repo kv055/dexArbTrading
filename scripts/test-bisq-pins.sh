@@ -13,7 +13,7 @@
 #      Dockerfiles, when submodules are checked out).
 #   2. scripts/bisq-bump-check.sh end to end via its *_OVERRIDE hooks:
 #      version bump, up-to-date, re-cut tag re-pin, lightweight-tag fallback,
-#      and incompatible patch.
+#      incompatible patch, and the patch-less bisq2 flavor.
 set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -107,6 +107,24 @@ out="$(run_bump 9.9.8 0000000000000000000000000000000000000000 9.9.9 "$fixture/p
 expect_kv "$out" bump true
 expect_kv "$out" patches_ok false
 expect_kv "$out" failed_patch bad.patch
+
+echo "== bisq2 flavor: bump without patches pins the tag commit"
+out="$(BISQ_FLAVOR=bisq2 run_bump 9.9.8 0000000000000000000000000000000000000000 9.9.9 "")"
+expect_kv "$out" bump true
+expect_kv "$out" repin false
+expect_kv "$out" latest 9.9.9
+expect_kv "$out" latest_commit "$sha_b"
+expect_kv "$out" patches_ok skipped
+expect_kv "$out" failed_patch none
+
+echo "== bisq2 flavor: up-to-date path"
+out="$(BISQ_FLAVOR=bisq2 run_bump 9.9.9 "$sha_b" 9.9.9 "")"
+expect_kv "$out" bump false
+
+echo "== unknown flavor is rejected"
+if BISQ_FLAVOR=nope run_bump 9.9.8 0000000000000000000000000000000000000000 9.9.9 "" >/dev/null 2>&1; then
+  fail "unknown BISQ_FLAVOR must fail"
+fi
 
 # --- pin-args helper: fixture Dockerfiles ---
 mkdir -p "$fixture/docker"

@@ -108,5 +108,53 @@
   ],
   "separateMajorMinor": false,
   "separateMultipleMajor": false,
-  "npmrc": "legacy-peer-deps=true\nallow-remote=all"
+  "npmrc": "legacy-peer-deps=true\nallow-remote=all",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "LND version (image tag v<version>) in compose files and .env.example of any repo.",
+      "managerFilePatterns": [
+        "/(^|/)docker-compose\\.ya?ml$/",
+        "/(^|/)\\.env\\.example$/"
+      ],
+      "matchStrings": [
+        "LND_VERSION(?:=|:-)(?<currentValue>\\d+\\.\\d+\\.\\d+-beta)\\b"
+      ],
+      "depNameTemplate": "lightningnetwork/lnd",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+-beta)$",
+      "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-beta$"
+    },
+    {
+      "customType": "regex",
+      "description": "Any version pinned on the line after a `# renovate: datasource=\u2026 depName=\u2026 [versioning=\u2026] [extractVersion=\u2026]` comment: Dockerfile ARGs, Makefile `X := v`, shell `X=\"v\"` / `readonly X=\"v\"` / `X=\"pkg@v\"`, workflow env `X: v`.",
+      "managerFilePatterns": [
+        "/(^|/)Dockerfile[^/]*$/",
+        "/(^|/)Makefile$/",
+        "/\\.sh$/",
+        "/(^|/)\\.(github|gitea)/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?(?: extractVersion=(?<extractVersion>\\S+))?[ \\t]*\\n[ \\t]*(?:ARG |readonly |export )?[A-Za-z0-9_]+[ \\t]*(?::=|=|:)[ \\t]*[\"']?(?:[^\"'@\\s]*@)?(?<currentValue>[^\"'\\s]+)"
+      ],
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver-coerced{{/if}}"
+    },
+    {
+      "customType": "regex",
+      "description": "gitleaks in CI: release tag + SHA-256 of the linux_x64 tarball move together (github-release-attachments computes the new asset digest; it looks releases up by tag, hence the v-prefixed value).",
+      "managerFilePatterns": [
+        "/(^|/)\\.(github|gitea)/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "GITLEAKS_VERSION: (?<currentValue>v\\d+\\.\\d+\\.\\d+)\\s*\\n\\s*GITLEAKS_LINUX_X64_SHA256: (?<currentDigest>[a-f0-9]{64})"
+      ],
+      "depNameTemplate": "gitleaks/gitleaks",
+      "datasourceTemplate": "github-release-attachments"
+    }
+  ],
+  "docker-compose": {
+    "managerFilePatterns": [
+      "/(^|/)act-runner-compose\\.ya?ml$/"
+    ]
+  }
 }

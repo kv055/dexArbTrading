@@ -13,7 +13,9 @@ COMPOSE ?= docker compose
 SONAR_COMPOSE := deploy/sonarqube/docker-compose.yml
 ENV_FILES := .env dexUnifiedApi/.env dexMonitor/.env
 BACKEND_TOOLS_DIR ?= /tmp/dexarb-backend-tools
+# renovate: datasource=github-tags depName=dominikh/go-tools versioning=regex:^(?<major>\d{4})\.(?<minor>\d+)(\.(?<patch>\d+))?$
 STATICCHECK_VERSION := 2026.1
+# renovate: datasource=go depName=golang.org/x/tools
 DEADCODE_VERSION := v0.48.0
 
 .DEFAULT_GOAL := help

@@ -23,6 +23,7 @@
 set -Eeuo pipefail
 
 base="${1:?usage: npm-peer-sync.sh <base-branch>}"
+# renovate: datasource=npm depName=npm-check-updates
 NCU="npm-check-updates@23.1.1"
 COOLDOWN_DAYS="${NPM_PEER_SYNC_COOLDOWN_DAYS:-3}"   # keep in step with minimumReleaseAge
 # The same age limit for what the lock file resolves inside the new ranges
