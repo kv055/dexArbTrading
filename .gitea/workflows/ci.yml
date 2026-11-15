@@ -450,7 +450,10 @@ jobs:
         run: npm run build
 
       - name: Run frontend unit tests
-        run: npm test
+        # The Gitea runner is a 2-core i3 shared with the app stack: userEvent-heavy
+        # tests (LiquidityWorkspace typing a BTC address) exceed vitest's 5 s default
+        # there. GitHub keeps the default.
+        run: npm test -- --testTimeout=30000
 
   certificate-renewal-test:
     name: Certificate renewal regression tests
