@@ -1,0 +1,167 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Dependency policy for every repo of the family (root + the four service repos), applied by the self-hosted bot as the defaults for each repo (scripts/renovate-run.sh merges it into the global config). Repo renovate.json files only add repo-specific rules.",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard"
+  ],
+  "timezone": "Europe/Berlin",
+  "schedule": [
+    "* 0-5 * * 1"
+  ],
+  "prHourlyLimit": 4,
+  "prConcurrentLimit": 10,
+  "labels": [
+    "dependencies"
+  ],
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps",
+  "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict",
+  "automerge": false,
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": [
+      "dependencies",
+      "security"
+    ],
+    "schedule": [
+      "at any time"
+    ],
+    "minimumReleaseAge": null,
+    "groupName": "security fixes"
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "* 0-5 1 * *"
+    ]
+  },
+  "postUpdateOptions": [
+    "gomodTidy",
+    "gomodUpdateImportPaths"
+  ],
+  "packageRules": [
+    {
+      "description": "Docker Hub often returns no publish timestamps; without this, minimumReleaseAge would hold those images back indefinitely.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
+    {
+      "description": "Go modules: one batched PR for all non-major updates per repo.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepTypes": [
+        "require",
+        "indirect"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin"
+      ],
+      "groupName": "go modules (non-major)"
+    },
+    {
+      "description": "Go toolchain: the go.mod `go` directive and the golang builder images move together.",
+      "matchDatasources": [
+        "golang-version"
+      ],
+      "groupName": "go toolchain"
+    },
+    {
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "golang"
+      ],
+      "groupName": "go toolchain"
+    },
+    {
+      "description": "npm: one batched PR for all non-major updates per package.json.",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "npm (non-major)"
+    },
+    {
+      "description": "CI actions: one batched PR for all non-major action updates.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin"
+      ],
+      "groupName": "ci actions (non-major)"
+    },
+    {
+      "description": "Generic OS/runtime base images: one batched PR for non-major updates.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "alpine",
+        "node",
+        "python",
+        "eclipse-temurin",
+        "debian",
+        "ubuntu"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "groupName": "base images (non-major)"
+    },
+    {
+      "description": "Majors always get their own PR plus a label the (future) LLM fix-up pipeline keys on.",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": null,
+      "addLabels": [
+        "major-update"
+      ]
+    },
+    {
+      "description": "The Bisq daemons are built against JDK 21; a JDK major is a Bisq-upstream decision, not ours.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "eclipse-temurin"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Stateful / money-handling software: never open a PR until approved on the Dependency Dashboard (data migrations, wallet formats).",
+      "matchPackageNames": [
+        "postgres",
+        "lightningnetwork/lnd",
+        "lightninglabs/lnd"
+      ],
+      "dependencyDashboardApproval": true
+    }
+  ],
+  "ignoreDeps": [
+    "commons"
+  ]
+}

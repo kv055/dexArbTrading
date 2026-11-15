@@ -1,0 +1,84 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "baseBranchPatterns": [
+    "develop"
+  ],
+  "ignorePaths": [
+    "**/node_modules/**"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "LND version: docker-compose.yml default and .env.example (image tag is v<version>).",
+      "managerFilePatterns": [
+        "/^docker-compose\\.yml$/",
+        "/^\\.env\\.example$/"
+      ],
+      "matchStrings": [
+        "LND_VERSION(?:=|:-)(?<currentValue>\\d+\\.\\d+\\.\\d+-beta)\\b"
+      ],
+      "depNameTemplate": "lightningnetwork/lnd",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+-beta)$",
+      "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-beta$"
+    },
+    {
+      "customType": "regex",
+      "description": "Dockerfile ARGs annotated with a `# renovate:` comment on the line above.",
+      "managerFilePatterns": [
+        "/(^|/)Dockerfile[^/]*$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\s*\\nARG [A-Z0-9_]+=(?<currentValue>\\S+)"
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "Self-hosted Renovate image pinned in the GitHub and Gitea pipelines.",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/ci-cd\\.yml$/",
+        "/^\\.gitea/workflows/ci\\.yml$/"
+      ],
+      "matchStrings": [
+        "RENOVATE_IMAGE: ghcr\\.io/renovatebot/renovate:(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "ghcr.io/renovatebot/renovate",
+      "datasourceTemplate": "docker"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Gitea's act_runner speaks the v3 artifact protocol and the cache API used by @actions/cache 4.x; never move these past their current majors in .gitea/.",
+      "matchFileNames": [
+        ".gitea/workflows/**"
+      ],
+      "matchPackageNames": [
+        "actions/upload-artifact",
+        "actions/download-artifact",
+        "actions/cache"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Observability stack (compose): one batched PR for non-major image updates.",
+      "matchManagers": [
+        "docker-compose"
+      ],
+      "matchPackageNames": [
+        "prom/**",
+        "grafana/**",
+        "gcr.io/cadvisor/**",
+        "prometheuscommunity/**"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "groupName": "monitoring stack (non-major)"
+    }
+  ]
+}

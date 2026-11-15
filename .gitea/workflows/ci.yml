@@ -459,6 +459,96 @@ jobs:
       - uses: actions/checkout@v5
       - run: bash deploy/test-letsencrypt.sh
 
+  renovate:
+    # Self-hosted Renovate for the Gitea root repo and the four service repos
+    # (opens PRs on Gitea; the GitHub pipeline's renovate job covers GitHub).
+    # A side branch of the pipeline: nothing needs it and it needs nothing, so
+    # it never delays or gates tests, builds or deploys.
+    #
+    # Throttle: a "last checked" stamp in this runner's Actions cache; the job
+    # only does work when the last successful run is >= 24h old (own stamp,
+    # independent of GitHub's). develop only, so all runs share one cache
+    # scope; Renovate runs on the first develop push/dispatch after the window.
+    #
+    # Shared logic: scripts/renovate-due.sh (throttle) and
+    # scripts/renovate-run.sh (config merge, commons staging, docker run).
+    # Repo names come from deploy/provision/manifest.sh, which is what
+    # setup-gitea.sh created on this instance.
+    #
+    # actions/cache stays on v4 here: it is built on @actions/cache 4.x, the
+    # same cache client setup-go@v6 already uses against act_runner's cache.
+    name: Renovate (dependency updates)
+    if: |
+      (github.ref == 'refs/heads/develop' || github.ref_name == 'develop') &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      RENOVATE_IMAGE: ghcr.io/renovatebot/renovate:44.239.1
+      RENOVATE_MIN_INTERVAL_SECONDS: "86400"
+      STAMP_FILE: .renovate-last-run
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Restore last-checked stamp
+        uses: actions/cache/restore@v4
+        with:
+          path: .renovate-last-run
+          # The exact key never exists; restore-keys yields the newest stamp.
+          key: renovate-last-run-${{ github.run_id }}
+          restore-keys: renovate-last-run-
+
+      - name: Decide whether Renovate is due
+        id: due
+        run: bash scripts/renovate-due.sh check
+
+      - name: Restore Renovate cache
+        if: steps.due.outputs.due == 'true'
+        uses: actions/cache@v4
+        with:
+          path: .renovate-cache
+          key: renovate-cache-${{ github.run_id }}
+          restore-keys: renovate-cache-
+
+      - name: Run Renovate (Gitea repos)
+        if: steps.due.outputs.due == 'true'
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          # Dedicated bot token if provisioned, else the Gitea admin token.
+          RENOVATE_BOT_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          # github.com lookups (releases, changelogs) without anonymous limits.
+          RENOVATE_GITHUB_COM_TOKEN: ${{ secrets.GH_PAT }}
+          OWNER: ${{ github.repository_owner }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          # shellcheck source=/dev/null
+          . deploy/provision/manifest.sh
+          RENOVATE_REPOSITORIES=$(for entry in "${REPOS[@]}"; do printf '%s/%s\n' "$OWNER" "${entry%%|*}"; done | jq -R . | jq -sc .)
+          echo "Repositories: $RENOVATE_REPOSITORIES"
+          RENOVATE_TOKEN="${RENOVATE_BOT_TOKEN:-$REGISTRY_TOKEN}"
+          export RENOVATE_REPOSITORIES RENOVATE_TOKEN
+          export RENOVATE_PLATFORM=gitea
+          export RENOVATE_ENDPOINT="${REGISTRY_URL%/}/api/v1/"
+          export RENOVATE_OWNER="$OWNER"
+          export RENOVATE_CACHE_DIR="$PWD/.renovate-cache"
+          bash scripts/renovate-run.sh
+
+      # Stamp only after a successful run: a failed run retries on the next
+      # develop push instead of waiting out the 24h window.
+      - name: Record last-checked stamp
+        if: steps.due.outputs.due == 'true'
+        run: bash scripts/renovate-due.sh stamp
+
+      - name: Save last-checked stamp
+        if: steps.due.outputs.due == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .renovate-last-run
+          key: renovate-last-run-${{ github.run_id }}
+
   test-gate:
     name: Test gate
     needs: [database-sql-integrity, detect-changes, openapi, test-go, test-frontend, certificate-renewal-test, release-protocol]
