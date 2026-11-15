@@ -189,7 +189,9 @@ echo "  wrote $SCRIPT_DIR/daemon.json (insecure-registries: $REGISTRY_HOST, mtu:
 # 6. Runner registration token + act-runner.env
 # ---------------------------------------------------------------------------
 log "Fetching runner registration token"
-reg_path="/repos/$GITEA_OWNER/$ROOT_REPO/actions/runners/registration-token"
+# Owner-scoped (org or user), not repo-scoped: the runner must also serve the
+# service repos' own CI (.gitea/workflows/ci.yml in each submodule repo).
+reg_path="/user/actions/runners/registration-token"
 [[ "$OWNER_TYPE" == "org" ]] && reg_path="/orgs/$GITEA_OWNER/actions/runners/registration-token"
 runner_base="${reg_path%/registration-token}"
 

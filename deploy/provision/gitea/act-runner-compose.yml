@@ -26,6 +26,10 @@ services:
     container_name: gitea-runner-dind
     privileged: true                  # required for Docker-in-Docker
     restart: unless-stopped
+    # Caps every CI job together (2026-10-15 wedge: Gradle builds + services ate all
+    # RAM). Was only set via `docker update`, which a recreate would silently drop.
+    mem_limit: 4g
+    memswap_limit: 5g
     command: ["--tls=false", "--host=unix:///var/run/docker.sock", "--host=tcp://0.0.0.0:2375"]
     environment:
       DOCKER_TLS_CERTDIR: ""          # disable TLS; listen on plain tcp://docker:2375

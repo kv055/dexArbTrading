@@ -106,8 +106,7 @@ api-check: ## Verify OpenAPI lint, route coverage, and committed generated artif
 api-contract-test: ## Exercise registered handlers through generated OpenAPI validators
 	@set -e; for module in dexUnifiedApi dexTakerController dexMonitor dexFiatController; do \
 		echo "==> $$module OpenAPI contract tests"; \
-		(cd $$module && GOCACHE=/tmp/dexarb-openapi-gocache/$$module \
-			go test ./... -run 'OpenAPI|ResponseValidation|LegacyStrictServer'); \
+		(cd $$module && go test ./... -run 'OpenAPI|ResponseValidation|LegacyStrictServer'); \
 	done
 
 prune: ## Drop stale remote refs and delete local branches already merged into develop

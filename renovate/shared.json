@@ -1,0 +1,112 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Dependency policy for every repo of the family (root + the four service repos), applied by the self-hosted bot as the defaults for each repo (scripts/renovate-run.sh merges it into the global config). One run = one PR per repo: every update, majors and security fixes included, lands in a single 'all dependencies' PR that each run refreshes. The CI job's 24h last-checked stamp is the only throttle; there is no Renovate schedule. Repo renovate.json files only add repo-specific rules.",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard"
+  ],
+  "ignorePresets": [
+    "group:monorepos",
+    "group:recommended"
+  ],
+  "timezone": "Europe/Berlin",
+  "labels": [
+    "dependencies"
+  ],
+  "semanticCommitType": "chore",
+  "semanticCommitScope": "deps",
+  "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict",
+  "automerge": false,
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "groupName": "all dependencies",
+    "groupSlug": "all",
+    "labels": [
+      "dependencies",
+      "security"
+    ],
+    "minimumReleaseAge": null
+  },
+  "lockFileMaintenance": {
+    "enabled": false
+  },
+  "postUpdateOptions": [
+    "gomodTidy",
+    "gomodUpdateImportPaths"
+  ],
+  "packageRules": [
+    {
+      "description": "Docker Hub often returns no publish timestamps; without this, minimumReleaseAge would hold those images back indefinitely.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
+    {
+      "description": "One PR per repo per run: every update joins the 'all dependencies' group (renovate/all branch).",
+      "matchPackageNames": [
+        "*"
+      ],
+      "groupName": "all dependencies",
+      "groupSlug": "all"
+    },
+    {
+      "description": "npm: Renovate bumps each package independently and never checks peer ranges, so the all-dependencies PR can be uninstallable (ERESOLVE). Whenever the branch carries an npm update, scripts/renovate/npm-peer-sync.sh replaces Renovate's npm edits with the newest peer-compatible set (npm-check-updates --peer) and regenerates the lock file. Renovate's own npm lock step cannot be skipped inside a mixed group, so the top-level npmrc (legacy-peer-deps, allow-remote for tarball-URL deps such as Tailwind's wasm package) keeps that superseded step from failing; the task itself resolves peers strictly.",
+      "matchManagers": [
+        "npm"
+      ],
+      "postUpgradeTasks": {
+        "commands": [
+          "bash /tmp/renovate-tools/npm-peer-sync.sh {{{baseBranch}}}"
+        ],
+        "fileFilters": [
+          "**/package.json",
+          "**/package-lock.json"
+        ],
+        "executionMode": "branch"
+      }
+    },
+    {
+      "description": "Label PRs that carry a major update; the (future) LLM fix-up pipeline keys on it.",
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "addLabels": [
+        "major-update"
+      ]
+    },
+    {
+      "description": "The Bisq daemons are built against JDK 21; a JDK major is a Bisq-upstream decision, not ours.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "eclipse-temurin"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Stateful / money-handling software (data migrations, wallet formats): kept out of the all-dependencies PR and only proposed, as its own PR, once approved on the Dependency Dashboard.",
+      "matchPackageNames": [
+        "postgres",
+        "lightningnetwork/lnd",
+        "lightninglabs/lnd"
+      ],
+      "groupName": "stateful services (approval required)",
+      "groupSlug": "stateful",
+      "dependencyDashboardApproval": true
+    }
+  ],
+  "ignoreDeps": [
+    "commons"
+  ],
+  "separateMajorMinor": false,
+  "separateMultipleMajor": false,
+  "npmrc": "legacy-peer-deps=true\nallow-remote=all"
+}

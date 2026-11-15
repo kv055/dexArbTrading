@@ -1,0 +1,21 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-global-schema.json",
+  "description": "Bot settings for self-hosted Renovate (scripts/renovate-run.sh). The dependency policy is renovate/shared.json, merged in at run time. The repo list is the GitHub one; the Gitea pipeline overrides platform/endpoint/repositories via env.",
+  "platform": "github",
+  "repositories": [
+    "kv055/dexPendulum",
+    "kv055/dexMonitor",
+    "kv055/dexTakerController",
+    "kv055/dexFiatController",
+    "kv055/dexUnifiedApi"
+  ],
+  "onboarding": false,
+  "requireConfig": "required",
+  "gitAuthor": "renovate[bot] <29139614+renovate[bot]@users.noreply.github.com>",
+  "binarySource": "install",
+  "repositoryCache": "enabled",
+  "persistRepoData": false,
+  "allowedCommands": [
+    "^bash /tmp/renovate-tools/npm-peer-sync\\.sh [A-Za-z0-9._/-]+$"
+  ]
+}
