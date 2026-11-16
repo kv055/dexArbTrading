@@ -2,6 +2,8 @@ name: Bisq version bump check
 
 # Gitea-side counterpart of .github/workflows/bisq-version-bump.yml.
 #
+# Runs once per daemon (matrix: bisq, bisq2) via BISQ_FLAVOR.
+#
 # DELIBERATELY CHECK + NOTIFY ONLY — no pushes, no PRs. GitHub is origin /
 # source of truth and this Gitea repo is a parallel remote receiving the same
 # pushes: a bump branch created or merged here would diverge from GitHub and
@@ -18,7 +20,14 @@ on:
 
 jobs:
   check-and-notify:
+    name: Check and notify (${{ matrix.flavor }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [bisq, bisq2]   # Bisq v1 (with source patches) and Bisq 2
+    env:
+      BISQ_FLAVOR: ${{ matrix.flavor }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -51,7 +60,10 @@ jobs:
           FAILED: ${{ steps.check.outputs.failed_patch }}
         run: |
           set -Eeuo pipefail
-          if [ "$PATCHES_OK" = "true" ]; then
+          if [ "$PATCHES_OK" = "skipped" ]; then
+            title="${BISQ_FLAVOR} v${NEW} available — bump PR runs on GitHub"
+            body="Upstream ${BISQ_FLAVOR} **v${NEW}** is available (no source patches to verify). The automated bump PR is opened by the GitHub *Bisq version bump* workflow — review/merge it there. This issue is Gitea-side visibility only."
+          elif [ "$PATCHES_OK" = "true" ]; then
             title="bisq v${NEW} available — bump PR runs on GitHub"
             body="Upstream Bisq **v${NEW}** is available and all patches in \`dexUnifiedApi/bisq-patches/\` apply cleanly against it. The automated bump PR is opened by the GitHub *Bisq version bump* workflow — review/merge it there. This issue is Gitea-side visibility only."
           else

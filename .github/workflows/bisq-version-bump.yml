@@ -1,10 +1,14 @@
 name: Bisq version bump
 
-# Nightly: detect a new upstream Bisq v1 release, verify our source patches
-# (dexUnifiedApi/bisq-patches/) still apply against it, then either open the
-# bump PR or — if a patch no longer applies — open/refresh a rebase issue
-# instead of a PR. Detection + patch-check logic lives in
-# scripts/bisq-bump-check.sh, shared with the Gitea check workflow.
+# Nightly, once per daemon (matrix: Bisq v1 and Bisq 2): detect a new upstream
+# release, verify our source patches (dexUnifiedApi/bisq-patches/, Bisq v1
+# only) still apply against it, then either open the bump PR or — if a patch
+# no longer applies — open/refresh a rebase issue instead of a PR. Detection +
+# patch-check logic lives in scripts/bisq-bump-check.sh (BISQ_FLAVOR), shared
+# with the Gitea check workflow. Renovate does not handle these pins: version
+# and pinned commit live in dexUnifiedApi/Dockerfile.<flavor> while
+# docker-compose.yml passes the version as a build arg, so both repos must
+# move together.
 
 on:
   schedule:
@@ -18,11 +22,28 @@ permissions:
 
 jobs:
   check-and-bump:
+    name: Check and bump (${{ matrix.flavor }})
     # Gitea Actions also executes .github/workflows/. This job can never work
     # there (gh CLI, GitHub PR/issue semantics), so it only runs on real GitHub;
     # the Gitea side has its own check-and-notify workflow.
     if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # One at a time: both flavors push to dexUnifiedApi main.
+      max-parallel: 1
+      matrix:
+        include:
+          - flavor: bisq
+            var: BISQ
+            compose_lines: 3   # build arg + bisq env + mm-controller env
+          - flavor: bisq2
+            var: BISQ2
+            compose_lines: 3   # build arg + bisq2 env + mm-controller env
+    env:
+      BISQ_FLAVOR: ${{ matrix.flavor }}
+      VAR: ${{ matrix.var }}
+      COMPOSE_LINES: ${{ matrix.compose_lines }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -51,10 +72,10 @@ jobs:
           NEW: ${{ steps.check.outputs.latest }}
         run: |
           set -Eeuo pipefail
-          if git ls-remote --exit-code origin "refs/heads/bisq-bump/${NEW}" >/dev/null 2>&1 \
-             || [ -n "$(gh pr list --head "bisq-bump/${NEW}" --state open --json number --jq '.[].number')" ]; then
+          if git ls-remote --exit-code origin "refs/heads/${BISQ_FLAVOR}-bump/${NEW}" >/dev/null 2>&1 \
+             || [ -n "$(gh pr list --head "${BISQ_FLAVOR}-bump/${NEW}" --state open --json number --jq '.[].number')" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "bisq-bump/${NEW} already exists; nothing to do."
+            echo "${BISQ_FLAVOR}-bump/${NEW} already exists; nothing to do."
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
@@ -96,31 +117,34 @@ jobs:
           git fetch origin main
           git checkout main
           git pull --ff-only origin main
+          DF="Dockerfile.${BISQ_FLAVOR}"
           # Rewrite every ARG line to $NEW (multi-stage Dockerfile declares it
           # several times) and verify — never trust a silent no-op sed again.
-          sed -i "s/^ARG BISQ_VERSION=.*/ARG BISQ_VERSION=${NEW}/" Dockerfile.bisq
-          if grep -P '^ARG BISQ_VERSION=(?!'"${NEW//./\\.}"'$)' Dockerfile.bisq; then
-            echo "ERROR: Dockerfile.bisq still contains a non-${NEW} ARG after sed" >&2
+          sed -i "s/^ARG ${VAR}_VERSION=.*/ARG ${VAR}_VERSION=${NEW}/" "$DF"
+          if grep -P "^ARG ${VAR}_VERSION=(?!${NEW//./\\.}\$)" "$DF"; then
+            echo "ERROR: $DF still contains a non-${NEW} ARG after sed" >&2
             exit 1
           fi
-          # The image builds BISQ_COMMIT, never the floating tag: a re-cut tag
+          # The image builds ${VAR}_COMMIT, never the floating tag: a re-cut tag
           # must not silently change a build, and changing the ARG busts the
           # stale clone layer cache.
-          if ! grep -qP '^ARG BISQ_COMMIT=[0-9a-f]{40}$' Dockerfile.bisq; then
-            echo "ERROR: Dockerfile.bisq has no well-formed ARG BISQ_COMMIT to bump" >&2
+          if ! grep -qP "^ARG ${VAR}_COMMIT=[0-9a-f]{40}\$" "$DF"; then
+            echo "ERROR: $DF has no well-formed ARG ${VAR}_COMMIT to bump" >&2
             exit 1
           fi
-          sed -i "s/^ARG BISQ_COMMIT=.*/ARG BISQ_COMMIT=${NEW_COMMIT}/" Dockerfile.bisq
-          if grep -P '^ARG BISQ_COMMIT=(?!'"${NEW_COMMIT}"'$)' Dockerfile.bisq; then
-            echo "ERROR: Dockerfile.bisq still contains a non-${NEW_COMMIT} BISQ_COMMIT after sed" >&2
+          sed -i "s/^ARG ${VAR}_COMMIT=.*/ARG ${VAR}_COMMIT=${NEW_COMMIT}/" "$DF"
+          if grep -P "^ARG ${VAR}_COMMIT=(?!${NEW_COMMIT}\$)" "$DF"; then
+            echo "ERROR: $DF still contains a non-${NEW_COMMIT} ${VAR}_COMMIT after sed" >&2
             exit 1
           fi
-          git add Dockerfile.bisq
+          git add "$DF"
           if git diff --cached --quiet; then
-            echo "ERROR: expected Dockerfile.bisq to change but nothing is staged (already at ${NEW}?)" >&2
+            echo "ERROR: expected $DF to change but nothing is staged (already at ${NEW}?)" >&2
             exit 1
           fi
-          git commit -m "chore(bisq): bump BISQ_VERSION to ${NEW}"
+          git commit -m "chore(${BISQ_FLAVOR}): bump ${VAR}_VERSION to ${NEW}"
+          # The other flavor may have pushed in an earlier matrix leg.
+          git pull --rebase origin main
           git push origin main
 
       - name: Open auto-merge PR for outer repo bump (submodule pointer + docker-compose.yml)
@@ -134,11 +158,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           set -Eeuo pipefail
-          BRANCH="bisq-bump/${NEW}"
-          # Both compose occurrences (build arg + runtime env) share this pattern.
-          sed -i "s/BISQ_VERSION=[0-9]\+\.[0-9]\+\.[0-9]\+/BISQ_VERSION=${NEW}/g" docker-compose.yml
-          if [ "$(grep -c "BISQ_VERSION=${NEW}" docker-compose.yml)" -lt 2 ]; then
-            echo "ERROR: expected both docker-compose.yml BISQ_VERSION lines (build arg + env) to read ${NEW}" >&2
+          BRANCH="${BISQ_FLAVOR}-bump/${NEW}"
+          # All compose occurrences (build arg + runtime env) share this pattern;
+          # the leading boundary keeps BISQ_ from also matching BISQ2_.
+          sed -i -E "s/(^|[^A-Z0-9_])${VAR}_VERSION=[0-9]+\.[0-9]+\.[0-9]+/\1${VAR}_VERSION=${NEW}/g" docker-compose.yml
+          if [ "$(grep -cE "(^|[^A-Z0-9_])${VAR}_VERSION=${NEW//./\\.}\b" docker-compose.yml)" -lt "$COMPOSE_LINES" ]; then
+            echo "ERROR: expected ${COMPOSE_LINES} docker-compose.yml ${VAR}_VERSION lines to read ${NEW}" >&2
             exit 1
           fi
           git checkout -b "$BRANCH"
@@ -147,12 +172,17 @@ jobs:
             echo "ERROR: expected compose/submodule changes but nothing is staged" >&2
             exit 1
           fi
-          if [ "${REPIN}" = "true" ]; then
-            TITLE="chore(bisq): re-pin BISQ_COMMIT for v${NEW} (upstream tag re-cut)"
-            BODY="Upstream re-cut the v${NEW} tag without a version change, so only the pinned source commit moves (${NEW_COMMIT}). All bisq-patches were pre-verified to apply against ${NEW_COMMIT}; the bisq-patches-apply job and the full bisq image build re-verify on this PR."
+          if [ "$BISQ_FLAVOR" = bisq ]; then
+            VERIFIED="All bisq-patches were pre-verified to apply against ${NEW_COMMIT}; the bisq-patches-apply job and the full bisq image build re-verify on this PR."
           else
-            TITLE="chore(bisq): bump BISQ_VERSION to ${NEW}"
-            BODY="Automated Bisq bump to ${NEW} (pinned source ${NEW_COMMIT}). All bisq-patches were pre-verified to apply against v${NEW}; the bisq-patches-apply job and the full bisq image build re-verify on this PR."
+            VERIFIED="${BISQ_FLAVOR} carries no source patches; the full ${BISQ_FLAVOR} image build verifies this PR."
+          fi
+          if [ "${REPIN}" = "true" ]; then
+            TITLE="chore(${BISQ_FLAVOR}): re-pin ${VAR}_COMMIT for v${NEW} (upstream tag re-cut)"
+            BODY="Upstream re-cut the v${NEW} tag without a version change, so only the pinned source commit moves (${NEW_COMMIT}). ${VERIFIED}"
+          else
+            TITLE="chore(${BISQ_FLAVOR}): bump ${VAR}_VERSION to ${NEW}"
+            BODY="Automated ${BISQ_FLAVOR} bump to ${NEW} (pinned source ${NEW_COMMIT}). ${VERIFIED}"
           fi
           git commit -m "$TITLE"
           git push -u origin "$BRANCH" --force
@@ -164,4 +194,4 @@ jobs:
           # private repo). If it isn't available, leave the PR open for a manual merge so
           # the bump never silently fails and a human gates the version change.
           gh pr merge "$BRANCH" --auto --squash --delete-branch \
-            || echo "::notice::Auto-merge unavailable; review and merge PR for bisq ${NEW} manually once CI is green."
+            || echo "::notice::Auto-merge unavailable; review and merge PR for ${BISQ_FLAVOR} ${NEW} manually once CI is green."

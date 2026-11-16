@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # bisq-bump-check.sh — shared detection + patch-compatibility check for the
-# nightly Bisq v1 version bump. Used by BOTH bump workflows
+# nightly Bisq daemon version bumps (Bisq v1 and, via BISQ_FLAVOR=bisq2,
+# Bisq 2). Used by BOTH bump workflows
 # (.github/workflows/bisq-version-bump.yml and .gitea/workflows/bisq-version-bump.yml)
 # so the logic cannot drift between platforms.
 #
@@ -27,15 +28,35 @@
 #   latest_commit=<sha|none>
 #   patches_ok=true|false|skipped      failed_patch=<basename|none>
 #
+# Flavors (BISQ_FLAVOR, default bisq):
+#   bisq   Dockerfile.bisq,  ARG BISQ_VERSION/BISQ_COMMIT,   bisq-network/bisq,
+#          patches in dexUnifiedApi/bisq-patches/
+#   bisq2  Dockerfile.bisq2, ARG BISQ2_VERSION/BISQ2_COMMIT, bisq-network/bisq2,
+#          no source patches (patches_ok=skipped; the pin is the tag's commit)
+#
 # Env overrides (testing): CURRENT_OVERRIDE, CURRENT_COMMIT_OVERRIDE,
-#   LATEST_OVERRIDE, PATCH_DIR, UPSTREAM_REPO,
+#   LATEST_OVERRIDE, PATCH_DIR (empty = no patch check), UPSTREAM_REPO,
 #   GITHUB_TOKEN (optional API auth).
 set -Eeuo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DOCKERFILE="$REPO_ROOT/dexUnifiedApi/Dockerfile.bisq"
-PATCH_DIR="${PATCH_DIR:-$REPO_ROOT/dexUnifiedApi/bisq-patches}"
-UPSTREAM_REPO="${UPSTREAM_REPO:-https://github.com/bisq-network/bisq.git}"
+FLAVOR="${BISQ_FLAVOR:-bisq}"
+case "$FLAVOR" in
+  bisq)
+    VAR=BISQ
+    UPSTREAM_SLUG=bisq-network/bisq
+    DEFAULT_PATCH_DIR="$REPO_ROOT/dexUnifiedApi/bisq-patches"
+    ;;
+  bisq2)
+    VAR=BISQ2
+    UPSTREAM_SLUG=bisq-network/bisq2
+    DEFAULT_PATCH_DIR=""
+    ;;
+  *) echo "ERROR: unknown BISQ_FLAVOR '$FLAVOR' (bisq|bisq2)" >&2; exit 1 ;;
+esac
+DOCKERFILE="$REPO_ROOT/dexUnifiedApi/Dockerfile.$FLAVOR"
+PATCH_DIR="${PATCH_DIR-$DEFAULT_PATCH_DIR}"
+UPSTREAM_REPO="${UPSTREAM_REPO:-https://github.com/$UPSTREAM_SLUG.git}"
 
 emit() {
   echo "$1"
@@ -51,15 +72,15 @@ api_curl() {
 }
 
 # --- 1. current version + commit (Dockerfile ARGs = source of truth) ---
-current="${CURRENT_OVERRIDE:-$(grep -oP '^ARG BISQ_VERSION=\K[0-9]+\.[0-9]+\.[0-9]+' "$DOCKERFILE" | head -1)}"
+current="${CURRENT_OVERRIDE:-$(grep -oP "^ARG ${VAR}_VERSION=\K[0-9]+\.[0-9]+\.[0-9]+" "$DOCKERFILE" | head -1)}"
 if [ -z "$current" ]; then
-  echo "ERROR: could not parse ARG BISQ_VERSION from $DOCKERFILE" >&2
+  echo "ERROR: could not parse ARG ${VAR}_VERSION from $DOCKERFILE" >&2
   exit 1
 fi
 emit "current=$current"
-current_commit="${CURRENT_COMMIT_OVERRIDE:-$(grep -oP '^ARG BISQ_COMMIT=\K[0-9a-f]{40}' "$DOCKERFILE" | head -1)}"
+current_commit="${CURRENT_COMMIT_OVERRIDE:-$(grep -oP "^ARG ${VAR}_COMMIT=\K[0-9a-f]{40}" "$DOCKERFILE" | head -1)}"
 if [ -z "$current_commit" ]; then
-  echo "ERROR: could not parse ARG BISQ_COMMIT from $DOCKERFILE" >&2
+  echo "ERROR: could not parse ARG ${VAR}_COMMIT from $DOCKERFILE" >&2
   exit 1
 fi
 
@@ -75,9 +96,9 @@ tag_commit() {
 }
 
 # --- 2. latest upstream release ---
-latest="${LATEST_OVERRIDE:-$(api_curl "https://api.github.com/repos/bisq-network/bisq/releases/latest" | jq -r '.tag_name' | sed 's/^v//')}"
+latest="${LATEST_OVERRIDE:-$(api_curl "https://api.github.com/repos/$UPSTREAM_SLUG/releases/latest" | jq -r '.tag_name' | sed 's/^v//')}"
 if [ -z "$latest" ] || [ "$latest" = "null" ]; then
-  echo "ERROR: could not determine latest upstream bisq release" >&2
+  echo "ERROR: could not determine latest upstream $FLAVOR release" >&2
   exit 1
 fi
 emit "latest=$latest"
@@ -98,7 +119,7 @@ if [ "$current" = "$latest" ]; then
   # Same version: only a silently re-cut tag justifies a bump (pin refresh).
   tag_now="$(tag_commit "$current")"
   if [ -z "$tag_now" ]; then
-    no_bump "WARNING: bisq ${current} has no git tag (yet); skipping"
+    no_bump "WARNING: $FLAVOR ${current} has no git tag (yet); skipping"
   fi
   if [ "$tag_now" = "$current_commit" ]; then
     no_bump "Up to date at ${current} (${current_commit})"
@@ -111,15 +132,22 @@ if [ "$higher" != "$latest" ]; then
   no_bump "Upstream ${latest} is not newer than current ${current}; skipping"
 fi
 if [ -z "$(tag_commit "$latest")" ]; then
-  no_bump "WARNING: bisq ${latest} has no git tag yet; skipping"
+  no_bump "WARNING: $FLAVOR ${latest} has no git tag yet; skipping"
 fi
 emit "bump=true"
 emit "repin=$repin"
 
 # --- 4. patch compatibility against the NEW version ---
+if [ -z "$PATCH_DIR" ]; then
+  # No source patches for this flavor: nothing to verify; pin the tag's commit.
+  emit "latest_commit=$(tag_commit "$latest")"
+  emit "patches_ok=skipped"
+  emit "failed_patch=none"
+  exit 0
+fi
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT
-echo "Cloning bisq v${latest} to verify patches from ${PATCH_DIR} ..."
+echo "Cloning $FLAVOR v${latest} to verify patches from ${PATCH_DIR} ..."
 git clone --depth 1 --branch "v${latest}" --quiet "$UPSTREAM_REPO" "$workdir/bisq"
 
 patches_ok=true

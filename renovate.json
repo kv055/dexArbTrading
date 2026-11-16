@@ -9,31 +9,6 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "LND version: docker-compose.yml default and .env.example (image tag is v<version>).",
-      "managerFilePatterns": [
-        "/^docker-compose\\.yml$/",
-        "/^\\.env\\.example$/"
-      ],
-      "matchStrings": [
-        "LND_VERSION(?:=|:-)(?<currentValue>\\d+\\.\\d+\\.\\d+-beta)\\b"
-      ],
-      "depNameTemplate": "lightningnetwork/lnd",
-      "datasourceTemplate": "github-releases",
-      "extractVersionTemplate": "^v(?<version>\\d+\\.\\d+\\.\\d+-beta)$",
-      "versioningTemplate": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-beta$"
-    },
-    {
-      "customType": "regex",
-      "description": "Dockerfile ARGs annotated with a `# renovate:` comment on the line above.",
-      "managerFilePatterns": [
-        "/(^|/)Dockerfile[^/]*$/"
-      ],
-      "matchStrings": [
-        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>\\S+)(?: extractVersion=(?<extractVersion>\\S+))?\\s*\\nARG [A-Z0-9_]+=(?<currentValue>\\S+)"
-      ]
-    },
-    {
-      "customType": "regex",
       "description": "Self-hosted Renovate image pinned in the GitHub and Gitea pipelines.",
       "managerFilePatterns": [
         "/^\\.github/workflows/ci-cd\\.yml$/",
