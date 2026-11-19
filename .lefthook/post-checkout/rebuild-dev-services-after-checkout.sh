@@ -19,7 +19,7 @@ if [[ ! -f "$compose_file" || "$old_revision" =~ ^0+$ || "$new_revision" =~ ^0+$
 	exit 0
 fi
 
-compose=(docker compose --project-directory "$root_dir" -f "$compose_file")
+compose=(docker compose --project-directory "$root_dir" -f "$compose_file" -f "$root_dir/docker-compose.override.yml")
 
 # Keep this in sync with the allowlist in dev-server.sh. External-image-only
 # services such as postgres and lnd are intentionally excluded.
@@ -71,7 +71,7 @@ add_all_buildable_services() {
 mapfile -t changed_paths < <(git diff --name-only "$old_revision" "$new_revision")
 for path in "${changed_paths[@]}"; do
 	case "$path" in
-		docker-compose.yml|.gitmodules)
+		docker-compose.yml|docker-compose.override.yml|.gitmodules)
 			add_all_buildable_services
 			;;
 		commons/*)

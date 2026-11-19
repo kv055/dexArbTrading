@@ -6,8 +6,9 @@
 # run is exactly your working tree.
 #
 # Prereq: the decrypted .env files must exist locally (run `make staging-env-check`).
-# CI/prod are unaffected — the deploy job always calls compose with an explicit
-# `-f docker-compose.yml`, so it never picks up this Makefile.
+# The builds come from docker-compose.override.yml, which plain `docker compose`
+# merges automatically here. CI/prod are unaffected: the deploy pins
+# COMPOSE_FILE to docker-compose.yml (image-only), so the override never loads.
 
 COMPOSE ?= docker compose
 SONAR_COMPOSE := deploy/sonarqube/docker-compose.yml

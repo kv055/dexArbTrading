@@ -1,3 +1,8 @@
+# Runtime stack: image-only, no `build:` keys (scripts/compose-validate.sh
+# enforces this). This file alone is what production and the end-user release
+# run. Building from local source lives in docker-compose.override.yml, which
+# Compose merges automatically on a plain `docker compose ...` in this directory.
+#
 # Pin the compose project name so named-volume prefixes (e.g. postgres-data)
 # stay stable regardless of which directory `docker compose up` is run from.
 # Without this, running compose from a worktree dir mints brand-new empty
@@ -43,9 +48,6 @@ services:
   tor:
     logging: *default-logging
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-tor:${TOR_IMAGE_TAG:-${IMAGE_TAG:-latest}}
-    build:
-      context: ./dexUnifiedApi
-      dockerfile: Dockerfile.tor
     ports:
       # Loopback only, for host-side debugging / curl --socks5 tests. Sibling
       # containers on the bridge network use tor:9050 directly. Override
@@ -75,9 +77,6 @@ services:
   bitcoind-rpc-proxy:
     logging: *default-logging
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-bitcoind-rpc-proxy:${BITCOIND_RPC_PROXY_IMAGE_TAG:-${IMAGE_TAG:-latest}}
-    build:
-      context: ./deploy/bitcoind-rpc-proxy
-      dockerfile: Dockerfile
     depends_on:
       tor:
         condition: service_healthy
@@ -95,14 +94,6 @@ services:
   bisq:
     logging: *default-logging
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-bisq:${BISQ_IMAGE_TAG:-${IMAGE_TAG:-latest}}
-    build:
-      context: ./dexUnifiedApi
-      dockerfile: Dockerfile.bisq
-      # Pin the built daemon version from here (like bisq2 below). Without this
-      # arg the image silently builds at the Dockerfile's ARG default and the
-      # env below drifts out of sync with what actually runs.
-      args:
-        - BISQ_VERSION=1.10.11
     depends_on:
       tor:
         condition: service_healthy
@@ -135,11 +126,6 @@ services:
   bisq2:
     logging: *default-logging
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-bisq2:${BISQ2_IMAGE_TAG:-${IMAGE_TAG:-latest}}
-    build:
-      context: ./dexUnifiedApi
-      dockerfile: Dockerfile.bisq2
-      args:
-        - BISQ2_VERSION=2.1.15
     depends_on:
       tor:
         condition: service_healthy
@@ -175,9 +161,6 @@ services:
   unified-api:
     logging: *default-logging
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-unified-api:${UNIFIED_API_IMAGE_TAG:-${IMAGE_TAG:-latest}}
-    build:
-      context: .
-      dockerfile: dexUnifiedApi/Dockerfile
     depends_on:
       postgres:
         condition: service_healthy
@@ -244,9 +227,6 @@ services:
   unified-snapshot:
     logging: *default-logging
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-unified-snapshot:${UNIFIED_SNAPSHOT_IMAGE_TAG:-${IMAGE_TAG:-latest}}
-    build:
-      context: .
-      dockerfile: dexUnifiedApi/Dockerfile.snapshot
     depends_on:
       postgres:
         condition: service_healthy
@@ -301,9 +281,6 @@ services:
   # postgres-backup:
   #   logging: *default-logging
   #   image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-postgres-backup:${POSTGRES_BACKUP_IMAGE_TAG:-${IMAGE_TAG:-latest}}
-  #   build:
-  #     context: .
-  #     dockerfile: dexUnifiedApi/Dockerfile.backup
   #   depends_on:
   #     postgres:
   #       condition: service_healthy
@@ -336,9 +313,6 @@ services:
   dexmonitor:
     logging: *default-logging
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-dexmonitor:${DEXMONITOR_IMAGE_TAG:-${IMAGE_TAG:-latest}}
-    build:
-      context: .
-      dockerfile: dexMonitor/Dockerfile
     depends_on:
       unified-api:
         condition: service_healthy
@@ -452,9 +426,6 @@ services:
   mm-controller:
     logging: *default-logging
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-mm-controller:${MM_CONTROLLER_IMAGE_TAG:-${IMAGE_TAG:-latest}}
-    build:
-      context: .
-      dockerfile: dexTakerController/Dockerfile
     # Bridge network: all upstreams (lnd, tor, unified-api, bisq) are reached
     # via docker DNS, not localhost. The 127.0.0.1:5001 publish below keeps
     # host-side callers (dev tooling, curl localhost:5001) working.
@@ -685,9 +656,6 @@ services:
   # totp-api:
   #   logging: *default-logging
   #   image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-totp-api:${TOTP_API_IMAGE_TAG:-${IMAGE_TAG:-latest}}
-  #   build:
-  #     context: ./dexFiatController/services/totp-api
-  #     dockerfile: Dockerfile
   #   environment:
   #     - PORT=8080
   #     - API_KEY=${TOTP_API_KEY:-}
@@ -707,9 +675,6 @@ services:
   fiat-controller:
     logging: *default-logging
     image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-fiat-controller:${FIAT_CONTROLLER_IMAGE_TAG:-${IMAGE_TAG:-latest}}
-    build:
-      context: .
-      dockerfile: dexFiatController/Dockerfile
     env_file:
       - ./dexFiatController/.env
     # The controller is private. nginx is the only public path and exposes
@@ -967,20 +932,6 @@ services:
           memory: 64M
           cpus: '0.1'
     restart: unless-stopped
-
-  # docs:
-  #   logging: *default-logging
-  #   image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-docs:${IMAGE_TAG:-latest}
-  #   build:
-  #     context: .
-  #     dockerfile: docs/Dockerfile.docs
-  #   profiles:
-  #     - docs
-  #   ports:
-  #     - "8000:8000"
-  #   volumes:
-  #     - .:/workspace:ro
-  #   command: ["serve", "-f", "/workspace/docs/mkdocs.yml", "--dev-addr=0.0.0.0:8000"]
 
 volumes:
   postgres-data:

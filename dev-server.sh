@@ -38,7 +38,7 @@ echo "dev-server: migrating the local database"
 bash "$ROOT/scripts/migrate-local-db.sh"
 
 echo "dev-server: starting backend services (detached)"
-docker compose --project-directory "$ROOT" -f "$ROOT/docker-compose.yml" up -d --build "${compose_services[@]}"
+docker compose --project-directory "$ROOT" -f "$ROOT/docker-compose.yml" -f "$ROOT/docker-compose.override.yml" up -d --build "${compose_services[@]}"
 
 # Tailnet endpoint (Tailscale Serve): expose Vite on the tailnet over HTTPS on
 # a dedicated port. This never touches the :443 serve config (if any).

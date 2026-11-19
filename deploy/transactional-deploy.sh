@@ -51,6 +51,11 @@ STACK_WAIT_SEC=1800
 RESTART_WAIT_SEC=120
 
 repo_dir="$(cd "$repo_dir" && pwd)"
+# Production runs docker-compose.yml only. Naming it explicitly stops Compose
+# from auto-merging docker-compose.override.yml (local build-from-source layer)
+# that is present in this checkout.
+base_compose_file="$repo_dir/docker-compose.yml"
+export COMPOSE_FILE="$base_compose_file"
 stage_dir="$(cd "$(dirname "$env_bundle")" && pwd)"
 expected_stage="$repo_dir/.deploy/staging/$new_sha"
 [[ "$stage_dir" == "$expected_stage" ]] || {
@@ -665,7 +670,7 @@ start_release() {
   local sha="$1" bundle="$2" manifest="$3" is_candidate="$4" from_sha="$5"
   local certificate_before certificate_after certificate_changed=false
   local restart_services=()
-  unset COMPOSE_FILE
+  export COMPOSE_FILE="$base_compose_file"
   sync_tree "$sha" || return 1
   activate_bundle "$bundle" || return 1
   configure_dexmm_telegram_webhook || return 1
@@ -687,7 +692,7 @@ start_release() {
       echo "no digest or local rollback references for $sha" >&2
       return 1
     fi
-    export COMPOSE_FILE="$repo_dir/docker-compose.yml:$state_root/active.compose.json"
+    export COMPOSE_FILE="$base_compose_file:$state_root/active.compose.json"
   fi
   compose_preflight || return 1
   if [[ "$is_candidate" == true ]]; then

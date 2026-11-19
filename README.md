@@ -32,7 +32,8 @@ External dependencies include Tor, Bisq, LND, optional OpenClaw services, CEX AP
 
 ```text
 .
-+-- docker-compose.yml              # Full local/VPS runtime stack
++-- docker-compose.yml              # Runtime stack, image-only (prod + release)
++-- docker-compose.override.yml     # Dev layer: build images from local source
 +-- .env.example                    # Compose-level Postgres and backup settings
 +-- commons/                        # Shared Go module for cost, price, hedge, and BTC fee logic
 +-- dexUnifiedApi/                  # Schema, live API, snapshot worker, backup helper
@@ -66,6 +67,8 @@ Fill in the generated files with real passwords, API keys, and wallet/account se
 ```bash
 make staging-up
 ```
+
+`make staging-up` builds every first-party image from your working tree: plain `docker compose` merges `docker-compose.override.yml` (the `build:` layer) automatically. `docker-compose.yml` on its own is the image-only runtime stack that production uses. To run released images locally instead of building, name the file explicitly: `docker compose -f docker-compose.yml pull && docker compose -f docker-compose.yml up -d`.
 
 Main local URLs:
 
