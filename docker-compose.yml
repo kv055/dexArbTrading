@@ -875,7 +875,10 @@ services:
 
   tempo:
     logging: *default-logging
-    image: grafana/tempo:3.1.1
+    # Held on 2.x: Tempo 3 drops the ingester/compactor blocks tempo.yml uses and
+    # refuses to start with it. Migrate the config before lifting the
+    # renovate.json rule that blocks the major bump.
+    image: grafana/tempo:2.7.1
     command:
       - -config.file=/etc/tempo/tempo.yml
     volumes:

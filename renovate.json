@@ -49,6 +49,19 @@
         "ubuntu"
       ],
       "enabled": false
+    },
+    {
+      "description": "Tempo 3 removes the ingester/compactor config blocks deploy/monitoring/tempo/tempo.yml relies on and will not start with it; stay on 2.x until that config is migrated.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "grafana/tempo"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
     }
   ]
 }
