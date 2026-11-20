@@ -374,7 +374,8 @@ jobs:
       needs.detect-changes.outputs.run_frontend == 'true'
     # Pinned: ubuntu-latest moved to 26.04, which Playwright 1.59 cannot
     # install chromium on. Return to ubuntu-latest once Playwright supports it.
-    runs-on: ubuntu-26.04
+    # (renovate.json keeps Renovate from bumping this pin.)
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:

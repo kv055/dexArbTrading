@@ -36,6 +36,19 @@
         "major"
       ],
       "enabled": false
+    },
+    {
+      "description": "The frontend e2e job pins ubuntu-24.04 because Playwright 1.59 cannot install Chromium on 26.04; lift this rule together with that pin.",
+      "matchFileNames": [
+        ".github/workflows/ci-cd.yml"
+      ],
+      "matchDatasources": [
+        "github-runners"
+      ],
+      "matchPackageNames": [
+        "ubuntu"
+      ],
+      "enabled": false
     }
   ]
 }
