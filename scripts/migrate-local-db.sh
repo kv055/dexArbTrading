@@ -9,7 +9,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ -n "${COMPOSE:-}" ]]; then
   read -ra compose <<<"$COMPOSE"
 else
-  compose=(docker compose --project-directory "$root" -f "$root/docker-compose.yml")
+  compose=(docker compose --project-directory "$root" -f "$root/docker-compose.yml" -f "$root/docker-compose.override.yml")
 fi
 cd "$root"
 

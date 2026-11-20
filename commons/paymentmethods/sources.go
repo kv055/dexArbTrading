@@ -17,6 +17,7 @@ var AllowedSources = []string{
 	"robosats",
 	"peachbitcoin",
 	"mostro",
+	"noones",
 }
 
 var allowedSourceSet = func() map[string]struct{} {

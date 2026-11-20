@@ -68,6 +68,17 @@ CONFIG="$(docker compose -f "$COMPOSE_FILE" config 2>/dev/null)"
 MAIL_CONFIG="$(COMPOSE_PROFILES=mail MADDY_HOSTNAME=mx.example.test MADDY_DOMAIN=example.test MADDY_RECIPIENT=payments@example.test MADDY_IMAP_PASSWORD=validation-password docker compose -f "$COMPOSE_FILE" config 2>/dev/null)"
 
 fail=0
+
+# The runtime file ships to prod and end users without the source tree, so it
+# must not build anything; build contexts live in docker-compose.override.yml.
+BUILD_SERVICES="$(docker compose -f "$COMPOSE_FILE" config --format json 2>/dev/null |
+	python3 -c 'import json, sys; print(" ".join(sorted(n for n, s in json.load(sys.stdin)["services"].items() if "build" in s)))')"
+if [ -n "$BUILD_SERVICES" ]; then
+	echo "✖ $COMPOSE_FILE must be image-only (build: found in: $BUILD_SERVICES; move it to docker-compose.override.yml)" >&2
+	fail=1
+else
+	echo "✓ $COMPOSE_FILE is image-only (no build: keys)"
+fi
 # Prefer here-strings over printf|grep -q: under pipefail, an early grep -q exit
 # SIGPIPEs the writer and turns a real match into a false miss (seen on CI).
 assert_contains() {

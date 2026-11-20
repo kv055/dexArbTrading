@@ -1,0 +1,95 @@
+# Developer-only Compose layer: build every first-party image from local source.
+#
+# Docker Compose merges this file automatically on a plain `docker compose ...`
+# run next to docker-compose.yml, so `make staging-up` / `dev-server.sh` build
+# your working tree. It is NOT loaded when a compose file is named explicitly
+# (`-f docker-compose.yml`) or via COMPOSE_FILE. The VPS deploy relies on that,
+# and the end-user release bundle never contains this file: docker-compose.yml
+# alone must describe a runnable, image-only stack.
+#
+# Keep runtime settings (env, ports, volumes, healthchecks) in
+# docker-compose.yml. Only put things here that need the source tree.
+#
+# Build contexts mirror the CI image catalogue (scripts/image-service-inputs.sh
+# `image_service_build`, .gitea/workflows/ci.yml build-and-push matrix).
+
+services:
+  tor:
+    build:
+      context: ./dexUnifiedApi
+      dockerfile: Dockerfile.tor
+
+  bitcoind-rpc-proxy:
+    build:
+      context: ./deploy/bitcoind-rpc-proxy
+      dockerfile: Dockerfile
+
+  bisq:
+    build:
+      context: ./dexUnifiedApi
+      dockerfile: Dockerfile.bisq
+      # Pin the built daemon version here. Without this arg the image silently
+      # builds at the Dockerfile's ARG default, and the runtime BISQ_VERSION env
+      # in docker-compose.yml drifts away from what actually runs.
+      # bisq-version-bump.yml bumps this line together with the runtime env.
+      args:
+        - BISQ_VERSION=1.10.11
+
+  bisq2:
+    build:
+      context: ./dexUnifiedApi
+      dockerfile: Dockerfile.bisq2
+      args:
+        - BISQ2_VERSION=2.1.15
+
+  unified-api:
+    build:
+      context: .
+      dockerfile: dexUnifiedApi/Dockerfile
+
+  unified-snapshot:
+    build:
+      context: .
+      dockerfile: dexUnifiedApi/Dockerfile.snapshot
+
+  dexmonitor:
+    build:
+      context: .
+      dockerfile: dexMonitor/Dockerfile
+
+  mm-controller:
+    build:
+      context: .
+      dockerfile: dexTakerController/Dockerfile
+
+  fiat-controller:
+    build:
+      context: .
+      dockerfile: dexFiatController/Dockerfile
+
+  # Re-enable together with the commented service in docker-compose.yml.
+  # postgres-backup:
+  #   build:
+  #     context: .
+  #     dockerfile: dexUnifiedApi/Dockerfile.backup
+
+  # totp-api:
+  #   build:
+  #     context: ./dexFiatController/services/totp-api
+  #     dockerfile: Dockerfile
+
+  # Live docs preview: mounts the source tree, so it is dev-only.
+  # docs:
+  #   logging:
+  #     driver: json-file
+  #   image: ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_OWNER:-kv055}/dexarbtrading-docs:${IMAGE_TAG:-latest}
+  #   build:
+  #     context: .
+  #     dockerfile: docs/Dockerfile.docs
+  #   profiles:
+  #     - docs
+  #   ports:
+  #     - "8000:8000"
+  #   volumes:
+  #     - .:/workspace:ro
+  #   command: ["serve", "-f", "/workspace/docs/mkdocs.yml", "--dev-addr=0.0.0.0:8000"]

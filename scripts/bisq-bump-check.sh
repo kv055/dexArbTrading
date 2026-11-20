@@ -7,7 +7,7 @@
 #
 # What it does:
 #   1. Reads the CURRENT version from dexUnifiedApi/Dockerfile.bisq's ARG —
-#      the single source of truth (docker-compose.yml mirrors it; reading the
+#      the single source of truth (the compose files mirror it; reading the
 #      compose value while sed-ing the Dockerfile is exactly the drift bug
 #      that made the old bump job fail on every run).
 #   2. Fetches the latest upstream release tag from the GitHub API.

@@ -38,7 +38,7 @@ func SupportsDEX(dex, currency string) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(dex)) {
-	case "bisq", "bisq2", "hodlhodl", "mostro":
+	case "bisq", "bisq2", "hodlhodl", "mostro", "noones":
 		return true
 	case "peachbitcoin":
 		switch strings.ToUpper(currency) {

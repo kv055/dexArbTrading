@@ -7,7 +7,8 @@ name: Bisq version bump
 # patch-check logic lives in scripts/bisq-bump-check.sh (BISQ_FLAVOR), shared
 # with the Gitea check workflow. Renovate does not handle these pins: version
 # and pinned commit live in dexUnifiedApi/Dockerfile.<flavor> while
-# docker-compose.yml passes the version as a build arg, so both repos must
+# docker-compose.override.yml passes the version as a build arg (and
+# docker-compose.yml mirrors it as runtime env), so both repos must
 # move together.
 
 on:
@@ -36,10 +37,10 @@ jobs:
         include:
           - flavor: bisq
             var: BISQ
-            compose_lines: 3   # build arg + bisq env + mm-controller env
+            compose_lines: 3   # build arg (override) + bisq env + mm-controller env
           - flavor: bisq2
             var: BISQ2
-            compose_lines: 3   # build arg + bisq2 env + mm-controller env
+            compose_lines: 3   # build arg (override) + bisq2 env + mm-controller env
     env:
       BISQ_FLAVOR: ${{ matrix.flavor }}
       VAR: ${{ matrix.var }}
@@ -147,7 +148,7 @@ jobs:
           git pull --rebase origin main
           git push origin main
 
-      - name: Open auto-merge PR for outer repo bump (submodule pointer + docker-compose.yml)
+      - name: Open auto-merge PR for outer repo bump (submodule pointer + compose files)
         if: steps.check.outputs.bump == 'true' && steps.check.outputs.patches_ok == 'true' && steps.dedupe.outputs.exists == 'false'
         env:
           NEW: ${{ steps.check.outputs.latest }}
@@ -159,15 +160,17 @@ jobs:
         run: |
           set -Eeuo pipefail
           BRANCH="${BISQ_FLAVOR}-bump/${NEW}"
-          # All compose occurrences (build arg + runtime env) share this pattern;
-          # the leading boundary keeps BISQ_ from also matching BISQ2_.
-          sed -i -E "s/(^|[^A-Z0-9_])${VAR}_VERSION=[0-9]+\.[0-9]+\.[0-9]+/\1${VAR}_VERSION=${NEW}/g" docker-compose.yml
-          if [ "$(grep -cE "(^|[^A-Z0-9_])${VAR}_VERSION=${NEW//./\\.}\b" docker-compose.yml)" -lt "$COMPOSE_LINES" ]; then
-            echo "ERROR: expected ${COMPOSE_LINES} docker-compose.yml ${VAR}_VERSION lines to read ${NEW}" >&2
+          # All compose occurrences share this pattern: runtime env lives in
+          # docker-compose.yml, the image build arg in docker-compose.override.yml.
+          # The leading boundary keeps BISQ_ from also matching BISQ2_.
+          COMPOSE_FILES=(docker-compose.yml docker-compose.override.yml)
+          sed -i -E "s/(^|[^A-Z0-9_])${VAR}_VERSION=[0-9]+\.[0-9]+\.[0-9]+/\1${VAR}_VERSION=${NEW}/g" "${COMPOSE_FILES[@]}"
+          if [ "$(cat "${COMPOSE_FILES[@]}" | grep -cE "(^|[^A-Z0-9_])${VAR}_VERSION=${NEW//./\\.}\b")" -lt "$COMPOSE_LINES" ]; then
+            echo "ERROR: expected ${COMPOSE_LINES} ${VAR}_VERSION lines across ${COMPOSE_FILES[*]} to read ${NEW}" >&2
             exit 1
           fi
           git checkout -b "$BRANCH"
-          git add dexUnifiedApi docker-compose.yml
+          git add dexUnifiedApi "${COMPOSE_FILES[@]}"
           if git diff --cached --quiet; then
             echo "ERROR: expected compose/submodule changes but nothing is staged" >&2
             exit 1

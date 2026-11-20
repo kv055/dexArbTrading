@@ -8,7 +8,7 @@ func CategoryForProvider(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "wise", "paypal", "revolut", "n26":
 		return "Fiat Transmitter"
-	case "robosats", "bisq", "bisq2", "hodlhodl", "peach", "peach bitcoin", "peachbitcoin", "mostro":
+	case "robosats", "bisq", "bisq2", "hodlhodl", "peach", "peach bitcoin", "peachbitcoin", "mostro", "noones":
 		return "DEX"
 	case "kraken", "coinbase", "bitstamp", "binance", "bybit", "kucoin", "huobi":
 		return "CEX"
